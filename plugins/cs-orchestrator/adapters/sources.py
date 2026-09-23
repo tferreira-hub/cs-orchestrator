@@ -34,31 +34,45 @@ class Zendesk:
 
     def tickets(self, account_ref: str) -> dict[str, Any]:
         import urllib.parse
+        from datetime import datetime, timedelta, timezone
         sub = config.env("ZENDESK_SUBDOMAIN")
         auth = config.basic_auth_header(f"{config.env('ZENDESK_EMAIL')}/token", config.env("ZENDESK_TOKEN"))
         headers = {"Authorization": auth, "Accept": "application/json"}
         base = f"https://{sub}.zendesk.com/api/v2"
-        # Zendesk stores the AUx-yyyy id in external_id as UPPERCASE with a hyphen and
-        # its search is case-sensitive, so query with the upper-cased canonical form.
         ref = identity.normalise(account_ref).upper()
         orgs = config.http_get(f"{base}/organizations/search.json?external_id={urllib.parse.quote(ref)}", headers)
         org_list = orgs.get("organizations", [])
         if not org_list:
             raise config.SourceError(f"Zendesk org not found for {ref}")
         org_id = org_list[0]["id"]
-        # Recent tickets for the org (Zendesk search API). URL-encode the query.
-        query = urllib.parse.quote(f"type:ticket organization:{org_id}")
-        recent = config.http_get(f"{base}/search.json?query={query}", headers)
-        results = recent.get("results", [])
-        open_tickets = sum(1 for t in results if t.get("status") in ("open", "pending", "hold"))
-        sev1 = sum(1 for t in results if "sev1" in [str(x).lower() for x in t.get("tags", [])])
+
+        now = datetime.now(timezone.utc)
+        d7 = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        d14 = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+
+        def _count(query: str) -> int:
+            r = config.http_get(f"{base}/search.json?query={urllib.parse.quote(query)}", headers)
+            return int(r.get("count", len(r.get("results", []))))
+
+        base_q = f"type:ticket organization:{org_id}"
+        last7 = _count(f"{base_q} created>={d7}")
+        prev7 = _count(f"{base_q} created>={d14} created<{d7}")
+        open_tickets = _count(f"{base_q} status<solved")
+
+        # CSAT from the org's recent rated tickets (good / good+bad).
+        rated = config.http_get(
+            f"{base}/search.json?query={urllib.parse.quote(base_q + ' satisfaction:good')}", headers).get("count", 0)
+        bad = config.http_get(
+            f"{base}/search.json?query={urllib.parse.quote(base_q + ' satisfaction:bad')}", headers).get("count", 0)
+        csat = round(100 * rated / (rated + bad)) if (rated + bad) else None
+
         return {
             "open_tickets": open_tickets,
-            "tickets_last_7d": len(results),  # refine with created_at window in production
-            "tickets_prev_7d": None,
-            "sev1_open": sev1,
-            "csat_30d": None,  # from satisfaction_ratings endpoint in production
-            "by_instance": {identity.normalise(account_ref): len(results)},
+            "tickets_last_7d": last7,
+            "tickets_prev_7d": prev7,
+            "sev1_open": _count(f"{base_q} status<solved tags:sev1"),
+            "csat_30d": csat,
+            "by_instance": {identity.normalise(account_ref): last7},
             "_source": "zendesk-live",
             "_org_name": org_list[0].get("name"),
         }
@@ -193,28 +207,37 @@ class HubSpot:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
 
     def _find_company(self, account_ref: str) -> dict[str, Any]:
-        ref = identity.normalise(account_ref)
+        # HubSpot stores the AUx-yyyy id in the `account_id` company property,
+        # uppercase-hyphen form (e.g. AU1-3102).
+        ref = identity.normalise(account_ref).upper()
         body = {
-            "filterGroups": [{"filters": [{"propertyName": "account_ref", "operator": "EQ", "value": ref}]}],
-            "properties": ["name", "cs_segment", "arr", "renewal_date", "account_ref"],
+            "filterGroups": [{"filters": [{"propertyName": "account_id", "operator": "EQ", "value": ref}]}],
+            "properties": ["name", "cs_segment", "arr", "renewal_date", "account_id",
+                            "lifecyclestage", "instance", "type"],
             "limit": 1,
         }
         res = config.http_post("https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
         results = res.get("results", [])
         if not results:
-            raise config.SourceError(f"HubSpot company not found for {ref}")
+            raise config.SourceError(f"HubSpot company not found for account_id={ref}")
         return results[0]
 
     def account(self, account_ref: str) -> dict[str, Any]:
         c = self._find_company(account_ref)
         p = c.get("properties", {})
+        arr = None
+        if p.get("arr"):
+            try:
+                arr = int(float(p["arr"]))
+            except (ValueError, TypeError):
+                arr = None
         return {
             "company_id": c.get("id"),
             "name": p.get("name"),
             "segment": p.get("cs_segment"),
-            "arr_usd": int(float(p["arr"])) if p.get("arr") else None,
+            "arr_usd": arr,
             "renewal_date": p.get("renewal_date"),
-            "csm_owner": p.get("cs_owner"),
+            "csm_owner": None,
             "contacts": [],  # associated contacts fetched separately in production
             "instances": [{"instance_id": identity.normalise(account_ref),
                             "instance_type": identity.instance_type(account_ref), "arr_share": 1.0}],

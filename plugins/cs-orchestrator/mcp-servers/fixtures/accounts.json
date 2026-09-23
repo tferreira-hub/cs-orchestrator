@@ -591,6 +591,510 @@
         "time_to_value_days": null,
         "health": "green"
       }
+    },
+    "AU1-3083": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Needus",
+        "segment": "Strategic",
+        "arr_usd": 160000,
+        "renewal_date": "2026-12-20",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3083",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3083": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3098": {
+      "hubspot": {
+        "company_id": null,
+        "name": "FulSearch",
+        "segment": "Scaled",
+        "arr_usd": 38000,
+        "renewal_date": "2027-01-10",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3098",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3098": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3111": {
+      "hubspot": {
+        "company_id": null,
+        "name": "DibbsBarker",
+        "segment": "Strategic",
+        "arr_usd": 210000,
+        "renewal_date": "2026-11-28",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3111",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3111": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3114": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Troy Recruitment",
+        "segment": "Scaled",
+        "arr_usd": 29000,
+        "renewal_date": "2026-10-30",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3114",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3114": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU5-1986": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Ashdown Consulting",
+        "segment": "Strategic",
+        "arr_usd": 175000,
+        "renewal_date": "2026-12-05",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au5-1986",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au5-1986": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3112": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Trak Search",
+        "segment": "Scaled",
+        "arr_usd": 33000,
+        "renewal_date": "2027-02-15",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3112",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3112": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3084": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Servian",
+        "segment": "Strategic",
+        "arr_usd": 320000,
+        "renewal_date": "2026-11-10",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3084",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3084": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-10704": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Six Degrees",
+        "segment": "Strategic",
+        "arr_usd": 145000,
+        "renewal_date": "2026-12-18",
+        "csm_owner": "Priya Nair",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-10704",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-10704": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
     }
   }
 }

@@ -50,6 +50,18 @@ def account(account_id: str) -> dict:
     hubspot, sources["hubspot"] = _pull(
         _ADAPTERS and _src.HUBSPOT.live(), lambda: _src.HUBSPOT.account(account_id),
         fx.get("hubspot", {}), "hubspot")
+    # Merge: keep fixture values where the live source returns null, so routing fields
+    # (segment, renewal, owner, contacts, instances) never regress to None on live data.
+    if sources["hubspot"] == "live":
+        fxh = fx.get("hubspot", {})
+        merged = dict(fxh)
+        for k, v in hubspot.items():
+            if v is not None and v != [] and v != "":
+                merged[k] = v
+        for k in ("segment", "renewal_date", "csm_owner", "contacts", "instances"):
+            if not merged.get(k) and fxh.get(k):
+                merged[k] = fxh[k]
+        hubspot = merged
     zendesk, sources["zendesk"] = _pull(
         _ADAPTERS and _src.ZENDESK.live(), lambda: _src.ZENDESK.tickets(account_id),
         fx.get("zendesk", {}), "zendesk")
