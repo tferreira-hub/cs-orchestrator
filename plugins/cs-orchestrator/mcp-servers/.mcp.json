@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cs-stack": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "$HOME/.copilot/installed-plugins/cs-orchestrator-marketplace/cs-orchestrator/mcp-servers/cs_stack_server.py"
+      ]
+    }
+  }
+}

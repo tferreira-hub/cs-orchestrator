@@ -1,0 +1,407 @@
+{
+  "_comment": "Sample CS accounts. Tool responses below are shaped to mirror the real vendor APIs (HubSpot company object, Zendesk tickets/CSAT, Stripe invoices, product usage telemetry, ML churn score) so the MCP tools are a drop-in swap for live integrations. Instances carry an 'instance_type' (primary|secondary|test) to exercise the multi-instance suppression hook (WoW \u00a75: prevent false-positive alerts).",
+  "accounts": {
+    "acct_northwind": {
+      "hubspot": {
+        "company_id": "hs_1001",
+        "name": "Northwind Traders",
+        "segment": "Strategic",
+        "arr_usd": 480000,
+        "renewal_date": "2026-11-05",
+        "contacts": [
+          {
+            "role": "Executive Sponsor",
+            "name": "Dana Ruiz",
+            "email": "dana@northwind.example"
+          },
+          {
+            "role": "Primary Champion",
+            "name": "Sam Lee",
+            "email": "sam@northwind.example"
+          },
+          {
+            "role": "Finance Contact",
+            "name": "Pat Ojo",
+            "email": "pat@northwind.example"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "nw-prod",
+            "instance_type": "primary",
+            "arr_share": 0.9
+          },
+          {
+            "instance_id": "nw-sandbox",
+            "instance_type": "test",
+            "arr_share": 0.0
+          }
+        ],
+        "csm_owner": "Alex Chen"
+      },
+      "zendesk": {
+        "open_tickets": 14,
+        "tickets_last_7d": 11,
+        "tickets_prev_7d": 3,
+        "sev1_open": 1,
+        "csat_30d": 61,
+        "by_instance": {
+          "nw-prod": 13,
+          "nw-sandbox": 1
+        }
+      },
+      "usage": {
+        "logins_last_7d": 42,
+        "logins_prev_7d": 90,
+        "active_users_pct": 38,
+        "license_utilization_pct": 44,
+        "key_feature_adoption_pct": 30,
+        "by_instance": {
+          "nw-prod": {
+            "logins_last_7d": 41
+          },
+          "nw-sandbox": {
+            "logins_last_7d": 1
+          }
+        }
+      },
+      "churn": {
+        "ml_churn_score": 0.72,
+        "model_version": "churn-v3.2",
+        "top_drivers": [
+          "usage_drop_7d",
+          "sev1_incident",
+          "csat_decline"
+        ]
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": "2026-09-10",
+        "sentiment": "negative",
+        "summary": "Sponsor raised concerns about recent outages and slow support responses.",
+        "talk_ratio_customer": 0.72
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": 38,
+        "health": "amber"
+      }
+    },
+    "acct_globex": {
+      "hubspot": {
+        "company_id": "hs_1002",
+        "name": "Globex Corp",
+        "segment": "Strategic",
+        "arr_usd": 610000,
+        "renewal_date": "2027-01-20",
+        "contacts": [
+          {
+            "role": "Executive Sponsor",
+            "name": "Iris Vance",
+            "email": "iris@globex.example"
+          },
+          {
+            "role": "Primary Champion",
+            "name": "Ken Alu",
+            "email": "ken@globex.example"
+          },
+          {
+            "role": "Finance Contact",
+            "name": "Mona Diaz",
+            "email": "mona@globex.example"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "gx-prod",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ],
+        "csm_owner": "Alex Chen"
+      },
+      "zendesk": {
+        "open_tickets": 2,
+        "tickets_last_7d": 2,
+        "tickets_prev_7d": 3,
+        "sev1_open": 0,
+        "csat_30d": 93,
+        "by_instance": {
+          "gx-prod": 2
+        }
+      },
+      "usage": {
+        "logins_last_7d": 210,
+        "logins_prev_7d": 205,
+        "active_users_pct": 84,
+        "license_utilization_pct": 88,
+        "key_feature_adoption_pct": 76,
+        "by_instance": {
+          "gx-prod": {
+            "logins_last_7d": 210
+          }
+        }
+      },
+      "churn": {
+        "ml_churn_score": 0.12,
+        "model_version": "churn-v3.2",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": "2026-09-18",
+        "sentiment": "positive",
+        "summary": "Champion excited about API roadmap; asked about additional seats.",
+        "talk_ratio_customer": 0.55
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": 21,
+        "health": "green"
+      }
+    },
+    "acct_initech": {
+      "hubspot": {
+        "company_id": "hs_1003",
+        "name": "Initech",
+        "segment": "Strategic",
+        "arr_usd": 350000,
+        "renewal_date": "2026-10-12",
+        "contacts": [
+          {
+            "role": "Executive Sponsor",
+            "name": "Bill Loom",
+            "email": "bill@initech.example"
+          },
+          {
+            "role": "Finance Contact",
+            "name": "Sara Kwon",
+            "email": "sara@initech.example"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "in-prod",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ],
+        "csm_owner": "Priya Nair"
+      },
+      "zendesk": {
+        "open_tickets": 3,
+        "tickets_last_7d": 3,
+        "tickets_prev_7d": 2,
+        "sev1_open": 0,
+        "csat_30d": 80,
+        "by_instance": {
+          "in-prod": 3
+        }
+      },
+      "usage": {
+        "logins_last_7d": 120,
+        "logins_prev_7d": 118,
+        "active_users_pct": 70,
+        "license_utilization_pct": 65,
+        "key_feature_adoption_pct": 58,
+        "by_instance": {
+          "in-prod": {
+            "logins_last_7d": 120
+          }
+        }
+      },
+      "churn": {
+        "ml_churn_score": 0.28,
+        "model_version": "churn-v3.2",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 2,
+        "days_past_due": 16,
+        "amount_due_usd": 29000,
+        "dunning_stage": "day_15_plus"
+      },
+      "jiminny": {
+        "last_call_date": "2026-08-30",
+        "sentiment": "neutral",
+        "summary": "Routine check-in; finance flagged invoice query.",
+        "talk_ratio_customer": 0.6
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": 45,
+        "health": "amber"
+      }
+    },
+    "acct_umbrella": {
+      "hubspot": {
+        "company_id": "hs_1004",
+        "name": "Umbrella Ltd",
+        "segment": "Strategic",
+        "arr_usd": 720000,
+        "renewal_date": "2026-12-15",
+        "contacts": [
+          {
+            "role": "Executive Sponsor",
+            "name": "Al Wesk",
+            "email": "al@umbrella.example"
+          },
+          {
+            "role": "Primary Champion",
+            "name": "Jo Park",
+            "email": "jo@umbrella.example"
+          },
+          {
+            "role": "Finance Contact",
+            "name": "Ada Cole",
+            "email": "ada@umbrella.example"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "um-prod",
+            "instance_type": "primary",
+            "arr_share": 0.95
+          },
+          {
+            "instance_id": "um-dev",
+            "instance_type": "test",
+            "arr_share": 0.0
+          }
+        ],
+        "csm_owner": "Priya Nair"
+      },
+      "zendesk": {
+        "open_tickets": 20,
+        "tickets_last_7d": 18,
+        "tickets_prev_7d": 4,
+        "sev1_open": 0,
+        "csat_30d": 90,
+        "by_instance": {
+          "um-prod": 2,
+          "um-dev": 16
+        }
+      },
+      "usage": {
+        "logins_last_7d": 260,
+        "logins_prev_7d": 255,
+        "active_users_pct": 90,
+        "license_utilization_pct": 91,
+        "key_feature_adoption_pct": 82,
+        "api_calls_last_7d": 145000,
+        "api_calls_prev_7d": 96000,
+        "by_instance": {
+          "um-prod": {
+            "logins_last_7d": 258
+          },
+          "um-dev": {
+            "logins_last_7d": 2
+          }
+        }
+      },
+      "churn": {
+        "ml_churn_score": 0.09,
+        "model_version": "churn-v3.2",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": "2026-09-19",
+        "sentiment": "positive",
+        "summary": "Strong adoption; discussing expansion to second business unit.",
+        "talk_ratio_customer": 0.5
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": 30,
+        "health": "green"
+      }
+    },
+    "acct_smallco": {
+      "hubspot": {
+        "company_id": "hs_1005",
+        "name": "SmallCo",
+        "segment": "Scaled",
+        "arr_usd": 9000,
+        "renewal_date": "2026-10-01",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "Ravi N",
+            "email": "ravi@smallco.example"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "sc-prod",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ],
+        "csm_owner": "Pooled"
+      },
+      "zendesk": {
+        "open_tickets": 1,
+        "tickets_last_7d": 1,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": 74,
+        "by_instance": {
+          "sc-prod": 1
+        }
+      },
+      "usage": {
+        "logins_last_7d": 4,
+        "logins_prev_7d": 20,
+        "active_users_pct": 15,
+        "license_utilization_pct": 20,
+        "key_feature_adoption_pct": 10,
+        "by_instance": {
+          "sc-prod": {
+            "logins_last_7d": 4
+          }
+        }
+      },
+      "churn": {
+        "ml_churn_score": 0.66,
+        "model_version": "churn-v3.2",
+        "top_drivers": [
+          "usage_drop_7d",
+          "low_adoption"
+        ]
+      },
+      "stripe": {
+        "past_due_invoices": 1,
+        "days_past_due": 18,
+        "amount_due_usd": 750,
+        "dunning_stage": "day_15_plus"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "No recent calls (Scaled/tech-touch).",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "stalled",
+        "time_to_value_days": 90,
+        "health": "red"
+      }
+    }
+  }
+}

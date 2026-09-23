@@ -1,0 +1,18 @@
+{
+  "name": "cs-orchestrator-marketplace",
+  "owner": {
+    "name": "The Observers"
+  },
+  "metadata": {
+    "description": "Helm CS Platform harness: MCP tools over the CS stack, the cs-orchestrator agent, the cs-playbook rules skill, and multi-instance suppression + grounding hooks.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "cs-orchestrator",
+      "source": "./plugins/cs-orchestrator",
+      "description": "Operationalises the Customer Success Ways of Working as an agent harness.",
+      "version": "1.0.0"
+    }
+  ]
+}
