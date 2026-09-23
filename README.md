@@ -19,7 +19,11 @@ CS_TODAY=2026-09-23 python3 platform/server.py     # http://localhost:8787
 - UI: `http://localhost:8787/`, portfolio health (worst-first), the prioritised task
   queue with mandate/priority badges + drafted actions, and the suppressed-signals panel.
   Click any account for the detail drawer (signals, health drivers, contacts, tasks).
-- API: `/api/portfolio`, `/api/accounts`, `/api/accounts/{id}`, `/api/tasks`, `/api/suppressed`.
+- API: `/api/portfolio`, `/api/accounts`, `/api/accounts/{id}`, `/api/tasks`, `/api/suppressed`, `/api/kpis`, `/api/lifecycle`, `/api/integrations`.
+
+The UI is organised as a CS Platform: a grouped sidebar (Workspace, the Three-Mandate
+Playbooks, and Data & Governance) with Dashboard, Task Queue, Accounts, Protect / Expand /
+Adopt playbook views, Lifecycle, Leadership KPIs, and an Integrations map.
 
 ## Architecture (single source of truth)
 ```
@@ -41,9 +45,12 @@ and the `cs-orchestrator` agent always produce the identical standardised queue 
 The MCP tools (`mcp-servers/cs_stack_server.py`) and the engine read from
 `mcp-servers/fixtures/accounts.json`, whose shapes mirror the real vendor APIs
 (HubSpot company object, Zendesk tickets/CSAT, Stripe invoices, usage telemetry, ML
-churn). Swap the fixture reads for live API clients, bi-directional HubSpot, read-only
-Stripe, real-time Zendesk, with no change to the engine, API, or UI. This is exactly
-the RevOps "data gap analysis / telemetry assessment" next step.
+churn, and Jiminny call sentiment). HubSpot is bi-directional: the platform pushes
+health score, risk status, and active playbook back for Sales visibility
+(`hubspot_push_cs_data` tool + the `hubspot_writeback` payload). Swap the fixture reads
+for live API clients, bi-directional HubSpot, read-only Stripe, real-time Zendesk, with
+no change to the engine, API, or UI. This is exactly the RevOps "data gap analysis /
+telemetry assessment" next step.
 
 ---
 

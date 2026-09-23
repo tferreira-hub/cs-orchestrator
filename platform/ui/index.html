@@ -3,134 +3,132 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Helm · Customer Success Platform</title>
+<title>CS Platform</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f5f7fb;--surface:#fff;--ink:#0f172a;--ink2:#475569;--muted:#94a3b8;--line:#e8edf3;
-  --brand:#4f46e5;--brand2:#6366f1;
-  --green:#0f9d58;--greenbg:#e7f7ee;--amber:#c2790b;--amberbg:#fdf3e2;--red:#d1362f;--redbg:#fdeceb;--blue:#2563eb;
-  --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);--shadowlg:0 12px 32px rgba(16,24,40,.14);
+  --bg:#f4f6fb;--surface:#fff;--ink:#0b1220;--ink2:#4a5568;--muted:#98a2b3;--line:#eaeef4;
+  --brand:#5b5bf0;--brand2:#7c6cf7;--brandsoft:#eef0fe;
+  --green:#0ca678;--greenbg:#e6f7f1;--amber:#d98b0b;--amberbg:#fdf4e3;--red:#e5484d;--redbg:#fdecec;--sky:#2f6bf0;
+  --shadow:0 1px 2px rgba(11,18,32,.04),0 2px 6px rgba(11,18,32,.05);
+  --shadowmd:0 6px 20px rgba(11,18,32,.08);--shadowlg:0 18px 44px rgba(11,18,32,.18);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+.app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
 
-.side{background:#0f172a;color:#cbd5e1;padding:20px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto}
-.brand{display:flex;align-items:center;gap:11px;padding:6px 8px 18px}
-.brand .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:17px}
-.brand .name{font-weight:800;color:#fff;font-size:1.08em;letter-spacing:-.01em}
-.brand .sub{font-size:.64em;color:#64748b;letter-spacing:.09em;text-transform:uppercase}
-.navgroup{margin-top:14px}
-.navgroup .lbl{font-size:.66em;text-transform:uppercase;letter-spacing:.09em;color:#64748b;font-weight:700;padding:0 10px 6px}
-.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:#cbd5e1;padding:9px 11px;border-radius:9px;font-size:.88em;font-weight:500;cursor:pointer;font-family:inherit;position:relative}
-.nav button:hover{background:#1e293b;color:#fff}
-.nav button.active{background:var(--brand);color:#fff}
-.nav .ico{width:16px;text-align:center;font-size:.95em;opacity:.95}
-.nav .count{margin-left:auto;background:#1e293b;color:#cbd5e1;border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px}
-.nav button.active .count{background:rgba(255,255,255,.22);color:#fff}
+/* Sidebar */
+.side{background:linear-gradient(180deg,#0b1020,#111834);color:#aeb7cc;padding:20px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px}
+.brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:16px;box-shadow:0 4px 12px rgba(91,91,240,.4)}
+.brand .name{font-weight:800;color:#fff;font-size:1.06em;letter-spacing:-.01em}
+.brand .sub{font-size:.62em;color:#5c6784;letter-spacing:.14em;text-transform:uppercase;margin-top:1px}
+.navgroup{margin-top:16px}
+.navgroup .lbl{font-size:.64em;text-transform:uppercase;letter-spacing:.1em;color:#5c6784;font-weight:700;padding:0 10px 7px}
+.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:#aeb7cc;padding:9px 11px;border-radius:10px;font-size:.88em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s}
+.nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav button.active{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(91,91,240,.35)}
+.nav .ico{width:16px;text-align:center;font-size:.95em;opacity:.9}
+.nav .count{margin-left:auto;background:rgba(255,255,255,.08);color:#cfd6e6;border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px;min-width:22px;text-align:center}
+.nav button.active .count{background:rgba(255,255,255,.24);color:#fff}
 .nav .count.red{background:var(--red);color:#fff}
-.side .foot{margin-top:auto;font-size:.68em;color:#64748b;padding:14px 8px 0;border-top:1px solid #1e293b;line-height:1.5}
+.side .foot{margin-top:auto;font-size:.68em;color:#5c6784;padding:16px 8px 0;border-top:1px solid rgba(255,255,255,.06);line-height:1.6}
 
+/* Main */
 .main{min-width:0}
-.topbar{background:var(--surface);border-bottom:1px solid var(--line);padding:16px 30px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
-.topbar h1{font-size:1.15em;font-weight:700;letter-spacing:-.01em}
-.topbar .crumb{font-size:.77em;color:var(--muted);margin-top:1px}
-.status{display:flex;align-items:center;gap:8px;font-size:.8em;color:var(--ink2)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--greenbg)}
-.content{padding:24px 30px 64px;max-width:1380px}
-.view{display:none}.view.on{display:block}
+.topbar{background:rgba(255,255,255,.85);backdrop-filter:saturate(150%) blur(8px);border-bottom:1px solid var(--line);padding:16px 32px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+.topbar h1{font-size:1.2em;font-weight:800;letter-spacing:-.02em}
+.topbar .crumb{font-size:.77em;color:var(--muted);margin-top:2px}
+.status{display:flex;align-items:center;gap:8px;font-size:.8em;color:var(--ink2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 13px;box-shadow:var(--shadow)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--greenbg);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.content{padding:26px 32px 70px;max-width:1420px}
+.view{display:none;animation:fade .25s ease}.view.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:13px;margin-bottom:22px}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:17px 19px;box-shadow:var(--shadow)}
-.stat .l{font-size:.71em;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
-.stat .v{font-size:1.85em;font-weight:800;letter-spacing:-.02em;margin-top:6px}
-.stat .v.warn{color:var(--red)} .stat .v.good{color:var(--green)}
-.stat .d{font-size:.73em;color:var(--ink2);margin-top:3px}
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:14px;margin-bottom:24px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.stat::after{content:"";position:absolute;right:-20px;top:-20px;width:70px;height:70px;border-radius:50%;background:var(--brandsoft);opacity:.6}
+.stat .l{font-size:.71em;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;position:relative}
+.stat .v{font-size:2em;font-weight:800;letter-spacing:-.03em;margin-top:8px;position:relative}
+.stat .v.warn{color:var(--red)}.stat .v.good{color:var(--green)}
+.stat .d{font-size:.74em;color:var(--ink2);margin-top:4px;position:relative}
+
 .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:20px}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}
-.panel .head{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
-.panel .head h2{font-size:.96em;font-weight:700;letter-spacing:-.01em}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}
+.panel .head{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.panel .head h2{font-size:1em;font-weight:700;letter-spacing:-.01em}
 .panel .head .note{font-size:.75em;color:var(--muted);font-weight:500}
-.panel .body{padding:4px 6px}
-.panel .body.pad{padding:16px 20px}
+.panel .body{padding:6px 8px}.panel .body.pad{padding:18px 22px}
 
-table{width:100%;border-collapse:collapse;font-size:.86em}
-th{text-align:left;padding:10px 14px;color:var(--muted);font-size:.74em;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-td{padding:12px 14px;border-top:1px solid var(--line);vertical-align:top}
-tr.click{cursor:pointer}tr.click:hover td{background:#fafbff}
-.pill{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.72em;font-weight:700;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:.87em}
+th{text-align:left;padding:11px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+td{padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}
+tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#fafb ff}
+tr.click:hover td{background:#f8f9ff}
+.pill{display:inline-block;border-radius:999px;padding:3px 11px;font-size:.72em;font-weight:700;white-space:nowrap}
 .g{background:var(--greenbg);color:var(--green)}.a{background:var(--amberbg);color:var(--amber)}.r{background:var(--redbg);color:var(--red)}
-.protect{background:var(--redbg);color:var(--red)}.expand{background:#eaf0ff;color:var(--brand)}.use{background:#f3ecff;color:#7c3aed}
-.pln{background:#eef2f7;color:var(--ink2)}
-.prio{width:26px;height:26px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.78em}
-.prio1{background:var(--red)}.prio2{background:#ea7317}.prio3{background:var(--brand)}.prio4{background:#64748b}.prio5{background:#94a3b8}
-.hbar{height:6px;border-radius:99px;background:#eef2f7;width:64px;display:inline-block;vertical-align:middle;margin-right:8px;overflow:hidden}.hfill{height:100%;border-radius:99px}
-.mono{font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.sub{font-size:.8em;color:var(--muted)}
-.evi{font-size:.78em;color:var(--muted);margin-top:3px}
-.draft{background:#f8fafc;border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:.85em;color:var(--ink2)}
-.supp{background:var(--amberbg);border:1px solid #f6dfb0;border-radius:10px;padding:11px 13px;font-size:.83em;color:#7c5306;margin:8px}
-.empty{padding:26px;text-align:center;color:var(--muted);font-size:.86em}
-.chips .pill{margin:0 8px 8px 0}
-.intgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:16px 20px}
-.intcard{border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:#fff}
-.intcard .top{display:flex;justify-content:space-between;align-items:flex-start}
-.intcard h3{font-size:1em;font-weight:700}
-.intcard .cat{font-size:.75em;color:var(--muted)}
-.intcard .rows{margin-top:12px;font-size:.8em;color:var(--ink2)}
-.intcard .rows b{color:var(--ink)}
-.dirbadge{font-size:.68em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand);background:#eef2ff;border-radius:6px;padding:2px 7px;margin-top:4px;display:inline-block}
+.protect{background:var(--redbg);color:var(--red)}.expand{background:var(--brandsoft);color:var(--brand)}.use{background:#f3ecff;color:#8b5cf6}
+.pln{background:#eef1f6;color:var(--ink2)}
+.prio{width:28px;height:28px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.8em;box-shadow:var(--shadow)}
+.prio1{background:linear-gradient(135deg,#e5484d,#f0656a)}.prio2{background:linear-gradient(135deg,#ea7317,#f59331)}.prio3{background:linear-gradient(135deg,#5b5bf0,#7c6cf7)}.prio4{background:#7a879c}.prio5{background:#9aa5b8}
+.hbar{height:7px;border-radius:99px;background:#edf0f6;width:70px;display:inline-block;vertical-align:middle;margin-right:9px;overflow:hidden}.hfill{height:100%;border-radius:99px}
+.mono{font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.sub{font-size:.8em;color:var(--muted);margin-top:1px}
+.evi{font-size:.78em;color:var(--muted);margin-top:4px}
+.draft{background:linear-gradient(180deg,#fafbff,#f6f7fe);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:10px;padding:11px 13px;margin-top:9px;font-size:.85em;color:var(--ink2)}
+.draft b{color:var(--brand)}
+.supp{background:var(--amberbg);border:1px solid #f6e2b8;border-radius:12px;padding:12px 14px;font-size:.83em;color:#8a5a06;margin:8px}
+.empty{padding:30px;text-align:center;color:var(--muted);font-size:.88em}
+.chips .pill{margin:0 8px 8px 0;font-size:.8em;padding:5px 13px}
+.intgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px;padding:18px 22px}
+.intcard{border:1px solid var(--line);border-radius:15px;padding:17px 19px;background:var(--surface);box-shadow:var(--shadow);transition:transform .12s,box-shadow .12s}
+.intcard:hover{transform:translateY(-2px);box-shadow:var(--shadowmd)}
+.intcard .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.intcard h3{font-size:1.02em;font-weight:700}.intcard .cat{font-size:.75em;color:var(--muted);margin-top:1px}
+.intcard .rows{margin-top:13px;font-size:.8em;color:var(--ink2);line-height:1.7}.intcard .rows b{color:var(--ink)}
+.dirbadge{font-size:.66em;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--brand);background:var(--brandsoft);border-radius:7px;padding:3px 8px;margin-top:6px;display:inline-block}
 
-.scrim{position:fixed;inset:0;background:rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .2s}.scrim.on{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;right:0;width:470px;max-width:94vw;height:100%;background:#fff;box-shadow:var(--shadowlg);transform:translateX(100%);transition:transform .24s cubic-bezier(.4,0,.2,1);overflow:auto;z-index:20}.drawer.on{transform:translateX(0)}
-.drawer .dhead{padding:22px 24px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
-.drawer .dbody{padding:18px 24px}.drawer .x{position:absolute;top:20px;right:22px;cursor:pointer;color:var(--muted);font-size:1.4em;line-height:1}
-.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
-.sect{font-size:.73em;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin:18px 0 8px}
-.writeback{background:#eef2ff;border:1px solid #d7defb;border-radius:10px;padding:12px 14px;font-size:.84em;color:#3730a3}
-.callout{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:.85em;color:var(--ink2)}
-@media(max-width:1040px){.app{grid-template-columns:1fr}.side{display:none}.cols{grid-template-columns:1fr}}
+.scrim{position:fixed;inset:0;background:rgba(11,18,32,.42);opacity:0;pointer-events:none;transition:opacity .2s}.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;width:480px;max-width:94vw;height:100%;background:#fff;box-shadow:var(--shadowlg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);overflow:auto;z-index:20}.drawer.on{transform:translateX(0)}
+.drawer .dhead{padding:24px 26px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
+.drawer .dbody{padding:20px 26px}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
+.sect{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:20px 0 9px}
+.writeback{background:linear-gradient(180deg,#f2f3ff,#eef0fe);border:1px solid #dcdffb;border-radius:12px;padding:13px 15px;font-size:.84em;color:#3b39b8}
+.callout{background:#f8f9fc;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:.85em;color:var(--ink2)}
+@media(max-width:1060px){.app{grid-template-columns:1fr}.side{display:none}.cols{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="app">
   <aside class="side">
-    <div class="brand"><div class="logo">H</div><div><div class="name">Helm</div><div class="sub">Customer Success</div></div></div>
-    <div class="navgroup">
-      <div class="lbl">Workspace</div>
-      <div class="nav">
-        <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
-        <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
-        <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
-      </div>
-    </div>
-    <div class="navgroup">
-      <div class="lbl">Playbooks · Three Mandates</div>
-      <div class="nav">
-        <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect (Risk) <span class="count" id="c-protect"></span></button>
-        <button data-v="expand" onclick="go('expand')"><span class="ico">▲</span> Expand (Renewals) <span class="count" id="c-expand"></span></button>
-        <button data-v="use" onclick="go('use')"><span class="ico">●</span> Adopt (Use) <span class="count" id="c-use"></span></button>
-      </div>
-    </div>
-    <div class="navgroup">
-      <div class="lbl">Data &amp; Governance</div>
-      <div class="nav">
-        <button data-v="life" onclick="go('life')"><span class="ico">◔</span> Lifecycle</button>
-        <button data-v="kpi" onclick="go('kpi')"><span class="ico">▦</span> Leadership KPIs</button>
-        <button data-v="integrations" onclick="go('integrations')"><span class="ico">⬡</span> Integrations</button>
-      </div>
-    </div>
-    <div class="foot">One standardised way of working. Signals from HubSpot, Zendesk, Stripe, product usage, churn ML, and Jiminny are synthesised into one prioritised queue.</div>
+    <div class="brand"><div class="logo">CS</div><div><div class="name">CS Platform</div><div class="sub">Customer Success</div></div></div>
+    <div class="navgroup"><div class="lbl">Workspace</div><div class="nav">
+      <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
+      <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
+      <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
+    </div></div>
+    <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
+      <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Risk <span class="count" id="c-protect"></span></button>
+      <button data-v="expand" onclick="go('expand')"><span class="ico">▲</span> Expand · Renewals <span class="count" id="c-expand"></span></button>
+      <button data-v="use" onclick="go('use')"><span class="ico">●</span> Adopt · Use <span class="count" id="c-use"></span></button>
+    </div></div>
+    <div class="navgroup"><div class="lbl">Data &amp; Governance</div><div class="nav">
+      <button data-v="life" onclick="go('life')"><span class="ico">◔</span> Lifecycle</button>
+      <button data-v="kpi" onclick="go('kpi')"><span class="ico">▦</span> Leadership KPIs</button>
+      <button data-v="integrations" onclick="go('integrations')"><span class="ico">⬡</span> Integrations</button>
+    </div></div>
+    <div class="foot">One standardised way of working. Signals from HubSpot, Zendesk, Stripe, product usage, churn ML, and Jiminny synthesised into one prioritised queue.</div>
   </aside>
 
   <div class="main">
     <div class="topbar">
-      <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and today's priorities</div></div>
+      <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and priority actions</div></div>
       <div class="status"><span class="dot"></span> Live data <span class="muted" id="asof"></span></div>
     </div>
     <div class="content">
-
       <section class="view on" id="v-dash">
         <div class="stats" id="stats"></div>
         <div class="cols">
@@ -141,20 +139,17 @@ tr.click{cursor:pointer}tr.click:hover td{background:#fafbff}
           </div>
         </div>
       </section>
-
       <section class="view" id="v-queue"><div class="panel"><div class="head"><h2>Task queue</h2><span class="note">System generated, ranked by mandate and SLA</span></div><div class="body" id="queue-body"></div></div></section>
       <section class="view" id="v-protect"><div class="panel"><div class="head"><h2>Must Protect · Predictive risk</h2><span class="note">Churn, multi-signal alerts, Day 15 payment. 24 hour SLA</span></div><div class="body" id="protect-body"></div></div></section>
-      <section class="view" id="v-expand"><div class="panel"><div class="head"><h2>Must Expand · Renewals &amp; expansion</h2><span class="note">T-120 / T-90 / T-60 / T-30 cadence and expansion triggers</span></div><div class="body" id="expand-body"></div></div></section>
-      <section class="view" id="v-use"><div class="panel"><div class="head"><h2>Must Use · Adoption &amp; hygiene</h2><span class="note">Onboarding, adoption, contact hygiene</span></div><div class="body" id="use-body"></div></div></section>
+      <section class="view" id="v-expand"><div class="panel"><div class="head"><h2>Must Expand · Renewals and expansion</h2><span class="note">T-120, T-90, T-60, T-30 cadence and expansion triggers</span></div><div class="body" id="expand-body"></div></div></section>
+      <section class="view" id="v-use"><div class="panel"><div class="head"><h2>Must Use · Adoption and hygiene</h2><span class="note">Onboarding, adoption, contact hygiene</span></div><div class="body" id="use-body"></div></div></section>
       <section class="view" id="v-accounts"><div class="panel"><div class="head"><h2>All accounts</h2><span class="note">Click any account for the full picture</span></div><div class="body" id="accounts-body"></div></div></section>
-
       <section class="view" id="v-life"><div class="panel"><div class="head"><h2>Lifecycle and adoption</h2><span class="note">Onboarding velocity alongside product adoption</span></div><div class="body" id="life-body"></div></div></section>
       <section class="view" id="v-kpi">
         <div class="panel"><div class="head"><h2>Portfolio and capacity by CSM</h2><span class="note">Informs resourcing and headcount</span></div><div class="body" id="kpi-csm"></div></div>
         <div class="panel"><div class="head"><h2>Task load by mandate</h2></div><div class="body pad"><div class="chips" id="kpi-mandate"></div></div></div>
       </section>
       <section class="view" id="v-integrations"><div class="panel"><div class="head"><h2>Integrations</h2><span class="note">Single pane of glass across the CS stack</span></div><div class="intgrid" id="int-body"></div></div></section>
-
     </div>
   </div>
 </div>
@@ -164,13 +159,19 @@ tr.click{cursor:pointer}tr.click:hover td{background:#fafbff}
 <script>
 const mand={MUST_PROTECT:['protect','Protect'],MUST_EXPAND:['expand','Expand'],MUST_USE:['use','Adopt']};
 const hband=b=>b==='green'?'g':b==='amber'?'a':'r';
-const hcolor=b=>b==='green'?'#0f9d58':b==='amber'?'#c2790b':'#d1362f';
-const fmt=n=>n==null?'—':'$'+Number(n).toLocaleString();
-const meta={dash:['Dashboard','Portfolio overview and today\\'s priorities'],queue:['Task Queue','Every system-generated action, ranked'],
-  accounts:['Accounts','Every account, worst health first'],protect:['Must Protect','Defensive risk playbooks'],
-  expand:['Must Expand','Renewals and expansion'],use:['Must Use','Adoption and hygiene'],
-  life:['Lifecycle','Onboarding velocity and adoption'],kpi:['Leadership KPIs','Capacity and portfolio allocation'],
-  integrations:['Integrations','Connected systems across the CS stack']};
+const hcolor=b=>b==='green'?'#0ca678':b==='amber'?'#d98b0b':'#e5484d';
+const fmt=n=>n==null?'-':'$'+Number(n).toLocaleString();
+const meta={
+  dash:['Dashboard','Portfolio overview and priority actions'],
+  queue:['Task Queue','Every system-generated action, ranked'],
+  accounts:['Accounts','Every account, worst health first'],
+  protect:['Must Protect','Defensive risk playbooks'],
+  expand:['Must Expand','Renewals and expansion'],
+  use:['Must Use','Adoption and hygiene'],
+  life:['Lifecycle','Onboarding velocity and adoption'],
+  kpi:['Leadership KPIs','Capacity and portfolio allocation'],
+  integrations:['Integrations','Connected systems across the CS stack']
+};
 let DATA=null;
 
 function go(v){
@@ -183,9 +184,13 @@ function go(v){
 }
 
 async function boot(){
-  DATA=await (await fetch('/api/portfolio')).json();
+  try{
+    DATA=await (await fetch('/api/portfolio')).json();
+  }catch(e){
+    document.getElementById('stats').innerHTML='<div class="empty">Could not reach the API. Is the server running?</div>';
+    return;
+  }
   document.getElementById('asof').textContent=new Date().toLocaleDateString();
-  // sidebar counts
   const byMand=m=>DATA.tasks.filter(t=>t.mandate===m).length;
   setCount('c-queue',DATA.tasks.length);
   setCount('c-acct',DATA.accounts.length);
@@ -200,12 +205,12 @@ function render(v){
   if(v==='dash'){
     const s=DATA.summary;
     document.getElementById('stats').innerHTML=[
-      ['Accounts',s.accounts,'in your book'],
+      ['Accounts',s.accounts,'in your book',''],
       ['Priority 1 risk',s.priority1,'action within 24h',s.priority1>0?'warn':''],
-      ['Portfolio ARR',fmt(s.total_arr_usd),'under management'],
+      ['Portfolio ARR',fmt(s.total_arr_usd),'under management',''],
       ['Revenue at risk',fmt(s.at_risk_arr_usd),'in red accounts',s.at_risk_arr_usd>0?'warn':''],
-      ['Noise suppressed',s.suppressed,'false positives avoided','good'],
-    ].map(([l,val,d,c])=>`<div class="stat"><div class="l">${l}</div><div class="v ${c||''}">${val}</div><div class="d">${d}</div></div>`).join('');
+      ['Noise suppressed',s.suppressed,'false positives avoided','good']
+    ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
     document.getElementById('dash-tasks').innerHTML=taskTable(DATA.tasks.slice(0,6),true);
     document.getElementById('dash-accts').innerHTML=acctTable(DATA.accounts);
     document.getElementById('dash-supp').innerHTML=suppHtml(DATA.suppressed);
@@ -222,73 +227,80 @@ function render(v){
 
 function taskTable(tasks,withDraft){
   if(!tasks.length) return '<div class="empty">Nothing here right now. The queue is clear.</div>';
-  return '<table><thead><tr><th style="width:34px"></th><th>Account</th><th>Mandate</th><th>Why it is here</th></tr></thead><tbody>'+
-    tasks.map(t=>`<tr><td><span class="prio prio${t.priority}">${t.priority}</span></td>
-      <td><strong>${t.account}</strong><div class="sub">${t.segment}</div></td>
-      <td><span class="pill ${mand[t.mandate][0]}">${mand[t.mandate][1]}</span></td>
-      <td>${t.trigger}<div class="evi">${escapeHtml(prettyEv(t.evidence))}</div>
-      ${withDraft&&t.draft_message?`<div class="draft">Suggested message: ${escapeHtml(t.draft_message)}</div>`:''}</td></tr>`).join('')+'</tbody></table>';
+  return '<table><thead><tr><th style="width:36px"></th><th>Account</th><th>Mandate</th><th>Why it is here</th></tr></thead><tbody>'+
+    tasks.map(t=>'<tr><td><span class="prio prio'+t.priority+'">'+t.priority+'</span></td>'+
+      '<td><strong>'+t.account+'</strong><div class="sub">'+t.segment+'</div></td>'+
+      '<td><span class="pill '+mand[t.mandate][0]+'">'+mand[t.mandate][1]+'</span></td>'+
+      '<td>'+t.trigger+'<div class="evi">'+escapeHtml(prettyEv(t.evidence))+'</div>'+
+      (withDraft&&t.draft_message?'<div class="draft"><b>Suggested message</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</td></tr>').join('')+
+    '</tbody></table>';
 }
-function prettyEv(e){return Object.entries(e).map(([k,v])=>`${k.replace(/_/g,' ')}: ${Array.isArray(v)?v.join(', '):v}`).join(' · ');}
+function prettyEv(e){return Object.entries(e).map(kv=>kv[0].replace(/_/g,' ')+': '+(Array.isArray(kv[1])?kv[1].join(', '):kv[1])).join('  ·  ');}
 function acctTable(rows){
   return '<table><thead><tr><th>Account</th><th>Segment</th><th>Health</th><th>ARR</th><th>Renews</th></tr></thead><tbody>'+
-    rows.map(a=>`<tr class="click" onclick="openAccount('${a.account_id}')"><td><strong>${a.name}</strong></td><td class="muted">${a.segment}</td>
-      <td><span class="hbar"><span class="hfill" style="width:${a.health.score}%;background:${hcolor(a.health.band)}"></span></span><span class="pill ${hband(a.health.band)}">${a.health.score}</span></td>
-      <td class="mono">${fmt(a.arr_usd)}</td><td class="muted">${a.renewal_date||'—'}</td></tr>`).join('')+'</tbody></table>';
+    rows.map(a=>'<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+a.name+'</strong></td><td class="muted">'+a.segment+'</td>'+
+      '<td><span class="hbar"><span class="hfill" style="width:'+a.health.score+'%;background:'+hcolor(a.health.band)+'"></span></span><span class="pill '+hband(a.health.band)+'">'+a.health.score+'</span></td>'+
+      '<td class="mono">'+fmt(a.arr_usd)+'</td><td class="muted">'+(a.renewal_date||'-')+'</td></tr>').join('')+
+    '</tbody></table>';
 }
-function suppHtml(sup){return sup.length?sup.map(x=>`<div class="supp"><strong>${x.account}</strong> · ${x.signal.replace(/_/g,' ')}. ${x.reason}.<div class="sub" style="margin-top:4px">${JSON.stringify(x.non_primary_instances)} carried ${x.non_primary_tickets} tickets versus ${x.primary_tickets} on the primary instance, so it was not raised as risk.</div></div>`).join(''):'<div class="empty">Nothing suppressed right now.</div>';}
+function suppHtml(sup){
+  if(!sup.length) return '<div class="empty">Nothing suppressed right now.</div>';
+  return sup.map(x=>'<div class="supp"><strong>'+x.account+'</strong> · '+x.signal.replace(/_/g,' ')+'. '+x.reason+'.'+
+    '<div class="sub" style="margin-top:5px">'+JSON.stringify(x.non_primary_instances)+' carried '+x.non_primary_tickets+' tickets versus '+x.primary_tickets+' on the primary instance, so it was not raised as risk.</div></div>').join('');
+}
 
 async function loadKpis(){
   const k=await (await fetch('/api/kpis')).json();
   document.getElementById('kpi-csm').innerHTML='<table><thead><tr><th>CSM</th><th>Accounts</th><th>Book ARR</th><th>Open tasks</th><th>Priority 1</th><th>At risk</th></tr></thead><tbody>'+
-    k.by_csm.map(c=>`<tr><td><strong>${c.csm}</strong></td><td>${c.accounts}</td><td class="mono">${fmt(c.arr_usd)}</td><td>${c.open_tasks}</td>
-      <td>${c.priority1_tasks?`<span class="pill r">${c.priority1_tasks}</span>`:'0'}</td><td>${c.at_risk_accounts?`<span class="pill r">${c.at_risk_accounts}</span>`:'<span class="muted">0</span>'}</td></tr>`).join('')+'</tbody></table>';
-  document.getElementById('kpi-mandate').innerHTML=Object.entries(k.mandate_load).map(([m,n])=>`<span class="pill ${mand[m][0]}">${mand[m][1]}: ${n}</span>`).join('');
+    k.by_csm.map(c=>'<tr><td><strong>'+c.csm+'</strong></td><td>'+c.accounts+'</td><td class="mono">'+fmt(c.arr_usd)+'</td><td>'+c.open_tasks+'</td>'+
+      '<td>'+(c.priority1_tasks?'<span class="pill r">'+c.priority1_tasks+'</span>':'0')+'</td><td>'+(c.at_risk_accounts?'<span class="pill r">'+c.at_risk_accounts+'</span>':'<span class="muted">0</span>')+'</td></tr>').join('')+'</tbody></table>';
+  document.getElementById('kpi-mandate').innerHTML=Object.entries(k.mandate_load).map(kv=>'<span class="pill '+mand[kv[0]][0]+'">'+mand[kv[0]][1]+': '+kv[1]+'</span>').join('');
 }
 async function loadLifecycle(){
   const l=await (await fetch('/api/lifecycle')).json();
   document.getElementById('life-body').innerHTML='<table><thead><tr><th>Account</th><th>Segment</th><th>Onboarding</th><th>Time to value</th><th>Feature adoption</th><th>Active users</th></tr></thead><tbody>'+
-    l.accounts.map(a=>`<tr><td><strong>${a.name}</strong></td><td class="muted">${a.segment}</td><td><span class="pill ${hband(a.onboarding_health)}">${a.onboarding_status}</span></td>
-      <td>${a.time_to_value_days!=null?a.time_to_value_days+' days':'—'}</td><td>${a.key_feature_adoption_pct??'—'}%</td><td>${a.active_users_pct??'—'}%</td></tr>`).join('')+'</tbody></table>';
+    l.accounts.map(a=>'<tr><td><strong>'+a.name+'</strong></td><td class="muted">'+a.segment+'</td><td><span class="pill '+hband(a.onboarding_health)+'">'+a.onboarding_status+'</span></td>'+
+      '<td>'+(a.time_to_value_days!=null?a.time_to_value_days+' days':'-')+'</td><td>'+(a.key_feature_adoption_pct!=null?a.key_feature_adoption_pct:'-')+'%</td><td>'+(a.active_users_pct!=null?a.active_users_pct:'-')+'%</td></tr>').join('')+'</tbody></table>';
 }
 async function loadIntegrations(){
   const d=await (await fetch('/api/integrations')).json();
   document.getElementById('int-body').innerHTML=d.connectors.map(c=>{
-    const cls=c.status.startsWith('connected')?'g':c.status==='planned'?'pln':'a';
-    return `<div class="intcard"><div class="top"><div><h3>${c.system}</h3><div class="cat">${c.category}</div></div><span class="pill ${cls}">${c.status}</span></div>
-      <div class="dirbadge">${c.direction}</div>
-      <div class="rows"><b>Pulls:</b> ${c.pulls.join(', ')||'—'}${c.pushes.length?`<br><b>Pushes:</b> ${c.pushes.join(', ')}`:''}<br><span class="muted">${c.accounts_synced} accounts synced</span></div></div>`;
+    const cls=c.status.indexOf('connected')===0?'g':c.status==='planned'?'pln':'a';
+    return '<div class="intcard"><div class="top"><div><h3>'+c.system+'</h3><div class="cat">'+c.category+'</div></div><span class="pill '+cls+'">'+c.status+'</span></div>'+
+      '<div class="dirbadge">'+c.direction+'</div>'+
+      '<div class="rows"><b>Pulls:</b> '+(c.pulls.join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
   }).join('');
 }
 
 async function openAccount(id){
   const d=await (await fetch('/api/accounts/'+id)).json();
-  const hs=d.hubspot,j=d.signals.jiminny||{};
-  const contacts=(hs.contacts||[]).map(c=>`${c.role}: ${c.name}`).join('<br>')||'<span class="muted">No contacts tagged yet</span>';
-  document.getElementById('drawer').innerHTML=`
-    <div class="dhead"><span class="x" onclick="closeDrawer()">×</span>
-      <div style="font-size:1.2em;font-weight:800;letter-spacing:-.01em">${hs.name} <span class="pill ${hband(d.health.band)}">${d.health.score}</span></div>
-      <div class="sub" style="margin-top:3px">${hs.segment} · ${fmt(hs.arr_usd)} ARR · renews ${hs.renewal_date||'—'} · owner ${hs.csm_owner||'—'}</div></div>
-    <div class="dbody">
-      <div class="kv"><span>Churn risk</span><b>${d.signals.churn.ml_churn_score!=null?Math.round(d.signals.churn.ml_churn_score*100)+'%':'—'}</b></div>
-      <div class="kv"><span>CSAT (30 days)</span><b>${d.signals.zendesk.csat_30d??'—'}</b></div>
-      <div class="kv"><span>Support tickets (7d vs prior)</span><b>${d.signals.zendesk.tickets_last_7d??'—'} vs ${d.signals.zendesk.tickets_prev_7d??'—'}</b></div>
-      <div class="kv"><span>Logins (7d vs prior)</span><b>${d.signals.usage.logins_last_7d??'—'} vs ${d.signals.usage.logins_prev_7d??'—'}</b></div>
-      <div class="kv"><span>License utilization</span><b>${d.signals.usage.license_utilization_pct??'—'}%</b></div>
-      <div class="kv"><span>Payment</span><b>${(d.signals.stripe.dunning_stage||'none').replace(/_/g,' ')}</b></div>
-      <div class="kv"><span>Call sentiment</span><b>${j.sentiment||'—'}</b></div>
-      <div class="kv"><span>Primary instances</span><b class="mono">${d.primary_instances.join(', ')||'—'}</b></div>
-      ${j.summary?`<div class="sect">Latest call</div><div class="callout">${escapeHtml(j.summary)}</div>`:''}
-      <div class="sect">Health drivers</div><div class="callout">${(d.health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'}</div>
-      <div class="sect">Shared with Sales</div>
-      <div class="writeback">Synced to HubSpot: health ${d.hubspot_writeback.cs_health_score}, status <b>${d.hubspot_writeback.cs_risk_status.replace(/_/g,' ')}</b>${d.hubspot_writeback.cs_active_playbook?`, active playbook "${escapeHtml(d.hubspot_writeback.cs_active_playbook)}"`:''}.</div>
-      <div class="sect">Contacts</div><div class="callout">${contacts}</div>
-      <div class="sect">Tasks</div>${d.tasks.length?d.tasks.map(t=>`<div class="callout" style="margin-bottom:8px"><span class="prio prio${t.priority}">${t.priority}</span> ${t.trigger}${t.draft_message?`<div class="draft">Suggested message: ${escapeHtml(t.draft_message)}</div>`:''}</div>`).join(''):'<div class="muted">No open tasks</div>'}
-    </div>`;
+  const hs=d.hubspot,j=d.signals.jiminny||{},zd=d.signals.zendesk,us=d.signals.usage,ch=d.signals.churn,st=d.signals.stripe;
+  const contacts=(hs.contacts||[]).map(c=>c.role+': '+c.name).join('<br>')||'<span class="muted">No contacts tagged yet</span>';
+  document.getElementById('drawer').innerHTML=
+    '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
+      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+hs.name+' <span class="pill '+hband(d.health.band)+'">'+d.health.score+'</span></div>'+
+      '<div class="sub" style="margin-top:4px">'+hs.segment+' · '+fmt(hs.arr_usd)+' ARR · renews '+(hs.renewal_date||'-')+' · owner '+(hs.csm_owner||'-')+'</div></div>'+
+    '<div class="dbody">'+
+      kv('Churn risk',ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%':'-')+
+      kv('CSAT (30 days)',zd.csat_30d!=null?zd.csat_30d:'-')+
+      kv('Support tickets (7d vs prior)',(zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-'))+
+      kv('Logins (7d vs prior)',(us.logins_last_7d!=null?us.logins_last_7d:'-')+' vs '+(us.logins_prev_7d!=null?us.logins_prev_7d:'-'))+
+      kv('License utilization',(us.license_utilization_pct!=null?us.license_utilization_pct:'-')+'%')+
+      kv('Payment',(st.dunning_stage||'none').replace(/_/g,' '))+
+      kv('Call sentiment',j.sentiment||'-')+
+      kv('Primary instances',d.primary_instances.join(', ')||'-')+
+      (j.summary?'<div class="sect">Latest call</div><div class="callout">'+escapeHtml(j.summary)+'</div>':'')+
+      '<div class="sect">Health drivers</div><div class="callout">'+((d.health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board')+'</div>'+
+      '<div class="sect">Shared with Sales (HubSpot)</div>'+
+      '<div class="writeback">Synced to HubSpot: health '+d.hubspot_writeback.cs_health_score+', status <b>'+d.hubspot_writeback.cs_risk_status.replace(/_/g,' ')+'</b>'+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.</div>'+
+      '<div class="sect">Contacts</div><div class="callout">'+contacts+'</div>'+
+      '<div class="sect">Tasks</div>'+(d.tasks.length?d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+t.trigger+(t.draft_message?'<div class="draft"><b>Suggested message</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</div>').join(''):'<div class="muted">No open tasks</div>')+
+    '</div>';
   document.getElementById('drawer').classList.add('on');document.getElementById('scrim').classList.add('on');
 }
+function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
 function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');}
-function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 boot();
 </script>
 </body>
