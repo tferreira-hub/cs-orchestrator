@@ -33,21 +33,22 @@ class Zendesk:
         )
 
     def tickets(self, account_ref: str) -> dict[str, Any]:
+        import urllib.parse
         sub = config.env("ZENDESK_SUBDOMAIN")
         auth = config.basic_auth_header(f"{config.env('ZENDESK_EMAIL')}/token", config.env("ZENDESK_TOKEN"))
         headers = {"Authorization": auth, "Accept": "application/json"}
         base = f"https://{sub}.zendesk.com/api/v2"
-        # Find the org by the AUx-yyyyy external id, then count/roll up its tickets.
-        ref = identity.normalise(account_ref)
-        orgs = config.http_get(f"{base}/organizations/search.json?external_id={ref}", headers)
+        # Zendesk stores the AUx-yyyy id in external_id as UPPERCASE with a hyphen and
+        # its search is case-sensitive, so query with the upper-cased canonical form.
+        ref = identity.normalise(account_ref).upper()
+        orgs = config.http_get(f"{base}/organizations/search.json?external_id={urllib.parse.quote(ref)}", headers)
         org_list = orgs.get("organizations", [])
         if not org_list:
             raise config.SourceError(f"Zendesk org not found for {ref}")
         org_id = org_list[0]["id"]
-        # Recent tickets for the org (Zendesk search API).
-        recent = config.http_get(
-            f"{base}/search.json?query=type:ticket organization:{org_id}", headers
-        )
+        # Recent tickets for the org (Zendesk search API). URL-encode the query.
+        query = urllib.parse.quote(f"type:ticket organization:{org_id}")
+        recent = config.http_get(f"{base}/search.json?query={query}", headers)
         results = recent.get("results", [])
         open_tickets = sum(1 for t in results if t.get("status") in ("open", "pending", "hold"))
         sev1 = sum(1 for t in results if "sev1" in [str(x).lower() for x in t.get("tags", [])])
@@ -57,8 +58,9 @@ class Zendesk:
             "tickets_prev_7d": None,
             "sev1_open": sev1,
             "csat_30d": None,  # from satisfaction_ratings endpoint in production
-            "by_instance": {ref: len(results)},
+            "by_instance": {identity.normalise(account_ref): len(results)},
             "_source": "zendesk-live",
+            "_org_name": org_list[0].get("name"),
         }
 
 
@@ -72,7 +74,9 @@ class Pendo:
 
     def metrics(self, account_ref: str) -> dict[str, Any]:
         headers = {"x-pendo-integration-key": config.env("PENDO_KEY"), "content-type": "application/json"}
-        ref = identity.normalise(account_ref)
+        # Pendo stores the account id in UNDERSCORE form (au1_12345), unlike Zendesk's
+        # uppercase-hyphen external_id. Normalise then convert '-' -> '_'.
+        ref = identity.normalise(account_ref).replace("-", "_")
         # Pendo Aggregation API: pull account metadata / usage for this accountId.
         agg = config.http_get(f"https://app.pendo.io/api/v1/account/{ref}", headers)
         md = agg.get("metadata", {}).get("auto", {}) if isinstance(agg, dict) else {}

@@ -402,6 +402,195 @@
         "time_to_value_days": 90,
         "health": "red"
       }
+    },
+    "AU1-3102": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Rise Personnel",
+        "segment": "Strategic",
+        "arr_usd": 180000,
+        "renewal_date": "2026-12-01",
+        "csm_owner": "Alex Chen",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3102",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3102": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3105": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Employ",
+        "segment": "Strategic",
+        "arr_usd": 240000,
+        "renewal_date": "2026-11-15",
+        "csm_owner": "Alex Chen",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3105",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3105": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
+    },
+    "AU1-3078": {
+      "hubspot": {
+        "company_id": null,
+        "name": "Wright Executive",
+        "segment": "Scaled",
+        "arr_usd": 42000,
+        "renewal_date": "2027-02-01",
+        "csm_owner": "Alex Chen",
+        "contacts": [
+          {
+            "role": "Primary Champion",
+            "name": "TBD"
+          }
+        ],
+        "instances": [
+          {
+            "instance_id": "au1-3078",
+            "instance_type": "primary",
+            "arr_share": 1.0
+          }
+        ]
+      },
+      "zendesk": {
+        "open_tickets": 0,
+        "tickets_last_7d": 0,
+        "tickets_prev_7d": 0,
+        "sev1_open": 0,
+        "csat_30d": null,
+        "by_instance": {
+          "au1-3078": 0
+        }
+      },
+      "usage": {
+        "logins_last_7d": null,
+        "logins_prev_7d": null,
+        "active_users_pct": null,
+        "license_utilization_pct": null,
+        "key_feature_adoption_pct": null,
+        "by_instance": {}
+      },
+      "churn": {
+        "ml_churn_score": 0.0,
+        "model_version": "n/a",
+        "top_drivers": []
+      },
+      "stripe": {
+        "past_due_invoices": 0,
+        "days_past_due": 0,
+        "amount_due_usd": 0,
+        "dunning_stage": "none"
+      },
+      "jiminny": {
+        "last_call_date": null,
+        "sentiment": "unknown",
+        "summary": "",
+        "talk_ratio_customer": null
+      },
+      "onboarding": {
+        "status": "complete",
+        "time_to_value_days": null,
+        "health": "green"
+      }
     }
   }
 }

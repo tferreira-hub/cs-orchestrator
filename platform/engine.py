@@ -43,7 +43,7 @@ def health_score(account: dict) -> dict:
     score = 100.0
     reasons: list[str] = []
 
-    ml = churn.get("ml_churn_score", 0.0)
+    ml = churn.get("ml_churn_score") or 0.0
     if ml:
         pen = round(ml * 40)
         score -= pen
@@ -56,7 +56,7 @@ def health_score(account: dict) -> dict:
         score -= pen
         reasons.append(f"CSAT {csat} (-{pen})")
 
-    now, prev = usage.get("logins_last_7d", 0), usage.get("logins_prev_7d", 0)
+    now, prev = usage.get("logins_last_7d") or 0, usage.get("logins_prev_7d") or 0
     if prev > 0 and now < prev:
         drop = (prev - now) / prev
         if drop >= 0.3:
@@ -64,7 +64,7 @@ def health_score(account: dict) -> dict:
             score -= pen
             reasons.append(f"usage down {int(drop * 100)}% (-{pen})")
 
-    if zd.get("sev1_open", 0) > 0:
+    if (zd.get("sev1_open") or 0) > 0:
         score -= 15
         reasons.append("open Sev-1 (-15)")
 

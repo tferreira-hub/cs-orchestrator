@@ -40,9 +40,9 @@ def ticket_spike_on_primary(zendesk: dict[str, Any], primary_ids: set[str]) -> t
     Returns (fired, evidence). If most of the recent tickets are on non-primary
     instances, the spike is suppressed as noise.
     """
-    last7 = zendesk.get("tickets_last_7d", 0)
-    prev7 = zendesk.get("tickets_prev_7d", 0)
-    by_instance = zendesk.get("by_instance", {})
+    last7 = zendesk.get("tickets_last_7d") or 0
+    prev7 = zendesk.get("tickets_prev_7d") or 0
+    by_instance = zendesk.get("by_instance", {}) or {}
     primary_tickets = sum(v for k, v in by_instance.items() if k in primary_ids)
     non_primary_tickets = sum(v for k, v in by_instance.items() if k not in primary_ids)
 
@@ -69,8 +69,8 @@ def suppressed_signals(hubspot: dict[str, Any], zendesk: dict[str, Any]) -> list
     non_primary = non_primary_instance_ids(hubspot)
     by_instance = zendesk.get("by_instance", {})
 
-    last7 = zendesk.get("tickets_last_7d", 0)
-    prev7 = zendesk.get("tickets_prev_7d", 0)
+    last7 = zendesk.get("tickets_last_7d") or 0
+    prev7 = zendesk.get("tickets_prev_7d") or 0
     raw_spike = prev7 > 0 and last7 >= 2 * prev7
     if raw_spike:
         non_primary_tickets = sum(v for k, v in by_instance.items() if k in non_primary)

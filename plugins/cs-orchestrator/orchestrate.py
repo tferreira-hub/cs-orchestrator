@@ -83,12 +83,12 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         tasks.append(t)
 
     # --- MUST_PROTECT: churn / multi-signal risk ---
-    score = churn.get("ml_churn_score", 0.0)
+    score = churn.get("ml_churn_score") or 0.0
     spike_fired, spike_ev = ticket_spike_on_primary(zd, primary_ids)
-    logins_now = usage.get("logins_last_7d", 0)
-    logins_prev = usage.get("logins_prev_7d", 0)
+    logins_now = usage.get("logins_last_7d") or 0
+    logins_prev = usage.get("logins_prev_7d") or 0
     usage_drop = logins_prev > 0 and logins_now <= USAGE_DROP * logins_prev
-    sev1 = zd.get("sev1_open", 0) > 0
+    sev1 = (zd.get("sev1_open") or 0) > 0
 
     risk_fired = False
     drivers = []
@@ -128,7 +128,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     # --- MUST_EXPAND: expansion triggers (healthy only) ---
     healthy = score < 0.4 and not sev1
     if segment == "Strategic" and healthy:
-        util = usage.get("license_utilization_pct", 0)
+        util = usage.get("license_utilization_pct") or 0
         api_now = usage.get("api_calls_last_7d")
         api_prev = usage.get("api_calls_prev_7d")
         if util >= UTIL_EXPANSION:
