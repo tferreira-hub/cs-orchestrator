@@ -73,20 +73,42 @@ class Pendo:
         return config.live_enabled() and bool(config.env("PENDO_KEY"))
 
     def metrics(self, account_ref: str) -> dict[str, Any]:
+        import time
         headers = {"x-pendo-integration-key": config.env("PENDO_KEY"), "content-type": "application/json"}
         # Pendo stores the account id in UNDERSCORE form (au1_12345), unlike Zendesk's
         # uppercase-hyphen external_id. Normalise then convert '-' -> '_'.
         ref = identity.normalise(account_ref).replace("-", "_")
-        # Pendo Aggregation API: pull account metadata / usage for this accountId.
         agg = config.http_get(f"https://app.pendo.io/api/v1/account/{ref}", headers)
-        md = agg.get("metadata", {}).get("auto", {}) if isinstance(agg, dict) else {}
+        md = agg.get("metadata", {}) if isinstance(agg, dict) else {}
+        agent = md.get("agent", {})
+        auto = md.get("auto", {})
+        predict = md.get("pendo_predict", {})
+
+        # Recency: days since last visit (from epoch-ms lastvisit).
+        last_visit_ms = auto.get("lastvisit")
+        days_since_visit = None
+        if last_visit_ms:
+            days_since_visit = int((time.time() * 1000 - last_visit_ms) / 86400000)
+
         return {
-            "logins_last_7d": md.get("logins7d"),
-            "logins_prev_7d": md.get("loginsPrev7d"),
-            "active_users_pct": md.get("activeUsersPct"),
-            "license_utilization_pct": md.get("licenseUtilizationPct"),
-            "key_feature_adoption_pct": md.get("keyFeatureAdoptionPct"),
-            "by_instance": {ref: {"logins_last_7d": md.get("logins7d")}},
+            # Real usage recency (Pendo doesn't expose 7d login counts on this endpoint;
+            # days-since-last-visit is the available real signal).
+            "days_since_last_visit": days_since_visit,
+            "logins_last_7d": None,
+            "logins_prev_7d": None,
+            "active_users_pct": None,
+            "license_utilization_pct": None,
+            "key_feature_adoption_pct": None,
+            # Real Pendo Predict "JobAdder risk advisor" signals.
+            "pendo_risk_score": predict.get("jobadder_risk_advisor___score"),
+            "pendo_adoption": predict.get("jobadder_risk_advisor___adoption"),
+            "pendo_adoption_engagement": predict.get("jobadder_risk_advisor___adoption_engagement"),
+            "pendo_trend": predict.get("jobadder_risk_advisor___trend"),
+            # Plan context.
+            "plan_tier": agent.get("tier"),
+            "plan_price": agent.get("planprice"),
+            "site": agent.get("sitename"),
+            "by_instance": {ref: {"days_since_last_visit": days_since_visit}},
             "_source": "pendo-live",
         }
 
