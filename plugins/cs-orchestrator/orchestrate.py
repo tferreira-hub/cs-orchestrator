@@ -45,6 +45,20 @@ def _load() -> dict:
     return json.loads(Path(FIXTURES).read_text(encoding="utf-8"))["accounts"]
 
 
+# Pluggable account source. Defaults to the fixture loader; the platform sets this
+# to a live data-access provider so the SAME rules run over real data.
+_ACCOUNT_PROVIDER = _load
+
+
+def set_account_provider(fn) -> None:
+    global _ACCOUNT_PROVIDER
+    _ACCOUNT_PROVIDER = fn
+
+
+def load_accounts() -> dict:
+    return _ACCOUNT_PROVIDER()
+
+
 def _days_to(d: str) -> int:
     return (date.fromisoformat(d) - TODAY).days
 
@@ -160,7 +174,7 @@ def _first_contact(hs: dict, role: str):
 
 
 def orchestrate(account_ids: list[str] | None = None) -> dict:
-    accounts = _load()
+    accounts = load_accounts()
     ids = account_ids or list(accounts)
     all_tasks, all_suppressed = [], []
     for aid in ids:

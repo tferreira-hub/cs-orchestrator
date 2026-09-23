@@ -14,11 +14,17 @@ import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # platform/ (for dataaccess)
 sys.path.insert(0, str(PLUGIN))
 sys.path.insert(0, str(PLUGIN / "hooks" / "scripts"))
 
 import orchestrate  # noqa: E402  (reference rules engine)
 from suppression import primary_instance_ids, suppressed_signals  # noqa: E402
+
+# Route the rules engine and the platform through the live data-access layer
+# (live per-source with fixture fallback). One source of truth for UI + agent.
+import dataaccess  # noqa: E402
+orchestrate.set_account_provider(dataaccess.all_accounts)
 
 
 def health_score(account: dict) -> dict:
@@ -78,7 +84,7 @@ def health_score(account: dict) -> dict:
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""
-    accounts = orchestrate._load()
+    accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
 
     tasks_by_account: dict[str, list] = {}
@@ -110,6 +116,8 @@ def portfolio() -> dict:
             "suppressed": len(result["suppressed"]),
             "total_arr_usd": total_arr,
             "at_risk_arr_usd": at_risk_arr,
+            "live_sources": dataaccess.live_sources(),
+            "data_mode": "live" if dataaccess.any_live() else "sample",
         },
         "accounts": rows,
         "tasks": result["tasks"],
@@ -118,7 +126,7 @@ def portfolio() -> dict:
 
 
 def account_detail(account_id: str) -> dict:
-    accounts = orchestrate._load()
+    accounts = orchestrate.load_accounts()
     if account_id not in accounts:
         raise KeyError(account_id)
     a = accounts[account_id]
@@ -136,6 +144,7 @@ def account_detail(account_id: str) -> dict:
         },
         "onboarding": a.get("onboarding", {}),
         "health": h,
+        "sources": a.get("sources", {}),
         "primary_instances": sorted(primary_instance_ids(a.get("hubspot", {}))),
         "tasks": tasks,
         "suppressed": suppressed,
@@ -162,7 +171,7 @@ def _writeback_payload(account: dict, health: dict, tasks: list) -> dict:
 def kpis() -> dict:
     """Leadership KPI & capacity tracking (req §3): per-CSM portfolio allocation,
     task load, at-risk ARR, and health mix, to inform headcount/resourcing."""
-    accounts = orchestrate._load()
+    accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
     tasks_by_account = {}
     for t in result["tasks"]:
@@ -203,7 +212,7 @@ def kpis() -> dict:
 
 def lifecycle() -> dict:
     """Unified lifecycle view (req §3): onboarding velocity/health alongside adoption."""
-    accounts = orchestrate._load()
+    accounts = orchestrate.load_accounts()
     rows = []
     for aid, a in accounts.items():
         hs = a.get("hubspot", {})
@@ -226,25 +235,28 @@ def integrations() -> dict:
     """Integration status map (req §1) for the single pane of glass. Reflects which
     connectors feed the platform, their sync direction, and what they contribute.
     Fixture mode reports 'connected (sample)'; swap adapters for live to flip to 'live'."""
-    accounts = orchestrate._load()
+    accounts = orchestrate.load_accounts()
     n = len(accounts)
+    liveset = set(dataaccess.live_sources())
+    def st(name):
+        return "live" if name in liveset else "connected (sample)"
     return {
         "connectors": [
             {"system": "HubSpot", "category": "CRM", "direction": "bi-directional",
-             "status": "connected (sample)", "accounts_synced": n,
+             "status": st("HubSpot"), "accounts_synced": n,
              "pulls": ["contract value", "renewal date", "account hierarchy", "contacts"],
              "pushes": ["health score", "risk status", "active playbook"]},
             {"system": "Stripe", "category": "Billing / Finance", "direction": "read-only",
-             "status": "connected (sample)", "accounts_synced": n,
+             "status": st("Stripe"), "accounts_synced": n,
              "pulls": ["invoice status", "days past due", "ARR"], "pushes": []},
             {"system": "Zendesk", "category": "Support", "direction": "read-only",
-             "status": "connected (sample)", "accounts_synced": n,
+             "status": st("Zendesk"), "accounts_synced": n,
              "pulls": ["ticket volume", "CSAT", "Sev-1 flags"], "pushes": []},
-            {"system": "Product Telemetry", "category": "Usage", "direction": "read-only",
-             "status": "connected (sample)", "accounts_synced": n,
+            {"system": "Product Telemetry", "category": "Usage (Pendo)", "direction": "read-only",
+             "status": st("Pendo"), "accounts_synced": n,
              "pulls": ["login frequency", "feature adoption", "license utilization", "API usage"], "pushes": []},
             {"system": "Jiminny", "category": "Conversational Intelligence", "direction": "read-only",
-             "status": "connected (sample)", "accounts_synced": n,
+             "status": st("Jiminny"), "accounts_synced": n,
              "pulls": ["call sentiment", "meeting summary", "talk ratio"], "pushes": []},
             {"system": "Rocket Lane", "category": "Onboarding", "direction": "read-only",
              "status": "planned", "accounts_synced": 0,

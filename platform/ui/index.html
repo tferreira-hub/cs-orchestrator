@@ -42,6 +42,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .topbar .crumb{font-size:.77em;color:var(--muted);margin-top:2px}
 .status{display:flex;align-items:center;gap:8px;font-size:.8em;color:var(--ink2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 13px;box-shadow:var(--shadow)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--greenbg);animation:pulse 2s infinite}
+.modebadge{font-weight:700;font-size:.92em}
+.modebadge.live{color:var(--green)}
+.modebadge.sample{color:var(--amber)}
+.src{font-size:.66em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;margin-left:8px;vertical-align:middle}
+.src.live{background:var(--greenbg);color:var(--green)}
+.src.sample{background:var(--amberbg);color:var(--amber)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .content{padding:26px 32px 70px;max-width:1420px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
@@ -126,7 +132,7 @@ tr.click:hover td{background:#f8f9ff}
   <div class="main">
     <div class="topbar">
       <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and priority actions</div></div>
-      <div class="status"><span class="dot"></span> Live data <span class="muted" id="asof"></span></div>
+      <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Sample data</span> <span class="muted" id="asof"></span></div>
     </div>
     <div class="content">
       <section class="view on" id="v-dash">
@@ -191,6 +197,12 @@ async function boot(){
     return;
   }
   document.getElementById('asof').textContent=new Date().toLocaleDateString();
+  const sm=DATA.summary;
+  const badge=document.getElementById('dataMode');
+  if(badge){
+    if(sm.data_mode==='live'){badge.textContent='Live: '+sm.live_sources.join(', ');badge.className='modebadge live';}
+    else{badge.textContent='Sample data';badge.className='modebadge sample';}
+  }
   const byMand=m=>DATA.tasks.filter(t=>t.mandate===m).length;
   setCount('c-queue',DATA.tasks.length);
   setCount('c-acct',DATA.accounts.length);
@@ -275,19 +287,21 @@ async function loadIntegrations(){
 async function openAccount(id){
   const d=await (await fetch('/api/accounts/'+id)).json();
   const hs=d.hubspot,j=d.signals.jiminny||{},zd=d.signals.zendesk,us=d.signals.usage,ch=d.signals.churn,st=d.signals.stripe;
+  const srcs=d.sources||{};
+  const src=s=>srcs[s]?'<span class="src '+srcs[s]+'">'+srcs[s]+'</span>':'';
   const contacts=(hs.contacts||[]).map(c=>c.role+': '+c.name).join('<br>')||'<span class="muted">No contacts tagged yet</span>';
   document.getElementById('drawer').innerHTML=
     '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
       '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+hs.name+' <span class="pill '+hband(d.health.band)+'">'+d.health.score+'</span></div>'+
       '<div class="sub" style="margin-top:4px">'+hs.segment+' · '+fmt(hs.arr_usd)+' ARR · renews '+(hs.renewal_date||'-')+' · owner '+(hs.csm_owner||'-')+'</div></div>'+
     '<div class="dbody">'+
-      kv('Churn risk',ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%':'-')+
-      kv('CSAT (30 days)',zd.csat_30d!=null?zd.csat_30d:'-')+
+      kv('Churn risk',(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%':'-')+src('churn'))+
+      kv('CSAT (30 days)',(zd.csat_30d!=null?zd.csat_30d:'-')+src('zendesk'))+
       kv('Support tickets (7d vs prior)',(zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-'))+
-      kv('Logins (7d vs prior)',(us.logins_last_7d!=null?us.logins_last_7d:'-')+' vs '+(us.logins_prev_7d!=null?us.logins_prev_7d:'-'))+
+      kv('Logins (7d vs prior)',(us.logins_last_7d!=null?us.logins_last_7d:'-')+' vs '+(us.logins_prev_7d!=null?us.logins_prev_7d:'-')+src('usage'))+
       kv('License utilization',(us.license_utilization_pct!=null?us.license_utilization_pct:'-')+'%')+
-      kv('Payment',(st.dunning_stage||'none').replace(/_/g,' '))+
-      kv('Call sentiment',j.sentiment||'-')+
+      kv('Payment',(st.dunning_stage||'none').replace(/_/g,' ')+src('stripe'))+
+      kv('Call sentiment',(j.sentiment||'-')+src('jiminny'))+
       kv('Primary instances',d.primary_instances.join(', ')||'-')+
       (j.summary?'<div class="sect">Latest call</div><div class="callout">'+escapeHtml(j.summary)+'</div>':'')+
       '<div class="sect">Health drivers</div><div class="callout">'+((d.health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board')+'</div>'+
