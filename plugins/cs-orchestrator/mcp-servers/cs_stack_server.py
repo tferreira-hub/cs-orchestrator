@@ -27,6 +27,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Live adapters (env-keyed) with fixture fallback. Import is optional so the server
+# still runs if the adapters package is absent.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from adapters import with_fallback
+    from adapters import sources as _src
+    _ADAPTERS = True
+except Exception:  # noqa: BLE001
+    _ADAPTERS = False
+    def with_fallback(is_live, live_call, fixture_call):  # type: ignore
+        return fixture_call()
+
 
 FIXTURES_PATH = os.environ.get(
     "CS_FIXTURES",
@@ -63,15 +75,27 @@ def tool_list_accounts(_: dict[str, Any]) -> Any:
 
 
 def tool_hubspot_get_account(args: dict[str, Any]) -> Any:
-    return _account(args["account_id"]).get("hubspot", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("hubspot", {})
+    if not _ADAPTERS:
+        return fixture()
+    return with_fallback(_src.HUBSPOT.live(), lambda: _src.HUBSPOT.account(aid), fixture)
 
 
 def tool_zendesk_get_tickets(args: dict[str, Any]) -> Any:
-    return _account(args["account_id"]).get("zendesk", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("zendesk", {})
+    if not _ADAPTERS:
+        return fixture()
+    return with_fallback(_src.ZENDESK.live(), lambda: _src.ZENDESK.tickets(aid), fixture)
 
 
 def tool_usage_get_metrics(args: dict[str, Any]) -> Any:
-    return _account(args["account_id"]).get("usage", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("usage", {})
+    if not _ADAPTERS:
+        return fixture()
+    return with_fallback(_src.PENDO.live(), lambda: _src.PENDO.metrics(aid), fixture)
 
 
 def tool_churn_get_score(args: dict[str, Any]) -> Any:
@@ -79,36 +103,51 @@ def tool_churn_get_score(args: dict[str, Any]) -> Any:
 
 
 def tool_stripe_get_payment(args: dict[str, Any]) -> Any:
-    return _account(args["account_id"]).get("stripe", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("stripe", {})
+    if not _ADAPTERS:
+        return fixture()
+    return with_fallback(_src.STRIPE.live(), lambda: _src.STRIPE.payment(aid), fixture)
 
 
 def tool_jiminny_get_calls(args: dict[str, Any]) -> Any:
     """Conversational intelligence: latest call sentiment, summary, talk ratio."""
-    return _account(args["account_id"]).get("jiminny", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("jiminny", {})
+    if not _ADAPTERS:
+        return fixture()
+    return with_fallback(_src.JIMINNY.live(), lambda: _src.JIMINNY.calls(aid), fixture)
 
 
 def tool_hubspot_push_cs_data(args: dict[str, Any]) -> Any:
     """Bi-directional sync: push CS-owned fields (health score, risk status, active
     playbook) BACK to the HubSpot company object so Sales has visibility (req §1).
 
-    In this fixture build the write is simulated and echoed back (no live HubSpot),
-    but the contract mirrors a real hubspot.crm.companies update so it is a drop-in
-    swap for the live integration.
-    """
+    Live when HUBSPOT_TOKEN is set; otherwise simulated (fixture mode)."""
     account_id = args["account_id"]
-    _account(account_id)  # validate exists
     fields = {
-        "cs_health_score": args.get("health_score"),
-        "cs_risk_status": args.get("risk_status"),
-        "cs_active_playbook": args.get("active_playbook"),
+        "health_score": args.get("health_score"),
+        "risk_status": args.get("risk_status"),
+        "active_playbook": args.get("active_playbook"),
     }
-    return {
-        "synced": True,
-        "target": "hubspot.crm.companies",
-        "account_id": account_id,
-        "written_fields": {k: v for k, v in fields.items() if v is not None},
-        "note": "Simulated bi-directional write-back (fixture mode). Swap for live HubSpot PATCH.",
-    }
+
+    def _sim():
+        _account(account_id)
+        return {
+            "synced": True,
+            "target": "hubspot.crm.companies",
+            "account_id": account_id,
+            "written_fields": {f"cs_{k}": v for k, v in fields.items() if v is not None},
+            "note": "Simulated bi-directional write-back (fixture mode). Set HUBSPOT_TOKEN to write live.",
+        }
+
+    if not _ADAPTERS:
+        return _sim()
+    return with_fallback(
+        _src.HUBSPOT.live(),
+        lambda: _src.HUBSPOT.push_cs_data(account_id, **fields),
+        _sim,
+    )
 
 
 _ACCOUNT_ARG = {
