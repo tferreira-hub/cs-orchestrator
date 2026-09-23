@@ -29,6 +29,13 @@ This mirrors the JobAdder demo videos (planner, developer, reviewer, subagent lo
    copilot plugin install ja-agile-agents@jobadder-agent-plugin-marketplace
    copilot plugin list
    ```
+   > Note: JobAdder is merging `jobadder-agent-plugin` into `ja-agile-agents` and
+   > extracting the out-of-the-box MCP servers (GitHub, Playwright, Atlassian, New Relic)
+   > into a separate plugin you can disable when you don't need them. If that lands, the
+   > install name above may change (run `copilot plugin marketplace list` to confirm the
+   > current entry). This only affects the bootstrap harness we build *with*; our
+   > `cs-orchestrator` plugin defines its own MCP config and is unaffected. Disabling the
+   > OOTB MCP servers keeps build sessions lean when working on the CS plugin.
 3. In a `copilot` session (or VS Code agent mode), drive the build with the harness agents:
    - `feature-planner`: turn a CS requirement into a `plan.md` (for example "add the Jiminny call-sentiment signal to the risk playbook").
    - `developer`: implement the plan in `plugins/cs-orchestrator` and `platform/`.
