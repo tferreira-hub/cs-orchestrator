@@ -89,6 +89,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     logins_prev = usage.get("logins_prev_7d") or 0
     usage_drop = logins_prev > 0 and logins_now <= USAGE_DROP * logins_prev
     sev1 = (zd.get("sev1_open") or 0) > 0
+    pendo_risk = str(usage.get("pendo_risk_score") or "").lower()  # live Pendo risk advisor
 
     risk_fired = False
     drivers = []
@@ -96,9 +97,12 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         if score >= CHURN_RISK:
             risk_fired = True
             drivers.append(f"ml_churn_score={score}")
+        if pendo_risk == "high":
+            risk_fired = True
+            drivers.append("pendo_risk_advisor=High")
         if spike_fired and usage_drop:
             risk_fired = True
-            drivers.append(f"ticket_spike({spike_ev['tickets_prev_7d']}->{spike_ev['tickets_last_7d']})+usage_drop({logins_prev}->{logins_now})")
+            drivers.append(f"ticket_spike({spike_ev.get('tickets_prev_7d')}->{spike_ev.get('tickets_last_7d')})+usage_drop({logins_prev}->{logins_now})")
         if sev1:
             risk_fired = True
             drivers.append("sev1_open")
@@ -107,7 +111,8 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
             drivers.append("negative_call_sentiment")
         if risk_fired:
             add(1, "MUST_PROTECT", "Predictive Risk Playbook (24h SLA)",
-                {"churn_score": score, "csat_30d": zd.get("csat_30d"), "drivers": drivers},
+                {"churn_score": score, "pendo_risk": usage.get("pendo_risk_score"),
+                 "csat_30d": zd.get("csat_30d"), "drivers": drivers},
                 "Initiate Defensive Workflow: root-cause analysis, executive outreach, internal escalation.",
                 f"Hi {(_first_contact(hs,'Executive Sponsor') or 'there')}, I'd like to book 30 minutes this week to review recent changes on your account and make sure we're delivering value. I've noticed a dip in usage and want to get ahead of it.")
     else:  # Scaled, exception only

@@ -76,6 +76,22 @@ def health_score(account: dict) -> dict:
         score -= 8
         reasons.append("negative call sentiment (-8)")
 
+    # Live Pendo recency: no visit in a while is a real disengagement signal.
+    dsv = usage.get("days_since_last_visit")
+    if dsv is not None and dsv >= 14:
+        pen = min(20, (dsv // 7) * 5)
+        score -= pen
+        reasons.append(f"no product visit in {dsv} days (-{pen})")
+
+    # Live Pendo risk advisor.
+    prisk = str(usage.get("pendo_risk_score") or "").lower()
+    if prisk == "high":
+        score -= 18
+        reasons.append("Pendo risk advisor: High (-18)")
+    elif prisk == "medium":
+        score -= 8
+        reasons.append("Pendo risk advisor: Medium (-8)")
+
     score = max(0, min(100, round(score)))
     band = "green" if score >= 75 else "amber" if score >= 50 else "red"
     return {"score": score, "band": band, "reasons": reasons}
