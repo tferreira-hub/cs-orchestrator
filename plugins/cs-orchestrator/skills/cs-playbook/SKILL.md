@@ -26,7 +26,7 @@ Trigger a **Defensive Workflow** task when ANY of:
 - multi-signal risk: a **support ticket spike** (tickets_last_7d >= 2x tickets_prev_7d, on a PRIMARY instance) AND a **usage drop** (logins_last_7d <= 0.6x logins_prev_7d), OR
 - an open **Sev-1** on a primary instance.
 Action: root-cause analysis + executive outreach + internal escalation. SLA: acknowledge & initiate within 24h.
-- **Scaled** accounts: do NOT create a manual CSM task for routine risk, only escalate if churn_score >= 0.85 (true exception).
+- **Scaled** accounts: do NOT create a manual CSM task for routine risk, stale usage, churn status, or Pendo advisory alone. Escalate only if churn_score >= 0.85 or an open Sev-1 creates a true exception.
 
 ## MUST_EXPAND, Expansion triggers
 Flag an **upsell conversation** task (Strategic) when:
@@ -50,6 +50,20 @@ CSMs are NOT debt collectors.
 
 ## Contact hygiene gate
 If `hubspot.contacts` is missing any of {Executive Sponsor, Primary Champion, Finance Contact} for a **Strategic** account, add a low-priority **MUST_USE** data-hygiene task ("tag missing contact roles"), required for automation accuracy (WoW §5).
+
+## MUST_USE, Adoption and onboarding
+Adoption and onboarding are operational work, not merely dashboard fields.
+- Strategic accounts: create a Priority-5 intervention when there has been no product visit for 14+ days, active users are below 60%, key feature adoption is below 50%, or onboarding is stalled/blocked/at-risk.
+- Scaled accounts: route the same signals to the automated adoption program; do not create a manual CSM adoption task from stale usage alone. Create a CSM exception only when the automated flow escalates. Do not create routine manual contact-hygiene tasks for Scaled accounts.
+- Use the live Pendo metadata mappings when configured. If a metric is unavailable, report a data gap and do not treat it as zero.
+- Rocket Lane onboarding fields are optional until the connector is configured; missing onboarding data must remain visible as a source gap.
+
+## Payment automation contract
+The CS platform does not mutate Stripe or suspend service. It emits a governed handoff:
+- days 1-14 -> `automated_dunning`, no CSM task;
+- Day 15+ Strategic high-ARR -> `payment_risk_escalation`, with the existing CSM task;
+- Day 15+ Scaled -> `auto_suspend`, no CSM task.
+The billing/ERP workflow owns execution; the platform records the decision and provenance.
 
 ## Output contract
 Produce a **prioritised task queue** (Priority 1 = MUST_PROTECT risk with 24h SLA first, then Day-15 payment, then expansion, then renewal cadence, then hygiene). For each task include:

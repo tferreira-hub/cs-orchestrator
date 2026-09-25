@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "cs-stack": {
+      "type": "stdio",
+      "command": "python3",
+      "env": {
+        "CS_CSM_OWNER": "Chris Coombs"
+      },
+      "args": [
+        "/Users/tferreira/github/cs-orchestrator/plugins/cs-orchestrator/mcp-servers/cs_stack_server.py"
+      ]
+    }
+  }
+}

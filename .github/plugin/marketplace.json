@@ -4,7 +4,7 @@
     "name": "The Observers"
   },
   "metadata": {
-    "description": "Helm CS Platform harness: MCP tools over the CS stack, the cs-orchestrator agent, the cs-playbook rules skill, and multi-instance suppression + grounding hooks.",
+    "description": "Helm CS Platform harness: live/read-only MCP tools over HubSpot, Zendesk, Stripe, Pendo, Jiminny, and Redshift churn; the cs-orchestrator agent, cs-playbook rules skill, deterministic queue validation, and feedback hooks.",
     "version": "1.0.0"
   },
   "plugins": [
@@ -12,7 +12,7 @@
       "name": "cs-orchestrator",
       "source": "./plugins/cs-orchestrator",
       "description": "Operationalises the Customer Success Ways of Working as an agent harness.",
-      "version": "1.0.0"
+      "version": "1.4.41"
     }
   ]
 }

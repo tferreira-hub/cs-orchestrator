@@ -36,7 +36,7 @@ def normalise(account_ref: str) -> str:
 def same_account(a: str, b: str) -> bool:
     """True if two source values refer to the same tenant (ignores instance suffix)."""
     pa, pb = parse(a), parse(b)
-    return bool(pa and pb and pa["shard"] == pb["shard"] and pa["tenant"] == pb["tenant"]) \
+    return bool(pa and pb and pa["tenant"] == pb["tenant"]) \
         or normalise(a) == normalise(b)
 
 

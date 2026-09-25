@@ -1,0 +1,8 @@
+{
+  "name": "cs-orchestrator",
+  "version": "1.4.41",
+  "description": "Operationalises the Customer Success Ways of Working as a governed multi-agent harness.",
+  "author": {
+    "name": "The Observers"
+  }
+}

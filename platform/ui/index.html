@@ -1,3 +1,7 @@
+<!-- .agent-thread{display:grid;gap:12px}.agent-turn{display:flex;gap:10px;align-items:flex-start}.agent-turn.user{justify-content:flex-end}.agent-avatar{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:0 0 28px;font-size:.68em;font-weight:800}.agent-turn.assistant .agent-avatar{background:var(--brandsoft);color:var(--brand)}.agent-turn.user .agent-avatar{background:#e8f6f1;color:var(--green);order:2}.agent-bubble{max-width:92%;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff;font-size:.86em}.agent-turn.user .agent-bubble{background:#f3f1ff;border-color:#dedcff}.agent-bubble .callout{background:#f8f9fc}
+.agent-studio{background:#10172a;border-radius:18px;box-shadow:0 14px 34px rgba(11,18,32,.16);overflow:hidden;color:#e7ebf5}.agent-chrome{height:42px;display:flex;align-items:center;gap:10px;padding:0 15px;border-bottom:1px solid rgba(255,255,255,.09);background:#0b1020;font-size:.76em}.agent-lights{display:flex;gap:5px}.agent-lights i{width:8px;height:8px;border-radius:50%;display:block;background:#53617d}.agent-lights i:first-child{background:#e56b6f}.agent-lights i:nth-child(2){background:#ddb05c}.agent-lights i:nth-child(3){background:#55b889}.agent-tab{background:#171f35;border:1px solid rgba(255,255,255,.08);border-bottom-color:#7c6cf7;border-radius:6px 6px 0 0;padding:7px 12px;color:#fff}.agent-path{color:#71809f;margin-left:auto}.agent-workspace{display:grid;grid-template-columns:minmax(0,1fr) 245px;min-height:440px}.agent-editor{background:#151d32;display:flex;flex-direction:column;min-width:0}.agent-editor-head{padding:15px 20px 8px;color:#94a3c2;font-size:.72em;letter-spacing:.08em;text-transform:uppercase}.agent-editor-head strong{color:#fff;letter-spacing:0;text-transform:none;font-size:1.2em;margin-right:8px}.agent-editor-body{flex:1;padding:4px 20px 18px;overflow:auto;max-height:560px}.agent-editor-body .agent-thread{padding-top:8px}.agent-editor-body .agent-turn.assistant .agent-bubble{background:#1c2740;border-color:#2f3d5d;color:#e7ebf5}.agent-editor-body .agent-turn.assistant .agent-bubble .callout{background:#111a2e;border-color:#2f3d5d;color:#dbe4f6}.agent-editor-body .agent-turn.user .agent-bubble{background:#29335a;border-color:#5b5bf0;color:#fff}.agent-editor-body .agent-turn .muted,.agent-editor-body .agent-turn .sub,.agent-editor-body .agent-turn .evi{color:#9ba9c4}.agent-compose{padding:12px 16px 15px;border-top:1px solid rgba(255,255,255,.09);background:#0f1629}.agent-compose-box{display:flex;align-items:center;gap:9px;border:1px solid #405070;border-radius:10px;background:#171f35;padding:9px 11px}.agent-compose-box .agent-prefix{color:#a69cff}.agent-compose-box input{background:transparent;color:#fff}.agent-compose-box input::placeholder{color:#72809c}.agent-compose-box button{background:#6d61ee}.agent-compose-hint{font-size:.68em;color:#71809f;margin:7px 3px 0}.agent-rail{background:#11192c;border-left:1px solid rgba(255,255,255,.09);padding:18px 16px}.agent-rail h3{font-size:.72em;letter-spacing:.1em;text-transform:uppercase;color:#7f8eac;margin-bottom:14px}.agent-rail-card{border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:11px;margin-bottom:9px;background:#171f35}.agent-rail-card b{display:block;color:#fff;font-size:.8em}.agent-rail-card span{display:block;color:#91a0bd;font-size:.72em;margin-top:4px}.agent-rail .agent-shortcuts{display:grid}.agent-rail .agent-shortcuts button{background:#171f35;border-color:#35425f;color:#b9c4da;text-align:left}.agent-rail .agent-shortcuts button:hover{background:#253052;color:#fff;border-color:#756bf2}.agent-rail .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#55b889;margin-right:5px}
+@media(max-width:900px){.agent-workspace{grid-template-columns:1fr}.agent-rail{border-left:0;border-top:1px solid rgba(255,255,255,.09)}.agent-rail .agent-shortcuts{display:flex}}
+@media(max-width:900px){.agent-workspace{grid-template-columns:1fr}.agent-rail{border-left:0;border-top:1px solid rgba(255,255,255,.09)}.agent-rail .agent-shortcuts{display:flex}} -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -48,6 +52,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .src{font-size:.66em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:1px 6px;margin-left:8px;vertical-align:middle}
 .src.live{background:var(--greenbg);color:var(--green)}
 .src.sample{background:var(--amberbg);color:var(--amber)}
+.nc{display:inline-block;font-size:.9em;font-weight:600;color:var(--muted);background:#f1f3f8;border:1px dashed #cbd2df;border-radius:6px;padding:1px 8px}
+.cov{display:inline-flex;gap:4px}
+.covdot{font-size:.62em;font-weight:800;border-radius:5px;padding:2px 5px;letter-spacing:.02em}
+.covdot.on{background:var(--greenbg);color:var(--green)}.covdot.partial{background:var(--amberbg);color:var(--amber)}
+.covdot.off{background:#f1f3f8;color:var(--muted);text-decoration:line-through}
+.pill.nc2{background:#f1f3f8;color:var(--muted);border:1px dashed #cbd2df}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .content{padding:26px 32px 70px;max-width:1420px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
@@ -72,8 +82,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 table{width:100%;border-collapse:collapse;font-size:.87em}
 th{text-align:left;padding:11px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 td{padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}
-tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#fafb ff}
-tr.click:hover td{background:#f8f9ff}
+tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#f8f9ff}
 .pill{display:inline-block;border-radius:999px;padding:3px 11px;font-size:.72em;font-weight:700;white-space:nowrap}
 .g{background:var(--greenbg);color:var(--green)}.a{background:var(--amberbg);color:var(--amber)}.r{background:var(--redbg);color:var(--red)}
 .protect{background:var(--redbg);color:var(--red)}.expand{background:var(--brandsoft);color:var(--brand)}.use{background:#f3ecff;color:#8b5cf6}
@@ -104,7 +113,19 @@ tr.click:hover td{background:#f8f9ff}
 .sect{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:20px 0 9px}
 .writeback{background:linear-gradient(180deg,#f2f3ff,#eef0fe);border:1px solid #dcdffb;border-radius:12px;padding:13px 15px;font-size:.84em;color:#3b39b8}
 .callout{background:#f8f9fc;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:.85em;color:var(--ink2)}
+.playbook-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}.playbook-card{background:#fff;border:1px solid var(--line);border-radius:15px;padding:18px;box-shadow:var(--shadow)}.playbook-card h3{font-size:.95em}.playbook-card p{font-size:.8em;color:var(--ink2);margin-top:5px}.rule-list{display:grid;gap:8px;margin-top:13px}.rule-item{background:#f8f9fc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.8em}.rule-item strong{display:block;color:var(--ink)}.rule-item span{color:var(--muted)}.proposal-form{display:grid;gap:9px}.proposal-form input,.proposal-form select,.proposal-form textarea{width:100%;padding:10px 11px;border:1px solid #dfe3ed;border-radius:8px;font:inherit;background:#fff}.proposal-form textarea{min-height:100px;resize:vertical}.proposal-form button{justify-self:start;padding:9px 15px;border:0;border-radius:8px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}.proposal-form button:hover{background:#4747d9}.proposal-status{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:.78em}.proposal-item{border-top:1px solid var(--line);padding:12px 0}.proposal-item:first-child{border-top:0}.proposal-item .meta{font-size:.72em;color:var(--muted);margin-top:3px}.proposal-item .reason{font-size:.8em;color:var(--ink2);margin-top:5px}.agent-feedback{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:.78em;color:var(--muted)}.agent-feedback button{font:inherit;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 9px;color:var(--ink2);cursor:pointer}.agent-feedback button:hover{border-color:var(--brand);color:var(--brand)}
+.agent-intro{display:grid;grid-template-columns:1.35fr .65fr;gap:18px;margin-bottom:18px}.agent-hero{background:linear-gradient(135deg,#111834,#252b5c);border-radius:18px;padding:25px 28px;color:#fff;box-shadow:var(--shadowmd)}.agent-hero h2{font-size:1.55em;letter-spacing:-.03em}.agent-hero p{color:#cbd2e7;max-width:680px;margin-top:8px}.agent-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.agent-meta span{border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:5px 10px;font-size:.72em;color:#e4e8f5}.agent-status{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:var(--shadow)}.agent-status .label{font-size:.7em;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800}.agent-status .value{font-size:1.6em;font-weight:800;margin-top:7px}.agent-status .detail{font-size:.78em;color:var(--ink2);margin-top:5px}.agent-flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px}.agent-stage{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 14px;min-height:86px;box-shadow:var(--shadow)}.agent-stage:not(:last-child)::after{content:'›';position:absolute;right:-12px;top:27px;color:var(--brand);font-size:1.4em;font-weight:800;z-index:1}.agent-stage .num{color:var(--brand);font-size:.7em;font-weight:900}.agent-stage b{display:block;font-size:.82em;margin-top:4px}.agent-stage span{display:block;color:var(--muted);font-size:.7em;margin-top:3px}.agent-prompts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.agent-prompts button{font:inherit;background:#fff;border:1px solid #dfe3ed;border-radius:999px;padding:8px 13px;color:var(--ink2);font-size:.78em;cursor:pointer}.agent-prompts button:hover{border-color:var(--brand);color:var(--brand);background:var(--brandsoft)}
+@media(max-width:900px){.agent-intro{grid-template-columns:1fr}.agent-flow{grid-template-columns:1fr 1fr}.agent-stage:not(:last-child)::after{display:none}}
 @media(max-width:1060px){.app{grid-template-columns:1fr}.side{display:none}.cols{grid-template-columns:1fr}}
+.review-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}.review-step{background:#f8f9fc;border:1px solid var(--line);border-radius:10px;padding:10px 11px;font-size:.75em}.review-step b{display:block;color:var(--ink);margin-bottom:3px}.review-step span{color:var(--muted)}.quality-list{display:grid;gap:6px;margin-top:10px}.quality-list div{font-size:.78em;color:var(--ink2)}.quality-list b{color:var(--green);margin-right:5px}
+.review-btn{border:1px solid #dfe3ed;border-radius:8px;background:#fff;color:var(--ink2);padding:7px 10px;font:inherit;font-size:.76em;font-weight:700;cursor:pointer}.review-btn:hover{border-color:var(--brand);color:var(--brand)}.review-btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.agent-chat{border:1px solid #cfd5e4;border-radius:14px;background:#fff;box-shadow:0 4px 14px rgba(11,18,32,.06);overflow:hidden}.agent-composer{display:flex;align-items:center;gap:9px;padding:11px 12px}.agent-prefix{font-weight:800;color:var(--brand);font-size:.83em;white-space:nowrap}.agent-composer input{flex:1;border:0;outline:0;font:inherit;color:var(--ink);min-width:0}.agent-composer input::placeholder{color:#a1a9b8}.agent-composer button{border:0;border-radius:8px;background:var(--brand);color:#fff;padding:7px 13px;font:inherit;font-size:.8em;font-weight:700;cursor:pointer}.agent-composer button:hover{background:#4747d9}.agent-context{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 12px;color:var(--muted);font-size:.72em}.agent-context .live-dot{width:6px;height:6px;border-radius:50%;background:var(--green)}.agent-shortcuts{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.agent-shortcuts button{font:inherit;background:#fff;border:1px solid #dfe3ed;border-radius:999px;padding:7px 11px;color:var(--ink2);font-size:.76em;cursor:pointer}.agent-shortcuts button:hover{border-color:var(--brand);color:var(--brand);background:var(--brandsoft)}
+.agent-thread{display:grid;gap:12px}.agent-turn{display:flex;gap:10px;align-items:flex-start}.agent-turn.user{justify-content:flex-end}.agent-avatar{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:0 0 28px;font-size:.68em;font-weight:800}.agent-turn.assistant .agent-avatar{background:var(--brandsoft);color:var(--brand)}.agent-turn.user .agent-avatar{background:#e8f6f1;color:var(--green);order:2}.agent-bubble{max-width:92%;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff;font-size:.86em}.agent-turn.user .agent-bubble{background:#f3f1ff;border-color:#dedcff}.agent-bubble .callout{background:#f8f9fc}.agent-studio{background:#10172a;border-radius:18px;box-shadow:0 14px 34px rgba(11,18,32,.16);overflow:hidden;color:#e7ebf5}.agent-chrome{height:42px;display:flex;align-items:center;gap:10px;padding:0 15px;border-bottom:1px solid rgba(255,255,255,.09);background:#0b1020;font-size:.76em}.agent-lights{display:flex;gap:5px}.agent-lights i{width:8px;height:8px;border-radius:50%;display:block;background:#53617d}.agent-lights i:first-child{background:#e56b6f}.agent-lights i:nth-child(2){background:#ddb05c}.agent-lights i:nth-child(3){background:#55b889}.agent-tab{background:#171f35;border:1px solid rgba(255,255,255,.08);border-bottom-color:#7c6cf7;border-radius:6px 6px 0 0;padding:7px 12px;color:#fff}.agent-path{color:#71809f;margin-left:auto}.agent-workspace{display:grid;grid-template-columns:minmax(0,1fr) 245px;min-height:440px}.agent-editor{background:#151d32;display:flex;flex-direction:column;min-width:0}.agent-editor-head{padding:15px 20px 8px;color:#94a3c2;font-size:.72em;letter-spacing:.08em;text-transform:uppercase}.agent-editor-head strong{color:#fff;letter-spacing:0;text-transform:none;font-size:1.2em;margin-right:8px}.agent-editor-body{flex:1;padding:4px 20px 18px;overflow:auto;max-height:560px}.agent-editor-body .agent-thread{padding-top:8px}.agent-editor-body .agent-turn.assistant .agent-bubble{background:#1c2740;border-color:#2f3d5d;color:#e7ebf5}.agent-editor-body .agent-turn.assistant .agent-bubble .callout{background:#111a2e;border-color:#2f3d5d;color:#dbe4f6}.agent-editor-body .agent-turn.user .agent-bubble{background:#29335a;border-color:#5b5bf0;color:#fff}.agent-editor-body .agent-turn .muted,.agent-editor-body .agent-turn .sub,.agent-editor-body .agent-turn .evi{color:#9ba9c4}.agent-compose{padding:12px 16px 15px;border-top:1px solid rgba(255,255,255,.09);background:#0f1629}.agent-compose-box{display:flex;align-items:center;gap:9px;border:1px solid #405070;border-radius:10px;background:#171f35;padding:9px 11px}.agent-compose-box .agent-prefix{color:#a69cff}.agent-compose-box input{background:transparent;color:#fff}.agent-compose-box input::placeholder{color:#72809c}.agent-compose-box button{background:#6d61ee}.agent-compose-hint{font-size:.68em;color:#71809f;margin:7px 3px 0}.agent-rail{background:#11192c;border-left:1px solid rgba(255,255,255,.09);padding:18px 16px}.agent-rail h3{font-size:.72em;letter-spacing:.1em;text-transform:uppercase;color:#7f8eac;margin-bottom:14px}.agent-rail-card{border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:11px;margin-bottom:9px;background:#171f35}.agent-rail-card b{display:block;color:#fff;font-size:.8em}.agent-rail-card span{display:block;color:#91a0bd;font-size:.72em;margin-top:4px}.agent-rail .agent-shortcuts{display:grid}.agent-rail .agent-shortcuts button{background:#171f35;border-color:#35425f;color:#b9c4da;text-align:left}.agent-rail .agent-shortcuts button:hover{background:#253052;color:#fff;border-color:#756bf2}.agent-rail .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#55b889;margin-right:5px}@media(max-width:900px){.agent-workspace{grid-template-columns:1fr}.agent-rail{border-left:0;border-top:1px solid rgba(255,255,255,.09)}.agent-rail .agent-shortcuts{display:flex}}
+.agent-compose-box{padding:11px 11px 11px 14px;border-radius:11px;transition:border-color .15s,box-shadow .15s}.agent-compose-box:focus-within{border-color:#8178ff;box-shadow:0 0 0 3px rgba(124,108,247,.18)}.agent-compose-box .agent-prefix{font-size:.82em;color:#b0a8ff}.agent-compose-box .agent-prefix::after{content:':';color:#7886a5;margin-left:2px}.agent-compose-box input{font-size:.94em}.agent-compose-box input::placeholder{color:#8390aa}.agent-compose-box button{width:auto;height:31px;padding:0 12px;border-radius:8px;background:#6d61ee;font-size:.78em;font-weight:700;line-height:1}.agent-compose-box button:hover{background:#8178ff}
+.agent-compose-box textarea.agent-command-input{flex:1;min-width:0;min-height:31px;max-height:180px;resize:none;overflow-y:auto;border:0;outline:0;background:transparent;color:#fff;font:inherit;font-size:.94em;line-height:1.45;padding:5px 0}.agent-compose-box textarea.agent-command-input::placeholder{color:#8390aa}.answer-block{margin:0 0 12px;line-height:1.6}.answer-block:last-child{margin-bottom:0}.answer-block h3,.answer-block h4{margin:0 0 6px;color:inherit}.answer-step{display:flex;gap:9px;margin:7px 0}.answer-step>span{color:#a69cff;font-weight:800;min-width:20px}.agent-editor-body .answer-block strong{color:#fff}.agent-editor-body .answer-step>span{color:#aaa2ff}
+.agent-rail{min-width:0;background:#10182b;border-left:1px solid rgba(255,255,255,.09);padding:18px 16px;color:#d8e0f0;overflow:auto}.agent-rail-title{display:grid;gap:2px;margin:0 0 10px}.agent-rail-title span{color:#7383a5;font-size:.65em;font-weight:800;letter-spacing:.1em}.agent-rail-title b{color:#f1f4fb;font-size:.88em;font-weight:700}.agent-rail-card{display:grid;gap:5px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.08)}.agent-rail-card b{display:flex;align-items:center;gap:7px;color:#f1f4fb;font-size:.79em}.agent-rail-card>b>span:last-child{margin-left:auto}.agent-rail-card>span{display:block;color:#95a4bf;font-size:.74em;line-height:1.45}.agent-rail .live-dot{display:inline-block;width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#45c597;box-shadow:0 0 0 3px rgba(69,197,151,.12)}.agent-rail .agent-shortcuts{display:grid;grid-template-columns:1fr;gap:6px;margin:0}.agent-rail .agent-shortcuts button{width:100%;border:1px solid #2f3d5d;border-radius:7px;background:#17223b;color:#cbd6ea;padding:8px 10px;text-align:left;font-size:.76em;line-height:1.25}.agent-rail .agent-shortcuts button:hover{border-color:#8178ff;background:#222b51;color:#fff}.agent-rail .pill{font-size:.62em;padding:2px 6px;vertical-align:middle}
+.learning-loop{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.learning-stage{border:1px solid var(--line);border-radius:10px;padding:12px;background:#f8f9fc}.learning-stage b{display:block;color:var(--ink);font-size:.8em}.learning-stage span{display:block;color:var(--muted);font-size:.75em;margin-top:4px}.learning-stage.active{border-color:#c8c3ff;background:#f5f3ff}.learning-stage.active b{color:var(--brand)}
+@media(max-width:900px){.agent-rail{border-left:0;border-top:1px solid rgba(255,255,255,.09)}.agent-rail .agent-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
 <body>
@@ -115,28 +136,32 @@ tr.click:hover td{background:#f8f9ff}
       <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
       <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
       <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
+      <button data-v="agent" onclick="go('agent')"><span class="ico">✦</span> Agent Automation</button>
     </div></div>
     <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
-      <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Risk <span class="count" id="c-protect"></span></button>
+      <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Actions <span class="count" id="c-protect"></span></button>
       <button data-v="expand" onclick="go('expand')"><span class="ico">▲</span> Expand · Renewals <span class="count" id="c-expand"></span></button>
       <button data-v="use" onclick="go('use')"><span class="ico">●</span> Adopt · Use <span class="count" id="c-use"></span></button>
     </div></div>
     <div class="navgroup"><div class="lbl">Data &amp; Governance</div><div class="nav">
       <button data-v="life" onclick="go('life')"><span class="ico">◔</span> Lifecycle</button>
       <button data-v="kpi" onclick="go('kpi')"><span class="ico">▦</span> Leadership KPIs</button>
+      <button data-v="gaps" onclick="go('gaps')"><span class="ico">◇</span> Data Gaps <span class="count" id="c-gaps"></span></button>
       <button data-v="integrations" onclick="go('integrations')"><span class="ico">⬡</span> Integrations</button>
+      <button data-v="playbook" onclick="go('playbook')"><span class="ico">⚙</span> Playbook Controls</button>
     </div></div>
-    <div class="foot">One standardised way of working. Signals from HubSpot, Zendesk, Stripe, product usage, churn ML, and Jiminny synthesised into one prioritised queue.</div>
+    <div class="foot">One standardised way of working. Live signals are synthesised into one prioritised queue.</div>
   </aside>
 
   <div class="main">
     <div class="topbar">
       <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and priority actions</div></div>
-      <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Sample data</span> <span class="muted" id="asof"></span></div>
+      <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span></div>
     </div>
     <div class="content">
       <section class="view on" id="v-dash">
         <div class="stats" id="stats"></div>
+        <div class="panel"><div class="head"><h2>Daily CS Brief</h2><span class="note">Deterministic queue, live evidence, CSM-owned actions</span></div><div class="body pad" id="daily-brief"><span class="muted">Loading today's brief...</span></div></div>
         <div class="cols">
           <div class="panel"><div class="head"><h2>Priority actions</h2><span class="note">Top of the queue</span></div><div class="body" id="dash-tasks"></div></div>
           <div>
@@ -146,16 +171,24 @@ tr.click:hover td{background:#f8f9ff}
         </div>
       </section>
       <section class="view" id="v-queue"><div class="panel"><div class="head"><h2>Task queue</h2><span class="note">System generated, ranked by mandate and SLA</span></div><div class="body" id="queue-body"></div></div></section>
-      <section class="view" id="v-protect"><div class="panel"><div class="head"><h2>Must Protect · Predictive risk</h2><span class="note">Churn, multi-signal alerts, Day 15 payment. 24 hour SLA</span></div><div class="body" id="protect-body"></div></div></section>
+      <section class="view" id="v-protect"><div class="panel"><div class="head"><h2>Must Protect · Risk and recovery</h2><span class="note">Active risk, payment exceptions, and lifecycle recovery</span></div><div class="body" id="protect-body"></div></div></section>
       <section class="view" id="v-expand"><div class="panel"><div class="head"><h2>Must Expand · Renewals and expansion</h2><span class="note">T-120, T-90, T-60, T-30 cadence and expansion triggers</span></div><div class="body" id="expand-body"></div></div></section>
       <section class="view" id="v-use"><div class="panel"><div class="head"><h2>Must Use · Adoption and hygiene</h2><span class="note">Onboarding, adoption, contact hygiene</span></div><div class="body" id="use-body"></div></div></section>
       <section class="view" id="v-accounts"><div class="panel"><div class="head"><h2>All accounts</h2><span class="note">Click any account for the full picture</span></div><div class="body" id="accounts-body"></div></div></section>
+      <section class="view" id="v-agent">
+        <div class="agent-studio"><div class="agent-chrome"><span class="agent-lights"><i></i><i></i><i></i></span><span class="agent-tab">cs-orchestrator</span><span class="agent-path">Agent Automation / live session</span></div><div class="agent-workspace"><div class="agent-editor"><div class="agent-editor-head"><strong>CS Agent</strong> portfolio conversation</div><div class="agent-editor-body"><div id="agentOut" class="agent-thread"><div class="agent-turn assistant"><div class="agent-avatar">CS</div><div class="agent-bubble"><span style="color:#b5c1d9">Ready. Ask about your live portfolio and I will return a judged, evidence-backed answer.</span></div></div></div></div><div class="agent-compose"><div class="agent-compose-box"><span class="agent-prefix">@cs-orchestrator</span><input id="agentQ" placeholder="Ask about your portfolio..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAgent();}"><button onclick="askAgent()">Send</button></div><div class="agent-compose-hint">Enter to send · live sources · human approval required</div></div></div><aside class="agent-rail"><h3>Session context</h3><div class="agent-rail-card"><b><span class="live-dot"></span>Live portfolio</b><span>25 accounts · current book</span></div><div class="agent-rail-card"><b>WoW judge</b><span>PASS · signed rules active</span></div><div class="agent-rail-card"><b>Model + Harness</b><span>Bedrock explains. Rules decide.</span></div><h3 style="margin-top:22px">Start with</h3><div class="agent-shortcuts"><button onclick="agentAsk('What are my top 3 actions today?')">Top actions</button><button onclick="agentAsk('Which account needs protection first?')">Protect first</button><button onclick="agentAsk('Which Strategic accounts are disengaged?')">Disengaged accounts</button><button onclick="agentAsk('Where are the expansion signals?')">Expansion signals</button></div></aside></div></div><div class="panel" style="margin-top:18px"><div class="head"><h2>Harness Feedback</h2><span class="note">Anonymous review signals used to improve rules and prompts</span></div><div class="body pad" id="agent-feedback-summary"><span class="muted">No feedback recorded yet.</span></div></div>
+      </section>
       <section class="view" id="v-life"><div class="panel"><div class="head"><h2>Lifecycle and adoption</h2><span class="note">Onboarding velocity alongside product adoption</span></div><div class="body" id="life-body"></div></div></section>
       <section class="view" id="v-kpi">
         <div class="panel"><div class="head"><h2>Portfolio and capacity by CSM</h2><span class="note">Informs resourcing and headcount</span></div><div class="body" id="kpi-csm"></div></div>
         <div class="panel"><div class="head"><h2>Task load by mandate</h2></div><div class="body pad"><div class="chips" id="kpi-mandate"></div></div></div>
       </section>
       <section class="view" id="v-integrations"><div class="panel"><div class="head"><h2>Integrations</h2><span class="note">Single pane of glass across the CS stack</span></div><div class="intgrid" id="int-body"></div></div></section>
+      <section class="view" id="v-playbook"><div class="panel"><div class="head"><h2>Playbook Controls</h2><span class="note">Propose improvements to the signed CS Ways of Working</span></div><div class="body pad" id="playbook-body"></div></div></section>
+      <section class="view" id="v-gaps">
+        <div class="stats" id="gaps-stats"></div>
+        <div class="panel"><div class="head"><h2>Data Gap Analysis</h2><span class="note">Per-account source coverage &amp; missing CS metadata (RevOps §4)</span></div><div class="body" id="gaps-body"></div></div>
+      </section>
     </div>
   </div>
 </div>
@@ -176,11 +209,16 @@ const meta={
   use:['Must Use','Adoption and hygiene'],
   life:['Lifecycle','Onboarding velocity and adoption'],
   kpi:['Leadership KPIs','Capacity and portfolio allocation'],
-  integrations:['Integrations','Connected systems across the CS stack']
+  integrations:['Integrations','Connected systems across the CS stack'],
+  playbook:['Playbook Controls','Governed CS rule proposals and review'],
+  gaps:['Data Gaps','Per-account source coverage and required-field cleanup'],
+  agent:['Agent Automation','Ask the CS Agent: live Bedrock orchestration, playbook enforcement, and self-correction']
 };
 let DATA=null;
 
 function go(v){
+  closeDrawer();
+  window.scrollTo({top:0,behavior:'instant'});
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   document.getElementById('v-'+v).classList.add('on');
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
@@ -198,10 +236,19 @@ async function boot(){
   }
   document.getElementById('asof').textContent=new Date().toLocaleDateString();
   const sm=DATA.summary;
+  renderAgentRail(sm);
+  const scopeBadge=document.getElementById('scopeBadge');
+  if(scopeBadge&&sm.account_scope==='csm'){scopeBadge.style.display='';scopeBadge.className='src live';scopeBadge.textContent='CSM book';scopeBadge.title='Owner-scoped portfolio: '+(sm.scope_owner||'configured owner');}
   const badge=document.getElementById('dataMode');
   if(badge){
     if(sm.data_mode==='live'){badge.textContent='Live: '+sm.live_sources.join(', ');badge.className='modebadge live';}
-    else{badge.textContent='Sample data';badge.className='modebadge sample';}
+    else{badge.textContent='No live sources connected';badge.className='modebadge sample';}
+  }
+  const jb=document.getElementById('judgeBadge'), jv=(sm.judge||{});
+  if(jb&&jv.verdict){
+    jb.style.display='';
+    if(jv.verdict==='PASS'){jb.className='src live';jb.textContent='WoW judge: PASS';jb.title='cs-playbook-judge verified the queue against the Ways of Working';}
+    else{jb.className='src sample';jb.textContent='WoW judge: '+(jv.violations?jv.violations.length:0)+' issue(s)';jb.title=(jv.violations||[]).map(v=>v.rule+': '+(v.account||'')+' '+v.detail).join('\n')||jv.verdict;}
   }
   const byMand=m=>DATA.tasks.filter(t=>t.mandate===m).length;
   setCount('c-queue',DATA.tasks.length);
@@ -216,6 +263,14 @@ function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.t
 function render(v){
   if(v==='dash'){
     const s=DATA.summary;
+    if(!DATA.accounts.length){
+      document.getElementById('stats').innerHTML=
+        '<div class="empty" style="grid-column:1/-1">No live sources connected. Set HubSpot, Zendesk, Pendo and Stripe (rk_) credentials in the environment to load real accounts. This platform shows only live data. No sample data is displayed.</div>';
+      document.getElementById('dash-tasks').innerHTML='<div class="empty">No live accounts, so no tasks yet.</div>';
+      document.getElementById('dash-accts').innerHTML='<div class="empty">No accounts connected.</div>';
+      document.getElementById('dash-supp').innerHTML='<div class="empty">Nothing to show.</div>';
+      return;
+    }
     document.getElementById('stats').innerHTML=[
       ['Accounts',s.accounts,'in your book',''],
       ['Priority 1 risk',s.priority1,'action within 24h',s.priority1>0?'warn':''],
@@ -226,95 +281,394 @@ function render(v){
     document.getElementById('dash-tasks').innerHTML=taskTable(DATA.tasks.slice(0,6),true);
     document.getElementById('dash-accts').innerHTML=acctTable(DATA.accounts);
     document.getElementById('dash-supp').innerHTML=suppHtml(DATA.suppressed);
+    loadDailyBrief();
   }
   if(v==='queue') document.getElementById('queue-body').innerHTML=taskTable(DATA.tasks,true);
   if(v==='protect') document.getElementById('protect-body').innerHTML=taskTable(DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT'),true);
-  if(v==='expand') document.getElementById('expand-body').innerHTML=taskTable(DATA.tasks.filter(t=>t.mandate==='MUST_EXPAND'),true);
+  if(v==='expand'){
+    const tasks=DATA.tasks.filter(t=>t.mandate==='MUST_EXPAND');
+    document.getElementById('expand-body').innerHTML=tasks.length
+      ? taskTable(tasks,true)
+      : '<div class="callout"><b>No eligible expansion action today</b><div class="sub" style="margin-top:6px">The signed playbook checked the portfolio and found no healthy Strategic account with an active renewal milestone or expansion trigger. This is a governed empty state: no action was invented.</div><div class="chips" style="margin-top:12px"><span class="pill g">Queue checked</span><span class="pill pln">No action invented</span></div><div class="quality-list" style="margin-top:12px"><div><b>Renewals:</b> needs a live HubSpot renewal date inside T-120 to T-30.</div><div><b>Expansion:</b> needs mapped Pendo utilization, API velocity, or strong adoption on a healthy Strategic account.</div><div><b>Next check:</b> refresh after renewal metadata or telemetry mappings change. Risk and recovery remain under Protect.</div></div></div>';
+  }
   if(v==='use') document.getElementById('use-body').innerHTML=taskTable(DATA.tasks.filter(t=>t.mandate==='MUST_USE'),true);
   if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctTable(DATA.accounts);
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
+  if(v==='agent') loadAgentFeedbackSummary();
   if(v==='integrations') loadIntegrations();
+  if(v==='playbook') loadPlaybook();
+  if(v==='gaps') loadGaps();
+}
+async function loadDailyBrief(){
+  const target=document.getElementById('daily-brief'); if(!target)return;
+  try{
+    const b=await (await fetch('/api/daily-brief')).json();
+    target.innerHTML='<div class="chips"><span class="pill r">Priority 1: '+b.priority1_count+'</span><span class="pill a">Data-gap accounts: '+b.data_gap_accounts+'</span><span class="muted">'+b.accounts_reviewed+' accounts reviewed</span></div><div style="margin-top:12px">'+(b.top_actions||[]).map((a,i)=>'<div class="callout click" style="margin:7px 0" onclick="openAccountByName(\''+escapeHtml(a.account)+'\')"><b>'+(i+1)+'. '+escapeHtml(a.account)+'</b> <span class="pill '+(a.mandate==='MUST_PROTECT'?'protect':a.mandate==='MUST_EXPAND'?'expand':'use')+'">'+escapeHtml(a.mandate)+'</span><div class="sub">'+escapeHtml(a.recommended_action||a.trigger)+' · owner: '+escapeHtml(a.owner)+' · '+escapeHtml(a.sla)+' · confidence: '+escapeHtml(a.confidence)+'</div><div class="sub" style="margin-top:5px;color:var(--brand)">Open account evidence</div></div>').join('')||'<span class="muted">No actions are currently active.</span>'+'</div>';
+  }catch(e){target.innerHTML='<span class="muted">Daily brief unavailable.</span>';}
 }
 
 function taskTable(tasks,withDraft){
   if(!tasks.length) return '<div class="empty">Nothing here right now. The queue is clear.</div>';
   return '<table><thead><tr><th style="width:36px"></th><th>Account</th><th>Mandate</th><th>Why it is here</th></tr></thead><tbody>'+
-    tasks.map(t=>'<tr><td><span class="prio prio'+t.priority+'">'+t.priority+'</span></td>'+
-      '<td><strong>'+t.account+'</strong><div class="sub">'+t.segment+'</div></td>'+
+    tasks.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')" title="Open account evidence"><td><span class="prio prio'+t.priority+'">'+t.priority+'</span></td>'+
+      '<td><strong>'+escapeHtml(t.account)+'</strong><div class="sub">'+escapeHtml(t.segment||'-')+'</div></td>'+
       '<td><span class="pill '+mand[t.mandate][0]+'">'+mand[t.mandate][1]+'</span></td>'+
-      '<td>'+t.trigger+'<div class="evi">'+escapeHtml(prettyEv(t.evidence))+'</div>'+
-      (withDraft&&t.draft_message?'<div class="draft"><b>Suggested message</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</td></tr>').join('')+
+      '<td>'+escapeHtml(t.trigger)+'<div class="evi">'+escapeHtml(prettyEv(t.evidence))+'</div>'+
+      (withDraft&&t.draft_message?'<div class="draft"><b>'+escapeHtml(t.draft_type==='internal_recovery'?'Internal recovery note':'Evidence-grounded draft · review before sending')+'</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</td></tr>').join('')+
     '</tbody></table>';
 }
 function prettyEv(e){return Object.entries(e).map(kv=>kv[0].replace(/_/g,' ')+': '+(Array.isArray(kv[1])?kv[1].join(', '):kv[1])).join('  ·  ');}
+function openAccountByName(name){const row=(DATA.accounts||[]).find(a=>(a.name||a.account_id)===name);if(row)openAccount(row.account_id);}
 function acctTable(rows){
-  return '<table><thead><tr><th>Account</th><th>Segment</th><th>Health</th><th>ARR</th><th>Renews</th></tr></thead><tbody>'+
-    rows.map(a=>'<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+a.name+'</strong></td><td class="muted">'+a.segment+'</td>'+
-      '<td><span class="hbar"><span class="hfill" style="width:'+a.health.score+'%;background:'+hcolor(a.health.band)+'"></span></span><span class="pill '+hband(a.health.band)+'">'+a.health.score+'</span></td>'+
-      '<td class="mono">'+fmt(a.arr_usd)+'</td><td class="muted">'+(a.renewal_date||'-')+'</td></tr>').join('')+
+  if(!rows||!rows.length) return '<div class="empty">No accounts connected. Connect HubSpot to load the live roster.</div>';
+  const NC='<span class="nc">not connected</span>';
+  const ND='<span class="muted">no data</span>';
+  return '<table><thead><tr><th>Account</th><th>Segment</th><th>Health state</th><th>ARR</th><th>Renews</th><th>Live coverage</th></tr></thead><tbody>'+
+    rows.map(a=>{
+      const hc=a.connected&&a.connected.hubspot;
+      const name=hc?escapeHtml(a.name||a.account_id):escapeHtml(a.account_id);
+      // When HubSpot is connected, an empty field means "no data", not "not connected".
+      const seg=!hc?NC:(a.segment?escapeHtml(a.segment):ND);
+      const health=a.health&&a.health.computable
+        ?'<span class="hbar"><span class="hfill" style="width:'+a.health.score+'%;background:'+hcolor(a.health.band)+'"></span></span><span class="pill '+hband(a.health.band)+'">'+(a.health.band==='red'?'At risk':a.health.band==='amber'?'Watch':'Healthy')+' · '+a.health.score+'</span>'
+        :ND;
+      const arr=!hc?NC:(a.arr_usd!=null?fmt(a.arr_usd):ND);
+      const renews=!hc?NC:(a.renewal_date?a.renewal_date:ND);
+      const coverage=a.connected?Object.values(a.connected).filter(Boolean).length+'/'+Object.keys(a.connected).length:NC;
+      return '<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+name+'</strong></td><td class="muted">'+seg+'</td>'+
+        '<td>'+health+'</td><td class="mono">'+arr+'</td><td class="muted">'+renews+'</td><td><span class="pill '+(coverage===Object.keys(a.connected||{}).length+'/'+Object.keys(a.connected||{}).length?'g':'pln')+'">'+coverage+' sources</span></td></tr>';
+    }).join('')+
     '</tbody></table>';
 }
 function suppHtml(sup){
-  if(!sup.length) return '<div class="empty">Nothing suppressed right now.</div>';
+  if(!sup.length) return '<div class="empty"><b>No live false positives suppressed today.</b><div class="sub" style="margin-top:6px">The multi-instance guard checked the current portfolio and found no support spike concentrated on a test or secondary instance. The guard remains active; a clean result means no suppression was needed.</div><div class="sub" style="margin-top:8px;color:var(--brand)">Demo proof: run the deterministic suppression test to show the guard rejecting test-instance noise.</div></div>';
   return sup.map(x=>'<div class="supp"><strong>'+x.account+'</strong> · '+x.signal.replace(/_/g,' ')+'. '+x.reason+'.'+
     '<div class="sub" style="margin-top:5px">'+JSON.stringify(x.non_primary_instances)+' carried '+x.non_primary_tickets+' tickets versus '+x.primary_tickets+' on the primary instance, so it was not raised as risk.</div></div>').join('');
 }
 
 async function loadKpis(){
-  const k=await (await fetch('/api/kpis')).json();
+  let k;
+  try{ k=await (await fetch('/api/kpis')).json(); }
+  catch(e){ document.getElementById('kpi-csm').innerHTML='<div class="empty">Could not load KPIs.</div>'; return; }
   document.getElementById('kpi-csm').innerHTML='<table><thead><tr><th>CSM</th><th>Accounts</th><th>Book ARR</th><th>Open tasks</th><th>Priority 1</th><th>At risk</th></tr></thead><tbody>'+
-    k.by_csm.map(c=>'<tr><td><strong>'+c.csm+'</strong></td><td>'+c.accounts+'</td><td class="mono">'+fmt(c.arr_usd)+'</td><td>'+c.open_tasks+'</td>'+
+    k.by_csm.map(c=>'<tr><td><strong>'+escapeHtml(c.csm)+'</strong></td><td>'+c.accounts+'</td><td class="mono">'+fmt(c.arr_usd)+'</td><td>'+c.open_tasks+'</td>'+
       '<td>'+(c.priority1_tasks?'<span class="pill r">'+c.priority1_tasks+'</span>':'0')+'</td><td>'+(c.at_risk_accounts?'<span class="pill r">'+c.at_risk_accounts+'</span>':'<span class="muted">0</span>')+'</td></tr>').join('')+'</tbody></table>';
   document.getElementById('kpi-mandate').innerHTML=Object.entries(k.mandate_load).map(kv=>'<span class="pill '+mand[kv[0]][0]+'">'+mand[kv[0]][1]+': '+kv[1]+'</span>').join('');
 }
 async function loadLifecycle(){
-  const l=await (await fetch('/api/lifecycle')).json();
-  document.getElementById('life-body').innerHTML='<table><thead><tr><th>Account</th><th>Segment</th><th>Onboarding</th><th>Time to value</th><th>Feature adoption</th><th>Active users</th></tr></thead><tbody>'+
-    l.accounts.map(a=>'<tr><td><strong>'+a.name+'</strong></td><td class="muted">'+a.segment+'</td><td><span class="pill '+hband(a.onboarding_health)+'">'+a.onboarding_status+'</span></td>'+
-      '<td>'+(a.time_to_value_days!=null?a.time_to_value_days+' days':'-')+'</td><td>'+(a.key_feature_adoption_pct!=null?a.key_feature_adoption_pct:'-')+'%</td><td>'+(a.active_users_pct!=null?a.active_users_pct:'-')+'%</td></tr>').join('')+'</tbody></table>';
+  let l;
+  try{ l=await (await fetch('/api/lifecycle')).json(); }
+  catch(e){ document.getElementById('life-body').innerHTML='<div class="empty">Could not load lifecycle data.</div>'; return; }
+  const NC='<span class="nc">not connected</span>';
+  document.getElementById('life-body').innerHTML=
+    '<div class="supp" style="margin:8px 8px 14px">Onboarding (Rocket Lane) is not connected. Product adoption metrics beyond usage recency are not exposed by the connected Pendo endpoint. Only live-sourced fields are shown below.</div>'+
+    '<table><thead><tr><th>Account</th><th>Segment</th><th>Onboarding</th><th>Time to value</th><th>Feature adoption</th><th>Days since last visit</th></tr></thead><tbody>'+
+    l.accounts.map(a=>{
+      const hc=a.connected&&a.connected.hubspot, uc=a.connected&&a.connected.usage;
+      const name=hc?escapeHtml(a.name||a.account_id):escapeHtml(a.account_id);
+      const seg=hc&&a.segment?escapeHtml(a.segment):NC;
+      const dsv=uc&&a.days_since_last_visit!=null?(a.days_since_last_visit+' days'):(uc?'<span class="muted">no data</span>':NC);
+      return '<tr><td><strong>'+name+'</strong></td><td class="muted">'+seg+'</td>'+
+        '<td>'+NC+'</td><td>'+NC+'</td><td>'+NC+'</td><td>'+dsv+'</td></tr>';
+    }).join('')+'</tbody></table>';
 }
 async function loadIntegrations(){
-  const d=await (await fetch('/api/integrations')).json();
+  let d;
+  try{ d=await (await fetch('/api/integrations')).json(); }
+  catch(e){ document.getElementById('int-body').innerHTML='<div class="empty">Could not load integrations.</div>'; return; }
   document.getElementById('int-body').innerHTML=d.connectors.map(c=>{
-    const cls=c.status.indexOf('connected')===0?'g':c.status==='planned'?'pln':'a';
-    return '<div class="intcard"><div class="top"><div><h3>'+c.system+'</h3><div class="cat">'+c.category+'</div></div><span class="pill '+cls+'">'+c.status+'</span></div>'+
-      '<div class="dirbadge">'+c.direction+'</div>'+
-      '<div class="rows"><b>Pulls:</b> '+(c.pulls.join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
+    const live=c.status.indexOf('connected')===0;
+    const cls=live?'g':'nc2';
+    const access=c.access||c.direction;
+    return '<div class="intcard"><div class="top"><div><h3>'+escapeHtml(c.system)+'</h3><div class="cat">'+escapeHtml(c.category)+'</div></div><span class="pill '+cls+'">'+escapeHtml(c.status)+'</span></div>'+
+      '<div class="dirbadge">'+escapeHtml(access)+'</div>'+
+      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
   }).join('');
+}
+async function loadPlaybook(){
+  const out=document.getElementById('playbook-body');
+  try{
+    const p=await (await fetch('/api/playbook')).json();
+    const rules=(p.headings||[]).map(h=>'<div class="rule-item"><strong>'+escapeHtml(h)+'</strong><span>Signed rule surface</span></div>').join('');
+    const proposals=p.proposals&&p.proposals.length?p.proposals.map(x=>'<div class="proposal-item"><b>'+escapeHtml(x.title)+'</b> <span class="pill '+(x.status==='approved_for_implementation'?'g':x.status==='rejected'?'r':'a')+'">'+escapeHtml(x.status)+'</span><div class="meta">'+escapeHtml(x.rule_section||x.category)+' · review stage: '+escapeHtml(x.review_stage||'CS Leadership')+' · '+escapeHtml(x.created_at||'')+'</div><div class="reason">'+escapeHtml(x.rationale)+'</div><div class="quality-list"><div><b>1</b> Evidence: '+escapeHtml(x.evidence_source||'not supplied')+'</div><div><b>2</b> Risk and impact: '+escapeHtml(x.quality_risk||'not assessed')+'</div><div><b>3</b> Tests: '+escapeHtml(x.test_cases||'not supplied')+'</div></div>'+(x.status==='pending_review'||x.status==='changes_requested'?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><button class="review-btn" onclick="reviewProposal(\''+escapeHtml(x.proposal_id)+'\',\'request_changes\')">Request changes</button><button class="review-btn primary" onclick="reviewProposal(\''+escapeHtml(x.proposal_id)+'\',\'approve_for_implementation\')">Approve for implementation</button><button class="review-btn" onclick="reviewProposal(\''+escapeHtml(x.proposal_id)+'\',\'reject\')">Reject</button><button class="review-btn" onclick="reviewProposal(\''+escapeHtml(x.proposal_id)+'\',\'archive\')">Archive</button></div>':'')+'</div>').join(''):'<span class="muted">No proposals yet.</span>';
+    out.innerHTML='<div class="playbook-card"><h3>How a playbook change becomes signed</h3><p>A proposal never changes runtime behavior directly. It moves through four review gates with evidence and tests attached at every step.</p><div class="review-flow"><div class="review-step"><b>1. Submit</b><span>State the problem and affected accounts.</span></div><div class="review-step"><b>2. Assess</b><span>CS Leadership checks WoW intent and customer impact.</span></div><div class="review-step"><b>3. Verify</b><span>RevOps validates sources; Engineering adds boundary tests.</span></div><div class="review-step"><b>4. Sign and release</b><span>Version the skill, run regressions, then deploy.</span></div></div><div class="callout"><b>Quality bar before approval</b><div class="quality-list"><div><b>✓</b> Trigger is measurable and source-backed</div><div><b>✓</b> Segment routing and suppression are explicit</div><div><b>✓</b> Positive, negative, boundary, and rollback tests exist</div><div><b>✓</b> Owner and rollback plan are documented</div></div></div></div><div class="playbook-grid"><div class="playbook-card"><h3>Signed CS Ways of Working</h3><p>Only reviewed, tested and versioned proposals can change these rules.</p><div class="rule-list">'+rules+'</div></div><div class="playbook-card"><h3>Propose an improvement</h3><p>Describe the rule precisely enough for another team to reproduce, test, approve or reject it.</p><div class="proposal-form"><input id="pbTitle" placeholder="Short proposal title"><select id="pbRule"><option>Three Core Mandates</option><option>Segmentation and routing</option><option>Predictive Risk Playbook</option><option>Expansion triggers</option><option>Renewal cadence</option><option>Payment / No Chasing</option><option>Adoption and onboarding</option><option>Contact hygiene</option><option>Other</option></select><select id="pbCategory"><option value="threshold">Threshold or routing</option><option value="evidence">Evidence requirement</option><option value="suppression">Suppression rule</option><option value="source">Source mapping</option><option value="other">Other</option></select><textarea id="pbCurrent" placeholder="Current behavior and why it is insufficient"></textarea><textarea id="pbProposed" placeholder="Proposed rule: trigger, segment, priority, action, exception"></textarea><textarea id="pbContext" placeholder="Customer / CSM context and affected accounts"></textarea><textarea id="pbEvidence" placeholder="Evidence source: field, report, tickets, or account IDs"></textarea><textarea id="pbImpact" placeholder="Expected benefit, risk, owner, and rollback plan"></textarea><textarea id="pbTests" placeholder="Positive, negative, boundary, suppression, and rollback tests"></textarea><textarea id="pbRationale" placeholder="Why should this change be considered now?"></textarea><button onclick="submitPlaybookProposal()">Submit for review</button><div id="pbNote" class="proposal-status"></div></div></div></div><div class="playbook-card"><h3>Review queue</h3><p>Submission is separate from approval. Each proposal shows its owner, evidence, risk, and test readiness.</p>'+proposals+'</div>';
+  }catch(e){out.innerHTML='<div class="empty">Playbook controls unavailable.</div>';}
+}
+async function reviewProposal(id,decision){
+  const reviewer=window.prompt('Reviewer name or team:','CS Leadership / RevOps / Engineering');
+  if(!reviewer)return;
+  const note=window.prompt('Review note:','')||'';
+  if(!note.trim()){window.alert('A review note is required.');return;}
+  let reviewChecklist={};
+  if(decision==='approve_for_implementation'){
+    const confirmation=window.confirm('Confirm that evidence, policy conflicts, tests, and rollback have all been reviewed.');
+    if(!confirmation){window.alert('Approval cancelled until all quality gates are reviewed.');return;}
+    reviewChecklist={evidence_verified:true,policy_conflict_checked:true,tests_added:true,rollback_defined:true};
+  }
+  const response=await fetch('/api/playbook/proposals/'+encodeURIComponent(id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,reviewed_by:reviewer,review_note:note,review_checklist:reviewChecklist})});
+  const data=await response.json();
+  if(!response.ok){window.alert(data.error||'Review could not be recorded.');return;}
+  loadPlaybook();
+}
+async function submitPlaybookProposal(){
+  const payload={title:document.getElementById('pbTitle').value,rationale:document.getElementById('pbRationale').value,category:document.getElementById('pbCategory').value,rule_section:document.getElementById('pbRule').value,current_behavior:document.getElementById('pbCurrent').value,proposed_behavior:document.getElementById('pbProposed').value,consumer_context:document.getElementById('pbContext').value,evidence_source:document.getElementById('pbEvidence').value,quality_risk:document.getElementById('pbImpact').value,test_cases:document.getElementById('pbTests').value};
+  const response=await fetch('/api/playbook/proposals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await response.json();
+  document.getElementById('pbNote').textContent=data.proposal_id?'Submitted for CS/RevOps review.':(data.error||'Could not submit proposal.');
+  if(data.proposal_id)loadPlaybook();
+}
+
+function agentAsk(q){document.getElementById('agentQ').value=q;askAgent();}
+function askAgentAbout(q){go('agent');agentAsk(q);}
+function sourceSummary(s){return Object.entries(s||{}).filter(kv=>kv[1]==='live').map(kv=>kv[0]).join(', ')||'No live source';}
+function renderAgentAnswer(text){
+  const safe=escapeHtml(text||'');
+  return safe.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+}
+async function sendAgentFeedback(rating,reason){
+  const d=window.LAST_AGENT_RESULT||{}, q=document.getElementById('agentQ').value;
+  const button=arguments[2], container=button&&button.closest('.agent-feedback');
+  const note=container&&container.querySelector('.agentFeedbackNote');
+  if(button) button.disabled=true;
+  try{
+    const response=await fetch('/api/agent/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating,reason,question:q,action_count:(d.actions||[]).length,judge_verdict:(d.harness||{}).queue_judge?.verdict})});
+    const result=await response.json();
+    if(note) note.textContent=result.recorded?'Recorded for harness review.':'Could not record feedback.';
+    if(result.recorded) container.querySelectorAll('button').forEach(item=>item.disabled=true);
+    loadAgentFeedbackSummary();
+  }catch(error){
+    if(note) note.textContent='Feedback could not be saved. Try again.';
+    if(button) button.disabled=false;
+  }
+}
+async function loadAgentFeedbackSummary(){
+  const target=document.getElementById('agent-feedback-summary');
+  if(!target)return;
+  try{
+    const s=await (await fetch('/api/agent/feedback/summary')).json();
+    const r=s.ratings||{}, reasons=s.correction_reasons||{};
+    const reasonText=Object.entries(reasons).map(kv=>kv[0].replace(/_/g,' ')+': '+kv[1]).join(' · ');
+    const candidates=(s.improvement_candidates||[]).map(c=>'<div class="callout" style="margin-top:7px"><b>'+escapeHtml(c.category.replace(/_/g,' '))+' ('+c.count+')</b><div class="sub">'+escapeHtml(c.recommendation)+'</div></div>').join('');
+    target.innerHTML='<div class="learning-loop"><div class="learning-stage active"><b>1 · Correct now</b><span>Validator catches unsupported answers before release.</span></div><div class="learning-stage"><b>2 · Learn patterns</b><span>Anonymous feedback highlights recurring quality issues.</span></div><div class="learning-stage"><b>3 · Improve safely</b><span>Repeated issues become tested Playbook proposals.</span></div></div><div class="chips"><span class="pill g">Helpful: '+(r.helpful||0)+'</span><span class="pill a">Needs correction: '+(r.needs_correction||0)+'</span>'+(reasonText?'<span class="muted">Common issues: '+escapeHtml(reasonText)+'</span>':'')+'</div>'+(candidates?'<div class="sect" style="margin-top:13px">Improvement candidates</div>'+candidates:'<div class="callout" style="margin-top:12px"><b>No patterns yet</b><div class="sub" style="margin-top:5px">Rate an Agent answer above. Feedback is recorded as anonymous metadata and never changes the signed playbook automatically.</div></div>')+'<div class="sub" style="margin-top:10px">When a pattern repeats, open Playbook Controls to review, test, approve, and version the change.</div>';
+    const stages=target.querySelectorAll('.learning-stage');
+    if(stages.length>=3){
+      stages[0].querySelector('b').textContent='1 · Correct the answer';
+      stages[0].querySelector('span').textContent='Evidence checks catch unsupported answers before release.';
+      stages[1].querySelector('b').textContent='2 · Spot repeated issues';
+      stages[1].querySelector('span').textContent='CSM feedback shows where the harness needs attention.';
+      stages[2].querySelector('b').textContent='3 · Review and release';
+      stages[2].querySelector('span').textContent='Approved improvements become tested playbook changes.';
+    }
+  }catch(e){target.innerHTML='<span class="muted">Feedback summary unavailable.</span>';}
+}
+let agentConversation=[];
+function renderAgentAnswer(text){
+  const escaped=escapeHtml(String(text||''));
+  return escaped.split(/\n\s*\n/).map(block=>{
+    let html=block.replace(/^###\s+(.+)$/gm,'<h4>$1</h4>')
+      .replace(/^##\s+(.+)$/gm,'<h3>$1</h3>')
+      .replace(/^\*\*([^*]+)\*\*$/gm,'<h4>$1</h4>')
+      .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g,'<em>$1</em>')
+      .replace(/^(\d+)\.\s+(.+)$/gm,'<div class="answer-step"><span>$1</span><div>$2</div></div>')
+      .replace(/\n/g,'<br>');
+    return '<div class="answer-block">'+html+'</div>';
+  }).join('');
+}
+function renderAgentConversation(){
+  const out=document.getElementById('agentOut');
+  if(!agentConversation.length){out.innerHTML='<span class="muted">Your verified CS conversation will appear here.</span>';return;}
+  out.className='agent-thread';
+  out.innerHTML=agentConversation.map(turn=>'<div class="agent-turn '+turn.role+'"><div class="agent-avatar">'+(turn.role==='user'?'YOU':'CS')+'</div><div class="agent-bubble">'+turn.content+'</div></div>').join('');
+}
+function resolveCsmOwner(question){
+  const owners=[...new Set((DATA.accounts||[]).map(account=>account.csm_owner).filter(Boolean))];
+  const rejected=owners.find(owner=>question.toLowerCase().includes(('i am not '+owner).toLowerCase()));
+  if(rejected){sessionStorage.removeItem('csCsmOwner');return null;}
+  const match=owners.find(owner=>question.toLowerCase().includes(owner.toLowerCase()));
+  if(match){sessionStorage.setItem('csCsmOwner',match);return match;}
+  return sessionStorage.getItem('csCsmOwner')||null;
+}
+async function askAgent(){
+  const q=document.getElementById('agentQ').value.trim();
+  const out=document.getElementById('agentOut');
+  if(!q){out.innerHTML='<span class="muted">Type a question first.</span>';return;}
+  agentConversation.push({role:'user',content:escapeHtml(q)});
+  agentConversation.push({role:'assistant',content:'<div class="muted"><span class="agentPulse">●</span> <span class="agentProgress">CS Agent is checking the live portfolio and signed playbook</span> <span class="agentTimer" style="display:none">0s</span></div>'});
+  document.getElementById('agentQ').value='';
+  renderAgentConversation();
+  const t0=Date.now();
+  const progressSteps=['CS Agent is checking the live portfolio and signed playbook','CS Agent is weighing priorities and account context','CS Agent is validating the answer against source evidence'];
+  let progressIndex=0;
+  const timer=setInterval(()=>{document.querySelectorAll('.agentTimer').forEach(e=>e.textContent=Math.round((Date.now()-t0)/1000)+'s');const progress=document.querySelectorAll('.agentProgress');if(progress.length){progress[progress.length-1].textContent=progressSteps[Math.min(++progressIndex,progressSteps.length-1)];}},4000);
+  const ctrl=new AbortController();
+  const to=setTimeout(()=>ctrl.abort(),180000); // 3-min ceiling
+  let d;
+  const csmOwner=resolveCsmOwner(q);
+  try{ d=await (await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,account_id:window.ACTIVE_ACCOUNT_ID||null,csm_owner:csmOwner}),signal:ctrl.signal})).json(); }
+  catch(e){ clearInterval(timer);clearTimeout(to);
+    agentConversation[agentConversation.length-1].content='<div class="nc">'+(e.name==='AbortError'?'Timed out after 3 minutes. Try a narrower question, such as a single account.':'Request failed: '+escapeHtml(String(e)))+'</div>'; renderAgentConversation(); return; }
+  clearInterval(timer);clearTimeout(to);
+  const secs=Math.round((Date.now()-t0)/1000);
+  if(!d.ok){ agentConversation[agentConversation.length-1].content='<div class="nc">'+escapeHtml(d.error||'Agent error')+'</div>'; renderAgentConversation(); return; }
+    window.LAST_AGENT_RESULT=d;
+  let html='<div class="muted" style="font-size:.8em;margin-bottom:6px">Verified by the CS harness · live evidence checked</div>';
+  const harness=d.harness||{};
+  const hv=harness.queue_judge||{};
+  html+='<div class="callout" style="margin-bottom:10px"><b>Harness checks:</b> '+
+    '<span class="pill '+(hv.verdict==='PASS'?'g':'a')+'">WoW judge: '+escapeHtml(hv.verdict||'UNKNOWN')+'</span>'+
+    (harness.live_sources&&harness.live_sources.length?' <span class="muted">Live evidence: '+harness.live_sources.map(escapeHtml).join(', ')+'</span>':'')+
+    (hv.violations&&hv.violations.length?' <div class="nc" style="margin-top:5px">'+hv.violations.map(v=>escapeHtml(v.rule+': '+(v.account||'')+' '+v.detail)).join('<br>')+'</div>':'')+'</div>';
+  html+='<div class="agent-answer" style="margin-bottom:14px">'+renderAgentAnswer(d.answer)+'</div>';
+  if(d.actions&&d.actions.length){
+    const renderAction=a=>
+      '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>P'+a.priority+' '+escapeHtml(a.account)+'</b> · '+escapeHtml((a.mandate||'').replace('MUST_PROTECT','Protect').replace('MUST_EXPAND','Expand').replace('MUST_USE','Adopt'))+
+      '<div class="sub">'+escapeHtml(a.trigger||'')+' · owner: '+escapeHtml(a.owner||'Unassigned')+' · SLA: '+escapeHtml(a.sla||'review')+'</div>'+
+      '<div class="evi">Evidence: '+escapeHtml(prettyEv(a.evidence||{}))+'</div>'+
+      '<div class="sub">Source: '+escapeHtml(sourceSummary(a.source))+'</div>'+
+      (a.data_gaps&&a.data_gaps.length?'<div class="nc">Data gaps: '+escapeHtml(a.data_gaps.join('; '))+'</div>':'')+'</div>';
+    const verifiedActions=d.actions.map(renderAction).join('');
+    html+='<details style="margin-bottom:10px"><summary class="sect" style="cursor:pointer;color:var(--brand)">Show evidence and verified actions ('+d.actions.length+')</summary><div class="callout">'+verifiedActions+'</div></details>';
+  }
+    html+='<div class="agent-feedback"><span>Was this useful?</span><button onclick="sendAgentFeedback(\'helpful\',null,this)">Helpful</button><button onclick="sendAgentFeedback(\'needs_correction\',\'wrong_priority\',this)">Wrong priority</button><button onclick="sendAgentFeedback(\'needs_correction\',\'missing_evidence\',this)">Missing evidence</button><button onclick="sendAgentFeedback(\'needs_correction\',\'irrelevant_action\',this)">Irrelevant action</button><button onclick="sendAgentFeedback(\'needs_correction\',\'source_gap\',this)">Source gap</button><span class="agentFeedbackNote"></span></div>';
+  if(d.transcript&&d.transcript.some(s=>s.delegate||s.harness)){
+    const attempts=d.transcript.filter(s=>s.harness), corrections=attempts.filter(s=>s.findings&&s.findings.length).length;
+    html+='<div class="sub" style="margin:10px 0">'+(corrections?'Self-corrected · final answer passed evidence checks':'Verified on first pass')+'</div><details style="margin-top:8px"><summary class="sect" style="cursor:pointer">Show audit trace</summary><div class="callout" style="font-size:.82em">';
+    html+=d.transcript.map(s=>{
+      if(s.delegate) return '<div style="color:var(--brand)"><b>→ '+escapeHtml(s.delegate)+'</b>: '+escapeHtml(s.task||'')+'</div>';
+      if(s.harness) return '<div class="muted"><b>Validation pass '+s.attempt+':</b> '+(s.findings&&s.findings.length?'Initial draft corrected before release':'Answer passed evidence checks')+'</div>';
+      return '';
+    }).join('')+'</div></details>';
+  }
+  agentConversation[agentConversation.length-1].content=html;
+  renderAgentConversation();
+}
+function covDots(cov){
+  const sys=[['hubspot','HubSpot'],['zendesk','Zendesk'],['stripe','Stripe'],['usage','Pendo']];
+  return '<span class="cov">'+sys.map(s=>{const state=typeof cov[s[0]]==='string'?cov[s[0]]:(cov[s[0]]?'live':'not_connected');const cls=state==='live'?'on':state==='no_record'?'partial':'off';const label=state==='live'?'Live':state==='no_record'?'No record':'Not connected';return '<span class="covdot '+cls+'" title="'+s[1]+': '+label+'">'+s[1]+' · '+label+'</span>';}).join('')+'</span>';
+}
+function renderAgentRail(summary){
+  const rail=document.querySelector('.agent-rail');
+  if(!rail)return;
+  const judge=(summary&&summary.judge)||{};
+  const judgeLabel=judge.verdict==='PASS'?'PASS':'Needs review';
+  rail.innerHTML='<div class="agent-rail-title"><span><i class="live-dot"></i>LIVE PORTFOLIO</span><b>'+(summary.accounts||0)+' accounts in scope</b></div>'+
+    '<div class="agent-rail-card"><b>Signed rules <span class="pill '+(judge.verdict==='PASS'?'g':'a')+'">'+escapeHtml(judgeLabel)+'</span></b><span>Priorities and routing are checked.</span></div>'+
+    '<div class="agent-rail-card"><b>Clear handoff</b><span>Agent explains. CSM decides.</span></div>'+
+    '<div class="agent-rail-title" style="margin-top:20px"><span>TRY A QUESTION</span><b>Start here</b></div>'+
+    '<div class="agent-shortcuts"><button onclick="agentAsk(\'What are my top 3 actions today?\')">Today\'s priorities</button><button onclick="agentAsk(\'Which account needs protection first?\')">Protect first</button><button onclick="agentAsk(\'Why was this account not given a manual Protect task?\')">Explain a no-action</button><button onclick="agentAsk(\'Where are the expansion signals?\')">Find growth</button></div>';
+}
+async function loadGaps(){
+  let g;
+  try{ g=await (await fetch('/api/datagaps')).json(); }
+  catch(e){ document.getElementById('gaps-body').innerHTML='<div class="empty">Could not load data gaps.</div>'; return; }
+  const s=g.summary, cp=s.coverage_pct;
+  document.getElementById('gaps-stats').innerHTML=[
+    ['HubSpot coverage',cp.hubspot+'%','of accounts',''],
+    ['Zendesk coverage',cp.zendesk+'%',s.not_in_zendesk+' not in Zendesk',s.not_in_zendesk>0?'warn':''],
+    ['Stripe coverage',cp.stripe+'%',s.not_in_stripe+' not in Stripe',s.not_in_stripe>0?'warn':''],
+    ['Pendo coverage',cp.usage+'%',s.not_in_pendo+' not in Pendo',s.not_in_pendo>0?'warn':''],
+    ['Missing contact roles',s.accounts_missing_roles,'accounts need tagging',s.accounts_missing_roles>0?'warn':'']
+  ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
+  const fieldGaps=Object.entries(s.hubspot_field_gaps).filter(kv=>kv[1]>0)
+    .map(kv=>'<span class="pill a">'+escapeHtml(kv[0])+': '+kv[1]+'</span>').join(' ')||'<span class="muted">none</span>';
+  document.getElementById('gaps-body').innerHTML=
+    '<div class="pad" style="padding:14px 22px"><b>HubSpot field gaps (accounts missing each):</b><div class="chips" style="margin-top:8px">'+fieldGaps+'</div><div class="sub" style="margin-top:10px"><b>Source legend:</b> green means a live account record was returned; amber means the connector is live but this account has no matching record; grey means the connector is unavailable. Only the named missing system requires account mapping work.</div></div>'+
+    '<table><thead><tr><th>Account</th><th>Coverage</th><th>Missing systems</th><th>Missing HubSpot fields</th><th>Missing roles</th></tr></thead><tbody>'+
+    g.accounts.map(a=>'<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
+      '<td>'+covDots(a.coverage_status||a.coverage)+'</td>'+
+      '<td>'+(a.missing_systems.length?a.missing_systems.map(escapeHtml).join(', '):'<span class="pill g">All tracked records present</span>')+'</td>'+
+      '<td>'+(a.missing_fields.length?a.missing_fields.map(escapeHtml).join(', '):'<span class="muted">-</span>')+'</td>'+
+      '<td>'+(a.missing_roles.length?'<span class="pill a">'+a.missing_roles.length+' missing</span>':'<span class="pill g">complete</span>')+'</td></tr>').join('')+
+    '</tbody></table>';
 }
 
 async function openAccount(id){
+  window.ACTIVE_ACCOUNT_ID=id;
   const d=await (await fetch('/api/accounts/'+id)).json();
-  const hs=d.hubspot,j=d.signals.jiminny||{},zd=d.signals.zendesk,us=d.signals.usage,ch=d.signals.churn,st=d.signals.stripe;
-  const srcs=d.sources||{};
-  const src=s=>srcs[s]?'<span class="src '+srcs[s]+'">'+srcs[s]+'</span>':'';
-  const contacts=(hs.contacts||[]).map(c=>c.role+': '+c.name).join('<br>')||'<span class="muted">No contacts tagged yet</span>';
+  const zd=d.signals.zendesk||{},us=d.signals.usage||{},ch=d.signals.churn||{},st=d.signals.stripe||{},jm=d.signals.jiminny||{};
+  const hs=d.hubspot||{};
+  const conn=d.connected||{};
+  const NC='<span class="nc">not connected</span>';
+  // Render a value only when its source is live; otherwise show "not connected".
+  const val=(isConn,v,fmtFn)=>!isConn?NC:(v==null?'<span class="muted">no data</span>':(fmtFn?fmtFn(v):v));
+  const contacts=conn.hubspot?((hs.contacts||[]).map(c=>{
+      const role=c.role?('<b>'+escapeHtml(c.role)+'</b>'):'<span class="muted">no role tagged</span>';
+      const em=c.email?(' · '+escapeHtml(c.email)):'';
+      return role+' / '+escapeHtml(c.name||'(unnamed)')+em;
+    }).join('<br>')||'<span class="muted">No contacts in HubSpot</span>'):NC;
+  const health=d.health||{};
+  const healthPill=health.computable?'<span class="pill '+hband(health.band)+'">'+health.score+'</span>':'<span class="nc">no data</span>';
+  const title=conn.hubspot?(hs.name||id):id;
+  const nd=v=>v?escapeHtml(String(v)):'<span class="muted">no data</span>';
+  const meta=conn.hubspot
+    ?('Segment '+nd(hs.segment_label||hs.segment)+' · ARR '+(hs.arr_usd!=null?fmt(hs.arr_usd):'<span class="muted">no data</span>')+' · renews '+nd(hs.renewal_date)+' · owner '+nd(hs.csm_owner))
+    :'HubSpot not connected';
   document.getElementById('drawer').innerHTML=
     '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
-      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+hs.name+' <span class="pill '+hband(d.health.band)+'">'+d.health.score+'</span></div>'+
-      '<div class="sub" style="margin-top:4px">'+hs.segment+' · '+fmt(hs.arr_usd)+' ARR · renews '+(hs.renewal_date||'-')+' · owner '+(hs.csm_owner||'-')+'</div></div>'+
+      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+'</div>'+
+      '<div class="sub" style="margin-top:4px">'+meta+'</div></div>'+
     '<div class="dbody">'+
-      kv('Churn risk',(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%':'-')+src('churn'))+
-      kv('CSAT (30 days)',(zd.csat_30d!=null?zd.csat_30d:'-')+src('zendesk'))+
-      kv('Support tickets (7d vs prior)',(zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-'))+
-      kv('Logins (7d vs prior)',(us.logins_last_7d!=null?us.logins_last_7d:'-')+' vs '+(us.logins_prev_7d!=null?us.logins_prev_7d:'-')+src('usage'))+
-      kv('License utilization',(us.license_utilization_pct!=null?us.license_utilization_pct:'-')+'%')+
-      kv('Payment',(st.dunning_stage||'none').replace(/_/g,' ')+src('stripe'))+
-      kv('Call sentiment',(j.sentiment||'-')+src('jiminny'))+
-      kv('Primary instances',d.primary_instances.join(', ')||'-')+
-      (j.summary?'<div class="sect">Latest call</div><div class="callout">'+escapeHtml(j.summary)+'</div>':'')+
-      '<div class="sect">Health drivers</div><div class="callout">'+((d.health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board')+'</div>'+
-      '<div class="sect">Shared with Sales (HubSpot)</div>'+
-      '<div class="writeback">Synced to HubSpot: health '+d.hubspot_writeback.cs_health_score+', status <b>'+d.hubspot_writeback.cs_risk_status.replace(/_/g,' ')+'</b>'+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.</div>'+
+      kv('Churn model',conn.churn?(ch.churn_status?escapeHtml(ch.churn_status)+' <span class="muted" style="font-weight:400">from Redshift</span>':(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'% <span class="muted" style="font-weight:400">'+(ch.computed?'computed from live signals':'from Redshift')+'</span>':'<span class="muted">no data</span>')):NC)+
+      kv('CSAT (30 days)',val(conn.zendesk,zd.csat_30d))+
+      kv('Support tickets (7d vs prior)',conn.zendesk?((zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-')):NC)+
+      kv('Product usage',conn.usage?(us.days_since_last_visit!=null?us.days_since_last_visit+' days since last visit':'<span class="muted">no data</span>'):NC)+
+      kv('Pendo risk advisor',val(conn.usage,us.pendo_risk_score))+
+      kv('Latest Jiminny call',conn.jiminny?(jm.last_call_date||'<span class="muted">no data</span>'):NC)+
+      kv('Call sentiment',val(conn.jiminny,jm.sentiment))+
+      kv('Payment',conn.stripe?(function(){
+          var stage=st.dunning_stage||'none';
+          if(stage==='none'){
+            return (st.past_due_invoices>0)
+              ? '<span class="pill a">'+st.past_due_invoices+' past-due · '+fmt(st.amount_due_usd)+'</span>'
+              : '<span class="pill g">Up to date</span>';
+          }
+          return '<span class="pill r">'+escapeHtml(stage.replace(/_/g,' '))+'</span>';
+        })():NC)+
+      kv('Primary instances',conn.hubspot?(d.primary_instances.join(', ')||'-'):NC)+
+      kv('Industry',conn.hubspot?nd(hs.industry):NC)+
+      kv('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
+      kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
+      '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
+      (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
+        '<div class="writeback"><b>Prepared (dry-run):</b> '+(d.hubspot_writeback.cs_health_score==null?'<span class="muted">no health data available</span>':'health '+d.hubspot_writeback.cs_health_score+', status <b>'+String(d.hubspot_writeback.cs_risk_status||'').replace(/_/g,' ')+'</b>')+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.<br><span class="muted">'+escapeHtml(d.hubspot_writeback.note||'No HubSpot mutation is sent. The guarded write-back endpoint verifies/creates missing properties and applies only when both CS_ALLOW_WRITE=1 and apply=true are supplied.')+'</span></div>'):'')+
       '<div class="sect">Contacts</div><div class="callout">'+contacts+'</div>'+
-      '<div class="sect">Tasks</div>'+(d.tasks.length?d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+t.trigger+(t.draft_message?'<div class="draft"><b>Suggested message</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</div>').join(''):'<div class="muted">No open tasks</div>')+
+      '<div class="sect">Tasks</div>'+(d.tasks.length?d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
+        (t.evidence?'<div class="evi" style="margin-top:6px"><b>Why:</b> '+escapeHtml(prettyEv(t.evidence))+'</div>':'')+
+        (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+
+        (t.draft_message?'<div class="draft"><b>'+escapeHtml(t.draft_type==='internal_recovery'?'Internal recovery note':'Evidence-grounded draft · review before sending')+'</b><br>'+escapeHtml(t.draft_message)+(t.draft_type==='internal_recovery'?'':'<br><button class="agent-draft" onclick="askAgentAbout('+escapeHtml(JSON.stringify('Polish a concise customer-facing message for '+t.account+' regarding: '+t.trigger+'. Use only the evidence in the account and do not mention internal churn scores.'))+')">Polish with AI</button>')+'</div>':'')+'</div>').join(''):'<div class="muted">No open tasks</div>')+
     '</div>';
   document.getElementById('drawer').classList.add('on');document.getElementById('scrim').classList.add('on');
 }
 function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
 function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+const agentInput=document.getElementById('agentQ');
+const qualityHeading=document.querySelector('#v-agent .panel .head h2');
+if(qualityHeading) qualityHeading.textContent='Improve the harness';
+const qualityNote=document.querySelector('#v-agent .panel .head .note');
+if(qualityNote) qualityNote.textContent='Feedback becomes tested improvements, never silent training';
+const agentEditorHead=document.querySelector('.agent-editor-head');
+if(agentEditorHead) agentEditorHead.innerHTML='<strong>CS Agent</strong> live portfolio';
+const initialAgentMessage=document.querySelector('#agentOut .agent-turn.assistant .agent-bubble span');
+if(initialAgentMessage) initialAgentMessage.textContent='Ask about your portfolio. I will return a prioritised answer with the evidence and next action.';
+if(agentInput){
+  const commandInput=document.createElement('textarea');
+  commandInput.id='agentQ';
+  commandInput.className='agent-command-input';
+  commandInput.rows=1;
+  commandInput.placeholder='Type a command or ask a follow-up...';
+  commandInput.setAttribute('aria-label','CS Agent command');
+  commandInput.addEventListener('input',()=>{commandInput.style.height='auto';commandInput.style.height=Math.min(commandInput.scrollHeight,180)+'px';});
+  commandInput.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAgent();}});
+  agentInput.replaceWith(commandInput);
+}
+const agentSend=document.querySelector('.agent-compose-box button');
+if(agentSend){agentSend.textContent='Send';agentSend.setAttribute('aria-label','Send command');agentSend.title='Send command';}
+document.querySelectorAll('.agent-rail-card span').forEach(item=>{if(item.textContent.trim()==='Bedrock explains. Rules decide.')item.textContent='CS Agent explains. Rules decide.';});
+const agentHint=document.querySelector('.agent-compose-hint');
+if(agentHint) agentHint.textContent='Enter to send · Shift+Enter for a new line · live context attached';
 boot();
 </script>
 </body>

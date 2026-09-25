@@ -5,3 +5,6 @@ __pycache__/
 .env.*
 *.key
 secrets.*
+.cs-agent-feedback.jsonl
+.cs-playbook-proposals.jsonl
+.cs-task-events.jsonl
