@@ -1,22 +1,30 @@
 # Data access and live integration
 
-The CS Platform runs on **API-shaped fixtures by default** and switches any source to
-**live data** when that source's credentials are present in the environment. No secret
-is ever stored in code or the repo.
+The CS Platform UI runs on **live data only**. A source without credentials, or a live
+lookup that fails, is marked `not connected` rather than being replaced with fixture data.
+The standalone MCP server is also live-only by default; set `CS_MCP_MODE=fixture` only
+for an explicit offline demo. No secret is ever stored in code or the repo.
 
 ## Read-only policy (enforced)
 Every live API call is **read-only**. Enforcement is at the HTTP layer:
 - `http_patch` is **hard-blocked** unless `CS_ALLOW_WRITE=1` (off by default).
 - `http_post` is allowed **only for vendor search endpoints** (reads); any other POST is refused in read-only mode.
 - HubSpot's bi-directional write-back (`push_cs_data`) runs as a **dry-run** by default: it reports what it *would* write and sends no PATCH.
-- Stripe refuses a live secret key (`sk_live_`); use a **restricted read-only** key (`rk_...`).
+- Stripe refuses a live secret key (`sk_live_`); use a **restricted read-only** key (`rk_...`). Override with `CS_ALLOW_STRIPE_SECRET_KEY=1` only if you understand the key's full scope.
 
 To enable the real HubSpot push-back later: set `CS_ALLOW_WRITE=1` **and** use a token with `crm.objects.companies` write scope. Leave it unset for a purely read-only demo.
 
+The platform workflow is `POST /api/accounts/{account_id}/writeback` with `{}` for a
+dry-run audit result. It verifies the `cs_health_score`, `cs_risk_status`, and
+`cs_active_playbook` properties and reports missing definitions without mutating
+HubSpot. An actual apply requires both `CS_ALLOW_WRITE=1` and a request body of
+`{"apply": true}`. Every response includes an `audit_id`, timestamp, mode, property
+status, and mutation result.
+
 ## Canonical account identity
 All sources join on the shard+tenant id **AUx-yyyyy** (for example `au1-12345`), stored as:
-- HubSpot: company property `account_ref`
-- Stripe: customer `metadata.account_ref`
+- HubSpot: company property `account_id`
+- Stripe: customer `metadata.ja_account_id`
 - Pendo: account id
 - Zendesk: organization `external_id`
 - Jiminny: account id
@@ -44,17 +52,23 @@ export ZENDESK_TOKEN=...
 # Jiminny
 export JIMINNY_KEY=...
 
-# Optional churn model endpoint
-export CHURN_API_URL=...
-export CHURN_KEY=...
+# Redshift churn status (read-only)
+export AWS_PROFILE=DataPlatform
+export AWS_REGION=ap-southeast-2
+export REDSHIFT_DATABASE=dwh
+export REDSHIFT_WORKGROUP=data-platform-redshift-warehouse-wg-prod
+export REDSHIFT_CHURN_TABLE=marts.int_ds_account_churn_scoring
+export REDSHIFT_CHURN_ID_COLUMN=nk_ja_account
+export REDSHIFT_CHURN_MODE=status
+export REDSHIFT_CHURN_STATUS_COLUMN=calculated_churn_status
 
 # Switches
 export CS_USE_LIVE=1     # default on: any source with a key goes live
 # export CS_ALLOW_WRITE=1  # leave UNSET for read-only (recommended)
 ```
 Put these in a local `.env` (gitignored) or your shell. If no key is set for a source,
-that source stays on fixtures. If a live call fails, it falls back to fixtures and logs
-a warning, so the platform never breaks.
+that source is shown as not connected. The explicit MCP offline mode is the only path
+that reads fixtures.
 
 ## Security reminders
 - Rotate any key that has been shared anywhere. Treat a Stripe `sk_live_` key as an

@@ -6,9 +6,9 @@ tools/call). Each tool returns JSON shaped to mirror the real vendor API so the
 server is a drop-in swap for live integrations (HubSpot company object, Zendesk
 tickets/CSAT, Stripe invoices, product usage telemetry, ML churn score).
 
-Data source: a fixtures JSON file (env CS_FIXTURES), no external calls, so the
-demo is deterministic and offline-safe. Swap the _load()/_account() internals for
-real API clients to go live.
+Data source: live adapters by default. Fixture data is available only when
+`CS_MCP_MODE=fixture` (explicit offline demo mode). In live mode, a missing
+credential or failed live lookup fails closed rather than silently returning fixtures.
 
 Tools:
   list_accounts()                 -> [{account_id, name, segment, arr_usd, renewal_date}]
@@ -27,8 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Live adapters (env-keyed) with fixture fallback. Import is optional so the server
-# still runs if the adapters package is absent.
+# Live adapters. Fixtures are an explicit offline-demo mode only.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     from adapters import with_fallback
@@ -44,6 +43,32 @@ FIXTURES_PATH = os.environ.get(
     "CS_FIXTURES",
     str(Path(__file__).parent / "fixtures" / "accounts.json"),
 )
+MCP_MODE = os.environ.get("CS_MCP_MODE", "live").strip().lower()
+
+
+def _fixture_allowed() -> bool:
+    return MCP_MODE in ("fixture", "offline", "demo")
+
+
+def _fixture_value(fixture_call):
+    if not _fixture_allowed():
+        raise RuntimeError("MCP live mode blocked fixture fallback; set CS_MCP_MODE=fixture for offline demo data")
+    value = fixture_call()
+    if isinstance(value, dict):
+        value = dict(value)
+        value["_source"] = "fixture"
+    return value
+
+
+def _live_or_fixture(is_live, live_call, fixture_call):
+    if not _ADAPTERS or not is_live:
+        return _fixture_value(fixture_call)
+    try:
+        return live_call()
+    except Exception:
+        if _fixture_allowed():
+            return _fixture_value(fixture_call)
+        raise
 
 
 def _load() -> dict[str, Any]:
@@ -60,7 +85,28 @@ def _account(account_id: str) -> dict[str, Any]:
 
 # --- Tool implementations ---------------------------------------------------
 
+def _platform_account_list() -> list[dict[str, Any]] | None:
+    from urllib.request import urlopen
+
+    platform_url = os.environ.get("CS_PLATFORM_URL", "http://localhost:8787").rstrip("/")
+    try:
+        with urlopen(f"{platform_url}/api/accounts", timeout=3) as response:  # noqa: S310
+            rows = json.loads(response.read().decode("utf-8"))
+        for row in rows:
+            row.setdefault("_source", "cs-platform-live-accounts")
+        return rows
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def tool_list_accounts(_: dict[str, Any]) -> Any:
+    platform_accounts = _platform_account_list()
+    if platform_accounts is not None:
+        return platform_accounts
+    if _ADAPTERS and _src.HUBSPOT.live():
+        return [{"account_id": aid, "_source": "hubspot-live"} for aid in _src.HUBSPOT.roster()]
+    if not _fixture_allowed():
+        raise RuntimeError("MCP live mode requires a live HubSpot roster; set CS_MCP_MODE=fixture for offline demo data")
     out = []
     for aid, a in _load().items():
         hs = a.get("hubspot", {})
@@ -70,53 +116,170 @@ def tool_list_accounts(_: dict[str, Any]) -> Any:
             "segment": hs.get("segment"),
             "arr_usd": hs.get("arr_usd"),
             "renewal_date": hs.get("renewal_date"),
+            "_source": "fixture",
         })
     return out
+
+
+def tool_get_portfolio_snapshot(_: dict[str, Any]) -> Any:
+    """Read the live roster and all available account signals in one approval."""
+    accounts = tool_list_accounts({})
+    snapshot = []
+    readers = {
+        "hubspot": tool_hubspot_get_account,
+        "zendesk": tool_zendesk_get_tickets,
+        "usage": tool_usage_get_metrics,
+        "churn": tool_churn_get_score,
+        "stripe": tool_stripe_get_payment,
+        "jiminny": tool_jiminny_get_calls,
+    }
+    for item in accounts:
+        aid = item["account_id"]
+        row = dict(item)
+        row["sources"] = {}
+        for source, reader in readers.items():
+            try:
+                row[source] = reader({"account_id": aid})
+                row["sources"][source] = row[source].get("_source", "live") if isinstance(row[source], dict) else "live"
+            except Exception as exc:  # noqa: BLE001
+                row[source] = {"_source": "not_connected", "error": f"{type(exc).__name__}: {exc}"}
+                row["sources"][source] = "not_connected"
+        snapshot.append(row)
+    return {"accounts": snapshot, "_source": "live-portfolio-snapshot"}
+
+
+def _platform_task_queue() -> dict[str, Any] | None:
+    from urllib.request import urlopen
+
+    platform_url = os.environ.get("CS_PLATFORM_URL", "http://localhost:8787").rstrip("/")
+    try:
+        with urlopen(f"{platform_url}/api/portfolio", timeout=3) as response:  # noqa: S310
+            portfolio = json.loads(response.read().decode("utf-8"))
+        summary = portfolio.get("summary", {})
+        return {
+            "reviewed": summary.get("accounts", len(portfolio.get("accounts", []))),
+            "tasks": portfolio.get("tasks", []),
+            "suppressed": portfolio.get("suppressed", []),
+            "automations": portfolio.get("automations", []),
+            "judge": summary.get("judge", portfolio.get("judge", {})),
+            "_source": "cs-platform-live-queue",
+        }
+    except Exception:  # noqa: BLE001 - fall back to direct live source fan-out
+        return None
+
+
+def tool_get_data_gaps(_: dict[str, Any]) -> Any:
+    """Return the platform's compact live source-coverage and data-gap report."""
+    from urllib.request import urlopen
+
+    platform_url = os.environ.get("CS_PLATFORM_URL", "http://localhost:8787").rstrip("/")
+    try:
+        with urlopen(f"{platform_url}/api/datagaps", timeout=3) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+        payload["_source"] = "cs-platform-live-datagaps"
+        return payload
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"CS Platform data gaps unavailable: {exc}") from exc
+
+
+def tool_get_csm_brief(args: dict[str, Any]) -> Any:
+    """Return a CSM's managed accounts, critical context, and next governed task."""
+    from urllib.request import urlopen
+
+    platform_url = os.environ.get("CS_PLATFORM_URL", "http://localhost:8787").rstrip("/")
+    try:
+        with urlopen(f"{platform_url}/api/portfolio", timeout=3) as response:  # noqa: S310
+            portfolio = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"CS Platform CSM brief unavailable: {exc}") from exc
+
+    summary = portfolio.get("summary", {})
+    requested_owner = str(args.get("csm_owner") or "").strip()
+    configured_owner = str(summary.get("scope_owner") or os.environ.get("CS_CSM_OWNER") or "").strip()
+    selected_owner = requested_owner or configured_owner
+    accounts = portfolio.get("accounts", [])
+    available_owners = sorted({str(row.get("csm_owner")).strip() for row in accounts
+                               if row.get("csm_owner")})
+    if selected_owner:
+        selected_accounts = [row for row in accounts
+                             if str(row.get("csm_owner") or "").casefold() == selected_owner.casefold()]
+    else:
+        selected_accounts = accounts
+
+    account_names = {row.get("name") for row in selected_accounts}
+    owner_tasks = [task for task in portfolio.get("tasks", []) if task.get("account") in account_names]
+    return {
+        "csm_owner": selected_owner or None,
+        "identity_status": "resolved" if selected_owner else "not_configured",
+        "available_csm_owners": available_owners,
+        "managed_account_count": len(selected_accounts),
+        "accounts": selected_accounts,
+        "next_task": owner_tasks[0] if owner_tasks else None,
+        "open_tasks": owner_tasks,
+        "judge": summary.get("judge", {}),
+        "_source": "cs-platform-live-csm-brief",
+    }
+
+
+def tool_get_task_queue(_: dict[str, Any]) -> Any:
+    """Build the authoritative governed queue from the live portfolio snapshot."""
+    platform_queue = _platform_task_queue()
+    if platform_queue is not None:
+        return platform_queue
+
+    import orchestrate
+
+    rows = tool_get_portfolio_snapshot({})["accounts"]
+    accounts = {row["account_id"]: row for row in rows}
+    previous_provider = orchestrate._ACCOUNT_PROVIDER
+    orchestrate.set_account_provider(lambda: accounts)
+    try:
+        return orchestrate.orchestrate()
+    finally:
+        orchestrate.set_account_provider(previous_provider)
 
 
 def tool_hubspot_get_account(args: dict[str, Any]) -> Any:
     aid = args["account_id"]
     fixture = lambda: _account(aid).get("hubspot", {})
-    if not _ADAPTERS:
-        return fixture()
-    return with_fallback(_src.HUBSPOT.live(), lambda: _src.HUBSPOT.account(aid), fixture)
+    return _live_or_fixture(_src.HUBSPOT.live() if _ADAPTERS else False,
+                            lambda: _src.HUBSPOT.account(aid), fixture)
 
 
 def tool_zendesk_get_tickets(args: dict[str, Any]) -> Any:
     aid = args["account_id"]
     fixture = lambda: _account(aid).get("zendesk", {})
-    if not _ADAPTERS:
-        return fixture()
-    return with_fallback(_src.ZENDESK.live(), lambda: _src.ZENDESK.tickets(aid), fixture)
+    return _live_or_fixture(_src.ZENDESK.live() if _ADAPTERS else False,
+                            lambda: _src.ZENDESK.tickets(aid), fixture)
 
 
 def tool_usage_get_metrics(args: dict[str, Any]) -> Any:
     aid = args["account_id"]
     fixture = lambda: _account(aid).get("usage", {})
-    if not _ADAPTERS:
-        return fixture()
-    return with_fallback(_src.PENDO.live(), lambda: _src.PENDO.metrics(aid), fixture)
+    return _live_or_fixture(_src.PENDO.live() if _ADAPTERS else False,
+                            lambda: _src.PENDO.metrics(aid), fixture)
 
 
 def tool_churn_get_score(args: dict[str, Any]) -> Any:
-    return _account(args["account_id"]).get("churn", {})
+    aid = args["account_id"]
+    fixture = lambda: _account(aid).get("churn", {})
+    return _live_or_fixture(_src.CHURN.live() if _ADAPTERS else False,
+                            lambda: _src.CHURN.score(aid), fixture)
 
 
 def tool_stripe_get_payment(args: dict[str, Any]) -> Any:
     aid = args["account_id"]
     fixture = lambda: _account(aid).get("stripe", {})
-    if not _ADAPTERS:
-        return fixture()
-    return with_fallback(_src.STRIPE.live(), lambda: _src.STRIPE.payment(aid), fixture)
+    return _live_or_fixture(_src.STRIPE.live() if _ADAPTERS else False,
+                            lambda: _src.STRIPE.payment(aid), fixture)
 
 
 def tool_jiminny_get_calls(args: dict[str, Any]) -> Any:
     """Conversational intelligence: latest call sentiment, summary, talk ratio."""
     aid = args["account_id"]
     fixture = lambda: _account(aid).get("jiminny", {})
-    if not _ADAPTERS:
-        return fixture()
-    return with_fallback(_src.JIMINNY.live(), lambda: _src.JIMINNY.calls(aid), fixture)
+    return _live_or_fixture(_src.JIMINNY.live() if _ADAPTERS else False,
+                            lambda: _src.JIMINNY.calls(aid), fixture)
 
 
 def tool_hubspot_push_cs_data(args: dict[str, Any]) -> Any:
@@ -141,8 +304,8 @@ def tool_hubspot_push_cs_data(args: dict[str, Any]) -> Any:
             "note": "Simulated bi-directional write-back (fixture mode). Set HUBSPOT_TOKEN to write live.",
         }
 
-    if not _ADAPTERS:
-        return _sim()
+    if not _ADAPTERS or not _src.HUBSPOT.live():
+        return _fixture_value(_sim)
     return with_fallback(
         _src.HUBSPOT.live(),
         lambda: _src.HUBSPOT.push_cs_data(account_id, **fields),
@@ -157,9 +320,34 @@ _ACCOUNT_ARG = {
 }
 
 TOOLS: dict[str, dict[str, Any]] = {
+    "get_csm_brief": {
+        "handler": tool_get_csm_brief,
+        "description": "Return the configured or requested CSM, all accounts they manage with critical health/lifecycle/ARR/renewal context, and their next governed task. Use for 'who is my CSM', 'my accounts', and 'what should I work on next' questions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "csm_owner": {"type": "string", "description": "Optional CSM owner name. Omit to use configured scope or list available owners."}
+            },
+        },
+    },
+    "get_data_gaps": {
+        "handler": tool_get_data_gaps,
+        "description": "Return the compact live CS data-gap report, including source coverage, unavailable account mappings, missing HubSpot fields, and missing contact roles. Prefer this for data-gap and source-coverage questions.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "get_task_queue": {
+        "handler": tool_get_task_queue,
+        "description": "Return the authoritative prioritised CS task queue built from the live portfolio, including evidence, suppression, automations, and the WoW judge verdict. Prefer this for next-action and top-actions questions.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "get_portfolio_snapshot": {
+        "handler": tool_get_portfolio_snapshot,
+        "description": "Read the complete live CS portfolio and all available source signals in one read-only operation. Prefer this for portfolio questions.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
     "list_accounts": {
         "handler": tool_list_accounts,
-        "description": "List all CS accounts with segment, ARR, and renewal date.",
+        "description": "List all live CS accounts with owner, health, lifecycle, segment, ARR, renewal, source connectivity, and open-task count. Use as the fallback for CSM account-book questions.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     "hubspot_get_account": {
@@ -192,20 +380,12 @@ TOOLS: dict[str, dict[str, Any]] = {
         "description": "Jiminny conversational intelligence: last call date, sentiment (positive|neutral|negative), automated summary, customer talk ratio.",
         "inputSchema": _ACCOUNT_ARG,
     },
-    "hubspot_push_cs_data": {
-        "handler": tool_hubspot_push_cs_data,
-        "description": "Bi-directional sync: push CS data (health_score, risk_status, active_playbook) back to the HubSpot company object for Sales visibility.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "account_id": {"type": "string"},
-                "health_score": {"type": "number"},
-                "risk_status": {"type": "string"},
-                "active_playbook": {"type": "string"},
-            },
-            "required": ["account_id"],
-        },
-    },
+}
+
+_READ_ONLY_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
 }
 
 
@@ -237,7 +417,8 @@ def handle(request: dict[str, Any]) -> dict[str, Any] | None:
     if method == "tools/list":
         return _result(request_id, {
             "tools": [
-                {"name": name, "description": t["description"], "inputSchema": t["inputSchema"]}
+                {"name": name, "description": t["description"],
+                 "inputSchema": t["inputSchema"], "annotations": _READ_ONLY_ANNOTATIONS}
                 for name, t in TOOLS.items()
             ]
         })

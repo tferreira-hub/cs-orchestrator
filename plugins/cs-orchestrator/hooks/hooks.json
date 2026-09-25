@@ -1,14 +1,4 @@
 {
   "version": 1,
-  "hooks": {
-    "Stop": [
-      {
-        "type": "command",
-        "command": "python3 \"$HOME/.copilot/installed-plugins/cs-orchestrator-marketplace/cs-orchestrator/hooks/scripts/grounding-gate.py\"",
-        "bash": "python3 \"$HOME/.copilot/installed-plugins/cs-orchestrator-marketplace/cs-orchestrator/hooks/scripts/grounding-gate.py\"",
-        "powershell": "python3 \"$HOME/.copilot/installed-plugins/cs-orchestrator-marketplace/cs-orchestrator/hooks/scripts/grounding-gate.py\"",
-        "timeoutSec": 15
-      }
-    ]
-  }
+  "hooks": {}
 }

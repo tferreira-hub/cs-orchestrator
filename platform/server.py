@@ -18,26 +18,237 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE lines from a repo-root .env into os.environ (no dependency on
+    python-dotenv). Existing environment variables take precedence, so an explicit
+    export always wins over the file. Values may be quoted with single or double
+    quotes; escaped inner quotes (\\' / \\") are un-escaped. Blank lines and
+    #comments are ignored."""
+    # repo root is two levels up from platform/server.py
+    for candidate in (Path(__file__).resolve().parent / ".env",
+                      Path(__file__).resolve().parents[1] / ".env"):
+        if not candidate.exists():
+            continue
+        for raw in candidate.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip()
+            # Strip matched outer quotes and un-escape inner escaped quotes.
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                quote = val[0]
+                val = val[1:-1].replace(f"\\{quote}", quote)
+            if key and key not in os.environ:
+                os.environ[key] = val
+        break
+
+
+_load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engine  # noqa: E402
 
 UI_PATH = Path(__file__).resolve().parent / "ui" / "index.html"
 PORT = int(os.environ.get("CS_PORT", "8787"))
+FEEDBACK_LOG = Path(__file__).resolve().parents[1] / ".cs-agent-feedback.jsonl"
+PLAYBOOK_PROPOSALS = Path(__file__).resolve().parents[1] / ".cs-playbook-proposals.jsonl"
+PLAYBOOK_RULES = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator" / "skills" / "cs-playbook" / "SKILL.md"
+TASK_EVENTS = Path(os.environ.get("CS_TASK_EVENTS_FILE", str(Path(__file__).resolve().parents[1] / ".cs-task-events.jsonl")))
+
+
+def _record_task_event(body: dict) -> dict:
+    task_id = str(body.get("task_id") or "").strip()
+    status = body.get("status")
+    if not task_id or status not in {"open", "in_progress", "completed"}:
+        raise ValueError("task_id and status (open, in_progress, completed) are required")
+    event = {
+        "task_id": task_id,
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if status == "completed":
+        event["completed_at"] = str(body.get("completed_at") or event["updated_at"])
+    TASK_EVENTS.parent.mkdir(parents=True, exist_ok=True)
+    with TASK_EVENTS.open("a", encoding="utf-8") as event_file:
+        event_file.write(json.dumps(event) + "\n")
+    return event
+
+
+def _record_agent_feedback(body: dict) -> dict:
+    """Persist only feedback metadata, never customer prose or answer content."""
+    question = str(body.get("question") or "")
+    display_reason = str(body.get("reason") or "other").strip()
+    raw_reason = display_reason.lower().replace(" ", "_")
+    record = {
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "rating": body.get("rating"),
+        "reason": raw_reason if raw_reason in {
+            "wrong_priority", "missing_evidence", "irrelevant_action", "source_gap", "other"
+        } else "other",
+        "reason_label": display_reason,
+        "question_hash": hashlib.sha256(question.encode()).hexdigest() if question else None,
+        "action_count": int(body.get("action_count") or 0),
+        "judge_verdict": body.get("judge_verdict"),
+    }
+    with FEEDBACK_LOG.open("a", encoding="utf-8") as feedback_file:
+        feedback_file.write(json.dumps(record) + "\n")
+    return {"recorded": True, "recorded_at": record["recorded_at"]}
+
+
+def _feedback_summary() -> dict:
+    counts = {"helpful": 0, "needs_correction": 0}
+    reasons = {}
+    if FEEDBACK_LOG.exists():
+        for line in FEEDBACK_LOG.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rating = row.get("rating")
+            if rating in counts:
+                counts[rating] += 1
+            reason = row.get("reason")
+            if rating == "needs_correction" and reason:
+                reasons[reason] = reasons.get(reason, 0) + 1
+    recommendations = {
+        "wrong_priority": "Review trigger-to-priority mappings in orchestrate.py and add a boundary test.",
+        "missing_evidence": "Require the missing source field in the playbook judge before allowing PASS.",
+        "irrelevant_action": "Review the WoW rule and specialist prompt for this action category.",
+        "source_gap": "Add or repair the source mapping, then add a live adapter contract test.",
+        "other": "Review the feedback sample during the next CS playbook calibration session.",
+    }
+    candidates = [{"category": reason, "count": count, "recommendation": recommendations.get(reason, recommendations["other"])}
+                  for reason, count in sorted(reasons.items(), key=lambda item: -item[1])]
+    return {"ratings": counts, "correction_reasons": reasons, "improvement_candidates": candidates,
+            "privacy": "metadata-only"}
+
+
+def _playbook_summary() -> dict:
+    text = PLAYBOOK_RULES.read_text(encoding="utf-8") if PLAYBOOK_RULES.exists() else ""
+    headings = [line.lstrip("# ").strip() for line in text.splitlines()
+                if line.startswith("## ") or line.startswith("### ")]
+    proposals_by_id = {}
+    if PLAYBOOK_PROPOSALS.exists():
+        for line in PLAYBOOK_PROPOSALS.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            proposal_id = record.get("proposal_id")
+            if not proposal_id:
+                continue
+            if record.get("event") == "review":
+                current = proposals_by_id.get(proposal_id)
+                if current:
+                    current.update({key: value for key, value in record.items() if key != "event"})
+                    current.setdefault("review_history", []).append(record)
+            else:
+                proposals_by_id[proposal_id] = record
+                record.setdefault("review_history", [])
+    proposals = [proposal for proposal in proposals_by_id.values()
+                 if proposal.get("status") != "archived"]
+    return {"status": "signed-and-versioned", "headings": headings,
+            "proposals": proposals[-20:],
+            "change_policy": "CS feedback creates proposals; approved changes require review, tests, signed skill versioning, and a release.",
+            "review_decisions": ["request_changes", "approve_for_implementation", "reject", "archive"]}
+
+
+def _record_playbook_proposal(body: dict) -> dict:
+    proposal = {
+        "proposal_id": hashlib.sha256((datetime.now(timezone.utc).isoformat() + str(body)).encode()).hexdigest()[:12],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending_review",
+        "category": body.get("category", "other"),
+        "rule_section": str(body.get("rule_section") or "Other")[:160],
+        "evidence_source": str(body.get("evidence_source") or "")[:500],
+        "quality_risk": str(body.get("quality_risk") or "")[:500],
+        "review_stage": "CS Leadership",
+        "review_checklist": {
+            "evidence_verified": False,
+            "policy_conflict_checked": False,
+            "tests_added": False,
+            "rollback_defined": False,
+        },
+        "title": str(body.get("title") or "")[:160],
+        "rationale": str(body.get("rationale") or "")[:1000],
+        "requested_by": str(body.get("requested_by") or "CS team")[:100],
+        "current_behavior": str(body.get("current_behavior") or "")[:1000],
+        "proposed_behavior": str(body.get("proposed_behavior") or "")[:1000],
+        "consumer_context": str(body.get("consumer_context") or "")[:1000],
+        "impact": str(body.get("impact") or "")[:1000],
+        "affected_accounts": str(body.get("affected_accounts") or "")[:500],
+        "test_cases": str(body.get("test_cases") or "")[:1000],
+    }
+    if not proposal["title"] or not proposal["rationale"]:
+        raise ValueError("title and rationale are required")
+    with PLAYBOOK_PROPOSALS.open("a", encoding="utf-8") as proposal_file:
+        proposal_file.write(json.dumps(proposal) + "\n")
+    return proposal
+
+
+def _record_playbook_review(proposal_id: str, body: dict) -> dict:
+    decision = str(body.get("decision") or "").strip().lower()
+    allowed = {"request_changes", "approve_for_implementation", "reject", "archive"}
+    if decision not in allowed:
+        raise ValueError("decision must be request_changes, approve_for_implementation, reject, or archive")
+    reviewer = str(body.get("reviewed_by") or "").strip()
+    review_note = str(body.get("review_note") or "").strip()
+    if not reviewer:
+        raise ValueError("reviewed_by is required")
+    if not review_note:
+        raise ValueError("review_note is required")
+    checklist = body.get("review_checklist") or {}
+    required_checks = {"evidence_verified", "policy_conflict_checked", "tests_added", "rollback_defined"}
+    if decision == "approve_for_implementation" and not all(checklist.get(key) is True for key in required_checks):
+            raise ValueError("approval requires all quality gates: evidence, policy, tests, and rollback checks")
+    summary = _playbook_summary()
+    proposal = next((item for item in summary["proposals"] if item.get("proposal_id") == proposal_id), None)
+    if not proposal:
+        raise ValueError(f"unknown proposal {proposal_id}")
+    status = {
+        "request_changes": "changes_requested",
+        "approve_for_implementation": "approved_for_implementation",
+        "reject": "rejected",
+        "archive": "archived",
+    }[decision]
+    review = {
+        "event": "review",
+        "proposal_id": proposal_id,
+        "decision": decision,
+        "status": status,
+        "review_stage": str(body.get("review_stage") or "CS Leadership")[:80],
+        "reviewed_by": reviewer[:120],
+        "review_note": review_note[:1000],
+        "review_checklist": {key: bool(checklist.get(key)) for key in required_checks},
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with PLAYBOOK_PROPOSALS.open("a", encoding="utf-8") as proposal_file:
+        proposal_file.write(json.dumps(review) + "\n")
+    return {**proposal, **{key: value for key, value in review.items() if key != "event"}}
 
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: bytes, content_type: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The browser navigated away or cancelled the request before delivery.
+            return
 
     def _json(self, code: int, payload) -> None:
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
@@ -56,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/portfolio":
                 self._json(200, engine.portfolio()); return
+            if path == "/api/daily-brief":
+                self._json(200, engine.daily_brief()); return
             if path == "/api/accounts":
                 self._json(200, engine.portfolio()["accounts"]); return
             if path == "/api/tasks":
@@ -64,16 +277,83 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.portfolio()["suppressed"]); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
+            if path == "/api/task-events":
+                self._json(200, {"events": list(engine._load_task_events().values())}); return
             if path == "/api/lifecycle":
                 self._json(200, engine.lifecycle()); return
             if path == "/api/integrations":
                 self._json(200, engine.integrations()); return
+            if path == "/api/datagaps":
+                self._json(200, engine.datagaps()); return
+            if path == "/api/playbook":
+                self._json(200, _playbook_summary()); return
+            if path == "/api/agent/feedback/summary":
+                self._json(200, _feedback_summary()); return
+            if path.startswith("/api/accounts/") and path.endswith("/why-not"):
+                account_id = path[len("/api/accounts/"):-len("/why-not")].strip("/")
+                try:
+                    self._json(200, engine.why_not(account_id))
+                except KeyError:
+                    self._json(404, {"error": f"unknown account {account_id}"})
+                return
             if path.startswith("/api/accounts/"):
                 acct = path.rsplit("/", 1)[-1]
                 try:
                     self._json(200, engine.account_detail(acct))
                 except KeyError:
                     self._json(404, {"error": f"unknown account {acct}"})
+                return
+            self._json(404, {"error": "not found", "path": path})
+        except Exception as exc:  # noqa: BLE001
+            self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+    def do_POST(self):  # noqa: N802
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length) if length else b"{}"
+            body = json.loads(raw or b"{}")
+            if path == "/api/agent":
+                question = (body.get("question") or "").strip() or "What are my top CS actions today?"
+                account_id = (body.get("account_id") or "").strip() or None
+                csm_owner = (body.get("csm_owner") or "").strip() or None
+                plugin = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"
+                sys.path.insert(0, str(plugin))
+                import agent_runner  # noqa: E402
+                self._json(200, agent_runner.run(question, account_id=account_id, csm_owner=csm_owner))
+                return
+            if path == "/api/agent/feedback":
+                rating = body.get("rating")
+                if rating not in ("helpful", "needs_correction"):
+                    self._json(400, {"error": "rating must be helpful or needs_correction"})
+                    return
+                self._json(200, _record_agent_feedback(body))
+                return
+            if path == "/api/agent/feedback/summary":
+                self._json(200, _feedback_summary())
+                return
+            if path == "/api/playbook/proposals":
+                try:
+                    self._json(201, _record_playbook_proposal(body))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path.startswith("/api/playbook/proposals/") and path.endswith("/review"):
+                proposal_id = path[len("/api/playbook/proposals/"):-len("/review")].strip("/")
+                try:
+                    self._json(200, _record_playbook_review(proposal_id, body))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path == "/api/tasks/status":
+                try:
+                    self._json(200, _record_task_event(body))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path.startswith("/api/accounts/") and path.endswith("/writeback"):
+                account_id = path[len("/api/accounts/"):-len("/writeback")].strip("/")
+                self._json(200, engine.writeback(account_id, apply=bool(body.get("apply", False))))
                 return
             self._json(404, {"error": "not found", "path": path})
         except Exception as exc:  # noqa: BLE001

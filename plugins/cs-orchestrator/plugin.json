@@ -1,7 +1,7 @@
 {
   "name": "cs-orchestrator",
-  "version": "1.0.0",
-  "description": "Operationalises the Customer Success Ways of Working framework as an agent harness: MCP tools over the CS stack (HubSpot, Zendesk, Stripe, usage, churn), a cs-orchestrator agent that generates the prioritised CSM task queue, a cs-playbook rules skill, and a multi-instance suppression + grounding hook.",
+  "version": "1.4.41",
+  "description": "Operationalises the Customer Success Ways of Working framework as a multi-agent harness: a delegating cs-orchestrator agent plus risk-analyst, renewal-planner, outreach-drafter, and judge specialists over live/read-only CS tools (HubSpot, Zendesk, Stripe, Pendo, Jiminny, Redshift churn), the cs-playbook rules skill, deterministic queue validation, and feedback hooks.",
   "author": {
     "name": "The Observers"
   },
@@ -12,5 +12,5 @@
     "./agents/"
   ],
   "hooks": "./hooks/hooks.json",
-  "mcpServers": "./mcp-servers/.mcp.json"
+  "mcpServers": "./mcp.json"
 }

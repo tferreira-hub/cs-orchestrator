@@ -1,0 +1,7 @@
+# Development dependencies (test runner).
+# The platform and harness are dependency-free (stdlib only) by design.
+# Pin pytest so the 75-test suite runs reproducibly for judges and reviewers.
+#
+#   pip install -r requirements-dev.txt
+#   python3 -m pytest plugins/cs-orchestrator/tests/ -v
+pytest==8.4.2

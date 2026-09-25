@@ -76,12 +76,56 @@ def _read_answer() -> str:
     return data
 
 
+def _structured_evidence(packet: dict) -> set[str]:
+    """Extract numeric evidence from the structured Ask Agent action packet."""
+    actions = packet.get("actions") or []
+    if not actions:
+        return set()
+    answer = str(packet.get("answer") or "")
+    mentioned = {a.get("account") for a in actions if a.get("account") and a["account"] in answer}
+    scoped = [a for a in actions if not mentioned or a.get("account") in mentioned]
+    raw = json.dumps(scoped, default=str)
+    values = {_norm(t) for t in NUMBER.findall(raw)}
+    for value in list(values):
+        try:
+            number = float(value)
+        except ValueError:
+            continue
+        if 0 < number < 1:
+            values.add(_norm(str(round(number * 100))))
+    return values
+
+
 def main() -> int:
-    answer = _read_answer()
-    if not answer.strip():
+    raw_answer = _read_answer()
+    if not raw_answer.strip():
         return 0  # nothing to check; never block
 
-    evidence = _evidence_numbers()
+    packet = None
+    try:
+        candidate = json.loads(raw_answer)
+        if isinstance(candidate, dict) and "answer" in candidate:
+            packet = candidate
+            answer = str(candidate.get("answer") or "")
+        else:
+            answer = raw_answer
+    except (TypeError, ValueError):
+        answer = raw_answer
+
+    evidence = _structured_evidence(packet) if packet else set()
+    if not evidence:
+        # LIVE-MODE WARNING: when no structured action packet is present (e.g. the
+        # agent is running against live vendor data outside the MCP packet protocol),
+        # we fall back to the fixture file as the grounded number set. This will
+        # produce false positives for any live figure that does not appear in the
+        # fixtures (e.g. real ARR, live churn scores). The gate is advisory (exit 0)
+        # and must never block the session, but warnings emitted here in live mode
+        # should be verified against live source data rather than the fixture file.
+        evidence = _evidence_numbers()
+        if packet:
+            sys.stderr.write("[cs-orchestrator grounding-gate] WARNING: structured action evidence was empty; "
+                             "falling back to fixture evidence. In live mode, fixture numbers may not match "
+                             "real account data — treat warnings below as advisory only.\n")
     if not evidence:
         return 0
 

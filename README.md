@@ -26,9 +26,16 @@ Playbooks, and Data & Governance) with Dashboard, Task Queue, Accounts, Protect 
 Adopt playbook views, Lifecycle, Leadership KPIs, and an Integrations map.
 
 ## Architecture (single source of truth)
+
+See the shareable system diagram and runtime flow in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+The platform and Ask Agent share one deterministic account-data and Ways-of-Working
+engine. Live sources are read-only by default; MCP fixtures require explicit offline-demo
+mode, and HubSpot write-back requires a separate double opt-in.
+
 ```
 CS stack (HubSpot, Zendesk, Stripe, usage, churn)
-        │  integrations layer (adapters; fixtures now, live APIs later)
+      │  integrations layer (live adapters with explicit fixture mode for tests)
         ▼
    Rules / orchestration engine  ── the signed Ways of Working ──┐
    (orchestrate.py + suppression + health scoring in platform/engine.py)
@@ -42,15 +49,22 @@ The **same** WoW logic powers the product UI and the agent, so a CSM in the dash
 and the `cs-orchestrator` agent always produce the identical standardised queue (WoW §1).
 
 ## Integrations layer
-The MCP tools (`mcp-servers/cs_stack_server.py`) and the engine read from
-`mcp-servers/fixtures/accounts.json`, whose shapes mirror the real vendor APIs
-(HubSpot company object, Zendesk tickets/CSAT, Stripe invoices, usage telemetry, ML
-churn, and Jiminny call sentiment). HubSpot is bi-directional: the platform pushes
-health score, risk status, and active playbook back for Sales visibility
-(`hubspot_push_cs_data` tool + the `hubspot_writeback` payload). Swap the fixture reads
-for live API clients, bi-directional HubSpot, read-only Stripe, real-time Zendesk, with
-no change to the engine, API, or UI. This is exactly the RevOps "data gap analysis /
-telemetry assessment" next step.
+The platform uses live adapters when credentials and mappings are present. Missing
+sources are returned as explicit data gaps; fixtures are retained only for deterministic
+offline tests and demos.
+
+- HubSpot: live roster, ARR, renewal, contacts, owner, instance family, and guarded
+   health/risk/playbook writeback.
+- Zendesk: live ticket, CSAT, Sev-1, and per-instance support signals.
+- Stripe: read-only invoice ageing and governed dunning/suspension handoff decisions.
+- Pendo: live risk and recency plus explicitly mapped nested telemetry fields.
+- Jiminny: ready for live call intelligence when its key and account mapping are present.
+- Rocket Lane: configurable read-only onboarding status, health, and time-to-value.
+- Redshift: read-only churn status or probability view through the Data API.
+
+The same structured queue also exposes adoption/onboarding tasks, multi-instance
+suppression, payment automation decisions, task status, ageing, SLA adherence, and
+CSM capacity metrics.
 
 ---
 
@@ -109,7 +123,7 @@ python3 mcp-servers/cs_stack_server.py   # stdio JSON-RPC MCP server
 
 **Tests:**
 ```bash
-python3 -m pytest tests/ -v      # 8 tests: rules, suppression, grounding gate
+python3 -m pytest tests/ -v      # 48 tests: rules, adapters, MCP, agent, API/UI contracts
 ```
 
 **As a Copilot plugin (VS Code / Copilot CLI):**
@@ -120,10 +134,9 @@ It calls the `cs-stack` MCP tools, applies the `cs-playbook` skill, the suppress
 hook drops test-instance noise, the grounding gate checks every figure, and it returns
 the prioritised queue + drafts.
 
-> **Data:** tools are backed by API-shaped fixtures (`mcp-servers/fixtures/accounts.json`)
-> so the demo is deterministic and offline. Swap the fixture reads for live API clients
-> to go to production, schemas already mirror the vendors (per the RevOps "data gap
-> analysis" next step).
+> **Data:** the demo can run deterministically from API-shaped fixtures, while the
+> platform uses live vendor adapters when configured. No unavailable signal is replaced
+> with a guessed value.
 
 ## The demo in one line
 Ask for today's actions → **Northwind = Priority-1 churn risk** (churn 72% + Sev-1, drafted exec outreach) → **Initech = Day-15 payment** (high-ARR Strategic; SmallCo, Scaled, correctly auto-suspends with no task) → **Globex & Umbrella = expansion** → and **Umbrella's ticket spike is suppressed** because 16 of 18 tickets are on its `um-dev` **test** instance, so a naive tool would false-alarm churn, but the harness keeps Umbrella an expansion play.
