@@ -296,7 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             for k, v in (extra_headers or {}).items():
                 self.send_header(k, v)
             self.end_headers()
-            self.wfile.write(body)
+            if not getattr(self, "_head_only", False):
+                self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             # The browser navigated away or cancelled the request before delivery.
             return
@@ -389,6 +390,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):  # quiet console
         pass
+
+    def do_HEAD(self):  # noqa: N802
+        """Answer HEAD like GET but without a body. Prevents a 501 from the stdlib
+        default handler for HEAD probes (load balancers, proxies, curl -I)."""
+        # Reuse do_GET's logic but suppress the body: capture via a minimal shim.
+        self._head_only = True
+        try:
+            self.do_GET()
+        finally:
+            self._head_only = False
 
     def do_GET(self):  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
