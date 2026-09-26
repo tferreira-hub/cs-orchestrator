@@ -51,12 +51,13 @@ The platform calls live adapters when credentials are present. If a source is mi
 | HubSpot | bi-directional | roster, ARR, renewal, contacts, owner, instance family; health/risk/playbook write-back |
 | Zendesk | read-only | tickets, CSAT, Sev-1, per-instance support signals |
 | Stripe | read-only | invoice ageing, dunning/suspension handoff decisions |
-| Pendo | read-only | risk advisor, adoption, usage recency, plan tier |
-| Jiminny | read-only | latest call, sentiment, summary, customer talk ratio |
+| Pendo | read-only | risk advisor, adoption, usage recency, plan tier; opt-in API/usage-velocity from the Aggregation API (`CS_PENDO_ACTIVITY=1`). Seat-based utilization comes from Entitlements, not Pendo |
+| Entitlements | read-only | licensed vs active seats → true license-utilization % for the expansion trigger (env-gated; data gap when unconfigured) |
+| Jiminny | read-only | latest call, sentiment (feeds health score + computed risk), summary, customer talk ratio |
 | Rocket Lane | read-only | onboarding status, health, time-to-value |
 | Redshift | read-only | ML churn score / status via the Data API |
 
-The queue also tracks adoption/onboarding tasks, multi-instance suppression, payment automation decisions, task ageing, SLA adherence, and CSM capacity metrics.
+The queue also tracks adoption/onboarding tasks, multi-instance suppression, payment automation decisions, task ageing, SLA adherence, CSM capacity metrics, and portfolio revenue retention (GRR against target, with the expansion pipeline reported separately).
 
 ## Why we built this
 
@@ -87,8 +88,8 @@ Following Fowler/Böckeler's model, a harness is Guides (feedforward) + Sensors 
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
 | `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (78 tests) | computational | feedback |
-| `playbook_judge.py` (queue checker, returns PASS / NEEDS_CHANGES, wired into `orchestrate()`) | computational | feedback |
+| `pytest` (93 tests) | computational | feedback |
+| `playbook_judge.py` (queue checker keyed on stable `rule_id`, returns PASS / NEEDS_CHANGES, wired into `orchestrate()`) | computational | feedback |
 | `cs-playbook-judge` agent (LLM-as-judge, semantic review on top of the code checks) | inferential | feedback |
 
 The deterministic judge runs on every queue before results go back to the user. The agent gets the queue, evidence, suppression list, and judge verdict via `get_task_queue` before it makes any recommendations. If the judge returns `NEEDS_CHANGES`, the agent re-delegates only the flagged items to the right specialist, re-assembles, and judges again. It caps at two correction cycles.
@@ -124,7 +125,7 @@ python3 plugins/cs-orchestrator/mcp-servers/cs_stack_server.py
 pip install -r requirements-dev.txt
 python3 -m pytest plugins/cs-orchestrator/tests/ -v
 ```
-78 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
+93 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
 
 **As a Copilot plugin:**
 

@@ -212,7 +212,7 @@ On the current portfolio, the Protect page count includes four actions: one acti
 - Low active-user percentage
 - Low key-feature adoption
 - Stalled or at-risk onboarding when Rocket Lane is connected
-- Missing Executive Sponsor, Primary Champion, or Finance Contact on Strategic accounts
+- Missing Executive Sponsor, Primary Champion / Admin, or Finance Contact on Strategic accounts
 
 **Scaled behavior:** Stale usage, Pendo advisory, churn status, and routine contact hygiene remain automated for Scaled accounts. A manual CSM task is created only when an explicit exception is raised.
 
@@ -241,6 +241,7 @@ If Rocket Lane or deeper Pendo fields are not connected, the page shows `not con
 - SLA adherence
 - Capacity utilisation
 - Task load by Protect, Expand, and Adopt
+- **Revenue retention:** Gross Revenue Retention (GRR) against the 92% target, computed from live ARR and churned ARR (Redshift/HubSpot churned status). Expansion is reported **separately** as an expansion *pipeline* figure (ARR of healthy accounts carrying an active expansion trigger). No Net Dollar Retention (NDR) percentage is published, because true NDR requires booked expansion/contraction revenue the platform does not yet ingest; reporting an NDR inflated by unrealised opportunity would mislead a board-level metric. When no live ARR is available the metric shows "no data" rather than a fabricated 0%.
 
 A blank KPI result indicates a backend or data problem, not that the team has no workload. The API must return a JSON-safe KPI payload.
 

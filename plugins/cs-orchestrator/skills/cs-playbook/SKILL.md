@@ -49,7 +49,7 @@ CSMs are NOT debt collectors.
 - `day_15_plus` AND **Scaled**: **auto-suspend, NO CSM task** (note it as automated, do not queue for a human).
 
 ## Contact hygiene gate
-If `hubspot.contacts` is missing any of {Executive Sponsor, Primary Champion, Finance Contact} for a **Strategic** account, add a low-priority **MUST_USE** data-hygiene task ("tag missing contact roles"), required for automation accuracy (WoW §5).
+If `hubspot.contacts` is missing any of {Executive Sponsor, Primary Champion / Admin, Finance Contact} for a **Strategic** account, add a low-priority **MUST_USE** data-hygiene task ("tag missing contact roles"), required for automation accuracy (WoW §5).
 
 ## MUST_USE, Adoption and onboarding
 Adoption and onboarding are operational work, not merely dashboard fields.

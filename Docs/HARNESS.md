@@ -32,8 +32,8 @@ This harness has both halves:
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
 | `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (33 tests) | computational | feedback |
-| **`playbook_judge.py`** (deterministic queue checker → PASS/NEEDS_CHANGES, wired into `orchestrate()`) | **computational** | **feedback** |
+| `pytest` (93 tests) | computational | feedback |
+| **`playbook_judge.py`** (deterministic queue checker keyed on stable `rule_id` → PASS/NEEDS_CHANGES, wired into `orchestrate()`) | **computational** | **feedback** |
 | **`cs-playbook-judge`** agent (LLM-as-judge, semantic review beyond the code checks) | **inferential** | **feedback** |
 
 The deterministic orchestrator runs the judge before returning results. The live Agent Automation
@@ -122,7 +122,7 @@ map are all driven by the same rules engine the agent uses. One source of truth.
 - `.mcp.json` uses `type: stdio`.
 - `hooks.json` fires `grounding-gate.py` on `Stop` using the `${PLUGIN_ROOT}` convention.
 - MCP server and hook resolve their data from their own location (no env needed).
-- **33 tests pass** (`plugins/cs-orchestrator/tests/`): rules, suppression, grounding gate,
+- **93 tests pass** (`plugins/cs-orchestrator/tests/`): rules, suppression, grounding gate,
   Stripe secret-key guard, and the playbook judge (PASS on a clean queue; catches
   priority/evidence/draft/routing violations on a deliberately-broken queue).
 - The **playbook judge runs on every queue** (`orchestrate()` returns a `judge` verdict; the

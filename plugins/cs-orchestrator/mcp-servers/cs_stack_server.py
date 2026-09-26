@@ -352,7 +352,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "hubspot_get_account": {
         "handler": tool_hubspot_get_account,
-        "description": "HubSpot company object: segment, ARR, renewal date, tagged contacts (Exec Sponsor/Champion/Finance), and instance hierarchy.",
+        "description": "HubSpot company object: segment, ARR, renewal date, tagged contacts (Exec Sponsor/Champion-Admin/Finance), and instance hierarchy.",
         "inputSchema": _ACCOUNT_ARG,
     },
     "zendesk_get_tickets": {

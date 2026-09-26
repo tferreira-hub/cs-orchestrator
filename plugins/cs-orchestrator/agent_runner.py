@@ -179,7 +179,7 @@ def _structured_actions(queue: dict, accounts: dict) -> list[dict]:
         hs = account.get("hubspot", {})
         sources = account.get("sources", {})
         gaps = [name for name, value in sources.items() if value not in ("live", "computed")]
-        missing_roles = sorted({"Executive Sponsor", "Primary Champion", "Finance Contact"} -
+        missing_roles = sorted({"Executive Sponsor", "Primary Champion / Admin", "Finance Contact"} -
                                {c.get("role") for c in hs.get("contacts", [])})
         if missing_roles:
             gaps.append("missing contact roles: " + ", ".join(missing_roles))

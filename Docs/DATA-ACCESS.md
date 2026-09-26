@@ -43,6 +43,37 @@ export STRIPE_KEY=rk_live_...
 
 # Pendo
 export PENDO_KEY=...
+# What the live Pendo account-aggregation endpoint returns for this tenant (verified
+# against live data): metadata.auto (firstvisit/lastvisit -> usage recency),
+# metadata.agent (planlevel/planprice/tier/sitename -> plan context), and
+# metadata.pendo_predict (the JobAdder risk advisor score/adoption/trend). These are
+# read directly and need no configuration.
+#
+# License utilization %, active users %, and feature adoption % are NOT on the account
+# metadata endpoint. The adapter reports them as a data gap (None) — never guessed. If
+# your Pendo instance exposes any as account metadata, map it explicitly (dotted paths):
+#   export PENDO_LICENSE_UTILIZATION_PCT_KEY=metadata.custom.license_utilization
+# (For TRUE license utilization prefer the Entitlements connector below — it is the
+#  authoritative seats-sold-vs-used source; Pendo only sees activity.)
+#
+# API / usage VELOCITY is available via the Pendo Aggregation API (usage events),
+# which IS reachable with PENDO_KEY. Enabling it derives per-account event counts for
+# the last 7d vs prior 7d and feeds the API-surge expansion trigger (>= 1.4x). It is a
+# real activity proxy (event volume), tagged usage.api_velocity_source=pendo_activity_events
+# so it is never over-claimed as a literal API-call meter. Opt-in (2 extra aggregation
+# calls per account; keep an eye on rate limits / fan-out):
+#   export CS_PENDO_ACTIVITY=1
+
+# Entitlements (authoritative license utilization for the >= 85% expansion trigger)
+# License utilization is a contract-vs-usage metric; its source of truth is the
+# billing/entitlement system, not product telemetry. This connector is an explicit,
+# read-only, env-gated seam — point it at whatever internal service owns seat counts.
+# Unset => not connected (license utilization stays a data gap; nothing fabricated).
+export ENTITLEMENTS_API_URL=...        # base URL of the entitlements service
+export ENTITLEMENTS_KEY=...            # bearer token
+# export ENTITLEMENTS_ACCOUNT_PATH=/accounts/{account_ref}   # optional route template
+# The response is read flexibly: an explicit `license_utilization_pct`, or computed
+# from active_seats/seats_used over licensed_seats/seats_purchased.
 
 # Zendesk
 export ZENDESK_SUBDOMAIN=jobadder

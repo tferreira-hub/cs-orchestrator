@@ -39,10 +39,69 @@ UTIL_EXPANSION = 85
 API_SURGE = 1.4
 USAGE_DROP = 0.6
 HIGH_ARR = 100000
-REQUIRED_ROLES = {"Executive Sponsor", "Primary Champion", "Finance Contact"}
+# Required contact roles per the signed WoW §5. The canonical label matches the
+# framework verbatim ("Primary Champion / Admin"); the same string is produced by
+# the HubSpot role mapper and stored in fixtures, so the hygiene gate compares like
+# with like.
+REQUIRED_ROLES = {"Executive Sponsor", "Primary Champion / Admin", "Finance Contact"}
 ADOPTION_DAYS_SINCE_VISIT = 14
 ACTIVE_USERS_ADOPTION_FLOOR = 60
 FEATURE_ADOPTION_FLOOR = 50
+
+# --- Stable rule identifiers -------------------------------------------------
+# Every task carries a machine-stable `rule_id` in addition to its human-readable
+# `trigger`. The deterministic judge (playbook_judge.py) keys its priority/routing
+# checks on these IDs, NOT on the prose in `trigger`, so editing a trigger's wording
+# can never silently break the feedback sensor. The `trigger` remains the display
+# string; the `rule_id` is the contract between the engine and the judge.
+#
+# Each rule_id maps to its expected priority via RULE_PRIORITY below.
+RULE_PREDICTIVE_RISK = "predictive_risk_playbook"        # P1 MUST_PROTECT (Strategic ML/multi-signal risk)
+RULE_CHURNED_RECOVERY = "churned_account_recovery"       # P2 MUST_PROTECT (Strategic churned)
+RULE_SCALED_EXCEPTION = "scaled_exception_escalation"    # P2 MUST_PROTECT (Scaled exception)
+RULE_DAY15_PAYMENT = "day15_payment_strategic"           # P2 MUST_PROTECT (Day-15 high-ARR Strategic)
+RULE_OVERDUE_RENEWAL = "overdue_renewal_escalation"      # P2 MUST_PROTECT (renewal past due)
+RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
+RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
+RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
+RULE_RENEWAL_CADENCE = "proactive_renewal_cadence"       # P4 MUST_EXPAND (T-120/90/60/30)
+RULE_ADOPTION_INTERVENTION = "adoption_onboarding_intervention"  # P5 MUST_USE
+RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategic)
+
+# Expected priority per rule_id. The judge uses this instead of prose matching.
+RULE_PRIORITY = {
+    RULE_PREDICTIVE_RISK: 1,
+    RULE_CHURNED_RECOVERY: 2,
+    RULE_SCALED_EXCEPTION: 2,
+    RULE_DAY15_PAYMENT: 2,
+    RULE_OVERDUE_RENEWAL: 2,
+    RULE_EXPANSION_UTILIZATION: 3,
+    RULE_EXPANSION_API_SURGE: 3,
+    RULE_EXPANSION_ADOPTION: 3,
+    RULE_RENEWAL_CADENCE: 4,
+    RULE_ADOPTION_INTERVENTION: 5,
+    RULE_CONTACT_HYGIENE: 5,
+}
+
+
+def payment_disposition(segment: str, arr: int, stage: str) -> str:
+    """Single source of truth for the WoW "No Chasing" payment policy.
+
+    Maps (segment, ARR, dunning stage) to one disposition, used by BOTH the task
+    engine (whether to create a Day-15 CSM task) and the automation-status record
+    (what billing handoff to report), so the two can never drift:
+      - 'automated_dunning'         days 1-14: fully automated, no CSM task
+      - 'payment_risk_escalation'   day 15+, Strategic, high-ARR: CSM task
+      - 'auto_suspend'              day 15+, everything else: automated, no task
+      - 'none'                      no active dunning
+    """
+    if stage == "day_1_14":
+        return "automated_dunning"
+    if stage == "day_15_plus":
+        if segment == "Strategic" and (arr or 0) >= HIGH_ARR:
+            return "payment_risk_escalation"
+        return "auto_suspend"
+    return "none"
 
 
 def _load() -> dict:
@@ -77,10 +136,10 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
 
     tasks: list[dict] = []
 
-    def add(priority, mandate, trigger, evidence, action, draft=None):
+    def add(rule_id, priority, mandate, trigger, evidence, action, draft=None):
         sla_hours = {1: 24, 2: 24, 3: 168, 4: 336, 5: 168, 6: 336}.get(priority)
-        t = {"priority": priority, "account": name, "segment": segment,
-             "mandate": mandate, "trigger": trigger, "evidence": evidence,
+        t = {"priority": priority, "account_id": account_id, "account": name, "segment": segment,
+             "mandate": mandate, "rule_id": rule_id, "trigger": trigger, "evidence": evidence,
              "recommended_action": action,
              "task_id": hashlib.sha256(f"{account_id}:{trigger}".encode()).hexdigest()[:16],
              "created_on": TODAY.isoformat(),
@@ -170,7 +229,8 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
                 risk_evidence["csat_30d"] = zd.get("csat_30d")
             draft_message, draft_type = risk_draft()
             recovery_priority = 2 if churn_status == "churned" else 1
-            add(recovery_priority, "MUST_PROTECT", risk_trigger,
+            risk_rule_id = RULE_CHURNED_RECOVERY if churn_status == "churned" else RULE_PREDICTIVE_RISK
+            add(risk_rule_id, recovery_priority, "MUST_PROTECT", risk_trigger,
                 risk_evidence,
                 risk_action,
                 draft_message)
@@ -193,20 +253,19 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
                 risk_evidence["pendo_risk"] = usage.get("pendo_risk_score")
             if zd.get("csat_30d") is not None:
                 risk_evidence["csat_30d"] = zd.get("csat_30d")
-            add(2, "MUST_PROTECT", risk_trigger,
+            add(RULE_SCALED_EXCEPTION, 2, "MUST_PROTECT", risk_trigger,
                 risk_evidence,
                 "Exception from the automated flow: review and, if warranted, escalate via the scaled playbook.")
 
     # --- Payment risk (No Chasing rule) ---
     stage = stripe.get("dunning_stage", "none")
-    if stage == "day_15_plus":
-        if segment == "Strategic" and arr >= HIGH_ARR:
-            risk_fired = True
-            add(2, "MUST_PROTECT", "Day-15 payment (high-ARR Strategic)",
-                {"days_past_due": stripe.get("days_past_due"), "amount_due_usd": stripe.get("amount_due_usd"), "arr_usd": arr},
-                "Executive outreach to Finance Contact to prevent service disruption.",
-                f"Hi {(_first_contact(hs,'Finance Contact') or f'{name} Finance team')}, our records show an invoice about {stripe.get('days_past_due')} days past due. I want to make sure there's no disruption to your service. Could you point me to the right person to resolve it?")
-        # Scaled day_15_plus => auto-suspend, NO task (intentionally omitted)
+    if payment_disposition(segment, arr, stage) == "payment_risk_escalation":
+        risk_fired = True
+        add(RULE_DAY15_PAYMENT, 2, "MUST_PROTECT", "Day-15 payment (high-ARR Strategic)",
+            {"days_past_due": stripe.get("days_past_due"), "amount_due_usd": stripe.get("amount_due_usd"), "arr_usd": arr},
+            "Executive outreach to Finance Contact to prevent service disruption.",
+            f"Hi {(_first_contact(hs,'Finance Contact') or f'{name} Finance team')}, our records show an invoice about {stripe.get('days_past_due')} days past due. I want to make sure there's no disruption to your service. Could you point me to the right person to resolve it?")
+    # Scaled day_15_plus => auto-suspend, NO task (intentionally omitted)
 
     # --- MUST_EXPAND: expansion triggers (healthy only) ---
     healthy = score < 0.4 and not sev1 and churn_status != "churned"
@@ -220,14 +279,14 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         dsv = usage.get("days_since_last_visit")
         recent = (dsv is not None and dsv <= 14)
         if util >= UTIL_EXPANSION:
-            add(3, "MUST_EXPAND", "Expansion trigger (license utilization >= 85%)",
+            add(RULE_EXPANSION_UTILIZATION, 3, "MUST_EXPAND", "Expansion trigger (license utilization >= 85%)",
                 {"license_utilization_pct": util}, "Prompt commercial upsell conversation.")
         elif api_now and api_prev and api_now >= API_SURGE * api_prev:
-            add(3, "MUST_EXPAND", "Expansion trigger (API usage surge)",
+            add(RULE_EXPANSION_API_SURGE, 3, "MUST_EXPAND", "Expansion trigger (API usage surge)",
                 {"api_calls_last_7d": api_now, "api_calls_prev_7d": api_prev},
                 "Prompt commercial upsell conversation (API/add-on velocity).")
         elif adoption in ("high", "strong", "increasing") and recent:
-            add(3, "MUST_EXPAND", "Expansion trigger (strong live adoption)",
+            add(RULE_EXPANSION_ADOPTION, 3, "MUST_EXPAND", "Expansion trigger (strong live adoption)",
                 {"pendo_adoption": usage.get("pendo_adoption"),
                  "days_since_last_visit": dsv},
                 "High product adoption on a healthy account, explore upsell / additional seats.")
@@ -252,10 +311,10 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     # driving churn risk. Keep the queue actionable instead of duplicating work.
     if adoption_drivers and segment == "Strategic" and not risk_fired and stage != "day_15_plus":
         adoption_priority = 5 if segment == "Strategic" else 6
-        adoption_action = ("Initiate the adoption playbook: review activation blockers, contact the Primary Champion, "
+        adoption_action = ("Initiate the adoption playbook: review activation blockers, contact the Primary Champion / Admin, "
                            "and schedule a value check-in." if segment == "Strategic" else
                            "Route to the automated adoption program and escalate only if the exception persists.")
-        add(adoption_priority, "MUST_USE", "Adoption / onboarding intervention",
+        add(RULE_ADOPTION_INTERVENTION, adoption_priority, "MUST_USE", "Adoption / onboarding intervention",
             {"drivers": adoption_drivers,
              "days_since_last_visit": days_since_visit,
              "active_users_pct": active_users,
@@ -270,7 +329,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         milestone = None
         if dtr <= 0:
             if segment == "Strategic":
-                add(2, "MUST_PROTECT", "Overdue renewal escalation",
+                add(RULE_OVERDUE_RENEWAL, 2, "MUST_PROTECT", "Overdue renewal escalation",
                     {"days_since_renewal": abs(dtr), "renewal_date": hs["renewal_date"]},
                     "Escalate the overdue renewal internally and confirm the commercial owner.")
         elif dtr <= 30:
@@ -282,7 +341,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         elif dtr <= 120:
             milestone = ("T-120", "Internal risk check.")
         if milestone and segment == "Strategic" and churn_status != "churned":
-            add(4, "MUST_EXPAND", f"Proactive renewal {milestone[0]}",
+            add(RULE_RENEWAL_CADENCE, 4, "MUST_EXPAND", f"Proactive renewal {milestone[0]}",
                 {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"]}, milestone[1])
 
     # --- MUST_USE: contact hygiene gate (WoW §5: roles maintained on ALL accounts) ---
@@ -291,7 +350,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     # Contact hygiene remains visible in Data Gaps, but should not compete with
     # an urgent risk/payment action in the CSM's daily queue.
     if missing and segment == "Strategic" and not risk_fired and stage != "day_15_plus":
-        add(5, "MUST_USE", "Contact hygiene (missing required roles)",
+        add(RULE_CONTACT_HYGIENE, 5, "MUST_USE", "Contact hygiene (missing required roles)",
             {"missing_roles": sorted(missing)}, "Tag missing contact roles in CRM (WoW §5).")
 
     return tasks, suppressed_signals(hs, zd)
@@ -339,25 +398,29 @@ def payment_automation_status(account_id: str, account: dict) -> dict | None:
     """
     stripe = account.get("stripe", {}) or {}
     stage = stripe.get("dunning_stage", "none")
-    if stage not in {"day_1_14", "day_15_plus"}:
-        return None
     hs = account.get("hubspot", {}) or {}
     segment = hs.get("segment") or "Scaled"
     arr = hs.get("arr_usd") or 0
     name = hs.get("name", account_id)
-    if stage == "day_1_14":
+    # Shared classifier: identical policy the task engine uses, so the automation
+    # record and the queue can never disagree about a Day-15 account.
+    disposition = payment_disposition(segment, arr, stage)
+    if disposition == "none":
+        return None
+    days_past_due = stripe.get("days_past_due")
+    if disposition == "automated_dunning":
         return {"account_id": account_id, "account": name, "workflow": "automated_dunning",
                 "status": "handoff_required", "requires_csm": False,
-                "days_past_due": stripe.get("days_past_due"),
+                "days_past_due": days_past_due,
                 "note": "Days 1-14 are handled by the billing automation; no CSM task is created."}
-    if segment == "Strategic" and arr >= HIGH_ARR:
+    if disposition == "payment_risk_escalation":
         return {"account_id": account_id, "account": name, "workflow": "payment_risk_escalation",
                 "status": "cs_task_created", "requires_csm": True,
-                "days_past_due": stripe.get("days_past_due"),
+                "days_past_due": days_past_due,
                 "note": "High-ARR Strategic Day-15 payment exception is routed to the CSM."}
     return {"account_id": account_id, "account": name, "workflow": "auto_suspend",
             "status": "handoff_required", "requires_csm": False,
-            "days_past_due": stripe.get("days_past_due"),
+            "days_past_due": days_past_due,
             "note": "Scaled Day-15 payment is handled by automated suspension; no CSM task is created."}
 
 

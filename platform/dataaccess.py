@@ -77,9 +77,21 @@ def account(account_id: str) -> dict:
     churn, sources["churn"] = _pull(
         _ADAPTERS and _src.CHURN.live(), lambda: _src.CHURN.score(account_id), "churn")
     if not churn:
-        churn = _computed_risk(usage, zendesk, stripe, sources)
+        churn = _computed_risk(usage, zendesk, stripe, jiminny, sources)
         if churn:
             sources["churn"] = "computed"
+
+    # True license utilization comes from the entitlement/billing system, not Pendo.
+    # When configured, merge it into the usage block so the expansion rule (>= 85%)
+    # can fire on real seats-used data. Unconfigured / no record => data gap (None).
+    entitlements, sources["entitlements"] = _pull(
+        _ADAPTERS and _src.ENTITLEMENTS.live(),
+        lambda: _src.ENTITLEMENTS.utilization(account_id), "entitlements")
+    if entitlements.get("license_utilization_pct") is not None:
+        usage = dict(usage)
+        usage["license_utilization_pct"] = entitlements["license_utilization_pct"]
+        usage["licensed_seats"] = entitlements.get("licensed_seats")
+        usage["active_seats"] = entitlements.get("active_seats")
 
     return {
         "hubspot": hubspot,
@@ -93,11 +105,11 @@ def account(account_id: str) -> dict:
     }
 
 
-def _computed_risk(usage: dict, zendesk: dict, stripe: dict, sources: dict) -> dict:
+def _computed_risk(usage: dict, zendesk: dict, stripe: dict, jiminny: dict, sources: dict) -> dict:
     """A transparent 0-1 churn-risk score from live signals (NOT an ML model).
     Only computed when at least one live risk input exists; otherwise returns {}."""
     have_live = (sources.get("usage") == "live") or (sources.get("zendesk") == "live") \
-        or (sources.get("stripe") == "live")
+        or (sources.get("stripe") == "live") or (sources.get("jiminny") == "live")
     if not have_live:
         return {}
 
@@ -135,11 +147,15 @@ def _computed_risk(usage: dict, zendesk: dict, stripe: dict, sources: dict) -> d
     elif (stripe.get("past_due_invoices") or 0) > 0:
         score += 0.10; reasons.append("past-due invoice")
 
+    # Jiminny (live): negative call sentiment is a leading relationship-risk signal.
+    if str(jiminny.get("sentiment") or "").lower() == "negative":
+        score += 0.15; reasons.append("negative call sentiment")
+
     score = round(min(1.0, score), 2)
     return {
         "ml_churn_score": score,     # same key the engine/health read
         "computed": True,            # NOT an ML model
-        "method": "weighted live signals (Pendo risk + recency + CSAT/Sev-1 + Stripe dunning)",
+        "method": "weighted live signals (Pendo risk + recency + CSAT/Sev-1 + Stripe dunning + Jiminny sentiment)",
         "reasons": reasons,
     }
 
@@ -190,17 +206,74 @@ def all_accounts() -> dict:
         # HubSpot roster membership is the live source of truth for instance
         # hierarchy. Attach the complete sibling family before orchestration so
         # suppression can distinguish primary from test/secondary instances.
-        for aid, acct in data.items():
-            hs = acct.get("hubspot", {})
-            family = [ref for ref in roster if _src.identity.same_account(aid, ref)]
-            if hs and family:
-                hs["instances"] = [
-                    {"instance_id": _src.identity.normalise(ref),
-                     "instance_type": _src.identity.instance_type(ref)}
-                    for ref in family
-                ]
+        _merge_instance_families(data, roster)
         _CACHE["data"], _CACHE["ts"] = data, now
         return data
+
+
+def _is_zendesk_live(acct: dict) -> bool:
+    """True when this assembled account's Zendesk block came from the live adapter."""
+    return acct.get("sources", {}).get("zendesk") == "live"
+
+
+def _merge_instance_families(data: dict, roster: list[str]) -> dict:
+    """Attach the sibling instance family to each account and fold live per-instance
+    Zendesk volume into a single `by_instance` map, so multi-instance suppression
+    (WoW §5) works on real Zendesk data — not just fixtures.
+
+    Each sibling instance is fetched as its own roster entry with its own Zendesk
+    org, so its ticket count already lives in data[sibling]["zendesk"]. We collect
+    every live sibling's last-7d volume, keyed by normalised instance id, onto the
+    account's Zendesk block. `suppression.ticket_spike_on_primary()` then compares
+    primary vs test/secondary counts instead of a single self-referential entry.
+
+    Mutates and returns `data`.
+    """
+    norm = _src.identity.normalise if _ADAPTERS else (lambda x: str(x).strip().lower().replace("_", "-"))
+    inst_type = _src.identity.instance_type if _ADAPTERS else (lambda x: "primary")
+    same = _src.identity.same_account if _ADAPTERS else (lambda a, b: norm(a) == norm(b))
+
+    for aid, acct in data.items():
+        hs = acct.get("hubspot", {})
+        family = [ref for ref in roster if same(aid, ref)]
+        if not (hs and family):
+            continue
+        hs["instances"] = [
+            {"instance_id": norm(ref), "instance_type": inst_type(ref)}
+            for ref in family
+        ]
+        if not _is_zendesk_live(acct):
+            continue
+        by_instance: dict[str, int] = {}
+        total_last7 = 0
+        total_prev7 = 0
+        for ref in family:
+            sib = data.get(norm(ref))
+            sib_zd = (sib or {}).get("zendesk") or {}
+            # Only count siblings whose Zendesk record is genuinely live.
+            if not _is_zendesk_live(sib or {}):
+                continue
+            inst_id = norm(ref)
+            # Prefer the sibling's own by_instance entry; fall back to its
+            # tickets_last_7d total (self-attributed to that instance).
+            sib_counts = sib_zd.get("by_instance") or {}
+            count = sib_counts.get(inst_id)
+            if count is None:
+                count = sib_zd.get("tickets_last_7d") or 0
+            by_instance[inst_id] = count
+            total_last7 += sib_zd.get("tickets_last_7d") or 0
+            total_prev7 += sib_zd.get("tickets_prev_7d") or 0
+        if by_instance:
+            zd = acct.setdefault("zendesk", {})
+            zd["by_instance"] = by_instance
+            # Use family-wide totals so a spike concentrated on a test sibling is
+            # DETECTED at the account level and then correctly SUPPRESSED as
+            # non-primary-driven — producing the visible "Suppressed" entry rather
+            # than silently never firing.
+            if len(by_instance) > 1:
+                zd["tickets_last_7d"] = total_last7
+                zd["tickets_prev_7d"] = total_prev7
+    return data
 
 
 def any_live() -> bool:
@@ -208,7 +281,8 @@ def any_live() -> bool:
     if not _ADAPTERS:
         return False
     return any([_src.HUBSPOT.live(), _src.ZENDESK.live(), _src.PENDO.live(),
-                _src.JIMINNY.live(), _src.ROCKET_LANE.live(), _src.STRIPE.live(), _src.CHURN.live()])
+                _src.JIMINNY.live(), _src.ROCKET_LANE.live(), _src.STRIPE.live(),
+                _src.CHURN.live(), _src.ENTITLEMENTS.live()])
 
 
 def live_sources() -> list[str]:
@@ -218,5 +292,6 @@ def live_sources() -> list[str]:
          "Pendo": _src.PENDO.live(), "Jiminny": _src.JIMINNY.live(),
          "Rocket Lane": _src.ROCKET_LANE.live(),
          "Stripe": _src.STRIPE.live(),
-         "Churn Model": _src.CHURN.live()}
+         "Churn Model": _src.CHURN.live(),
+         "Entitlements": _src.ENTITLEMENTS.live()}
     return [k for k, v in m.items() if v]

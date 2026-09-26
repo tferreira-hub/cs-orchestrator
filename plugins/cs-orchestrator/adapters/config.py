@@ -22,6 +22,17 @@ Environment variables (set the ROTATED keys, not any that were shared in chat):
                                                      PENDO_KEY_FEATURE_ADOPTION_PCT_KEY, PENDO_API_CALLS_LAST_7D_KEY,
                                                      PENDO_API_CALLS_PREV_7D_KEY, PENDO_LOGINS_LAST_7D_KEY,
                                                      PENDO_LOGINS_PREV_7D_KEY. Unmapped metrics remain unavailable.
+    CS_PENDO_ACTIVITY        Optional "1" to derive API/usage velocity (last-7d vs
+                             prior-7d event counts) from the Pendo Aggregation API and
+                             feed the API-surge expansion trigger. Off by default (adds
+                             two aggregation calls per account). Tagged
+                             usage.api_velocity_source=pendo_activity_events (an activity
+                             proxy, not a literal API-call meter).
+    ENTITLEMENTS_API_URL     Optional entitlement/billing service base URL; authoritative
+                             source for TRUE license utilization (seats sold vs used).
+    ENTITLEMENTS_KEY         Optional entitlements bearer token.
+    ENTITLEMENTS_ACCOUNT_PATH Optional account route, default /accounts/{account_ref}.
+                             Unset => license utilization stays a data gap (not guessed).
 
   Churn model (Redshift Data API - no secret stored here; AWS creds come from
   the standard boto3 chain, e.g. AWS_PROFILE for the data platform account):
@@ -40,6 +51,13 @@ Environment variables (set the ROTATED keys, not any that were shared in chat):
     REDSHIFT_CHURN_DRIVER_2_COLUMN secondary driver column (default: top_driver_2)
     REDSHIFT_CHURN_SCORED_AT_COLUMN score timestamp column (default: scored_at)
   AWS_REGION                 Redshift Data API region (default: ap-southeast-2)
+  REDSHIFT_ASSUME_ROLE_ARN   Optional. Cross-account access: role ARN in the Data
+                             Platform account to assume before calling the Redshift
+                             Data API (the CS Platform task role calls sts:AssumeRole).
+                             Unset => use ambient creds (local AWS_PROFILE / same-account
+                             task role). The assumed role needs redshift-data:* and
+                             redshift-serverless:GetCredentials on the churn workgroup.
+  REDSHIFT_ASSUME_ROLE_SESSION Optional STS session name (default: cs-platform-churn).
 
 Global:
   CS_USE_LIVE   "1"/"true" to enable live calls where a key exists (default: auto -
@@ -141,6 +159,18 @@ def http_post(url: str, headers: dict[str, str], body: dict | str, timeout: int 
     writes are explicitly enabled."""
     if not writes_allowed() and _looks_like_write(url):
         raise SourceError(f"Read-only mode: refusing POST to write endpoint {url}")
+    data = (json.dumps(body) if isinstance(body, dict) else body).encode("utf-8")
+    return _request_with_retry("POST", url, headers, data, timeout)
+
+
+def http_post_readonly(url: str, headers: dict[str, str], body: dict | str, timeout: int = 12) -> Any:
+    """A POST that is KNOWN to be non-mutating (e.g. an analytics/aggregation query
+    endpoint that only reads). Bypasses the `_looks_like_write` heuristic — which is
+    tuned for CRM 'search'/'batch/read' paths and would false-positive on an
+    aggregation URL — while still going through the shared 429 retry/backoff so it is
+    as resilient as every other adapter call. Callers must only use this for endpoints
+    they have verified are read-only. It never sends a mutation and is unaffected by
+    CS_ALLOW_WRITE."""
     data = (json.dumps(body) if isinstance(body, dict) else body).encode("utf-8")
     return _request_with_retry("POST", url, headers, data, timeout)
 

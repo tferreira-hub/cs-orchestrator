@@ -56,6 +56,47 @@ def test_scaled_account_no_payment_task():
         "SmallCo must not get a payment-chasing task"
 
 
+def test_payment_disposition_is_single_source_of_truth():
+    """The shared payment_disposition classifier maps (segment, ARR, stage) the same
+    way the task engine and the automation record both rely on."""
+    d = orchestrate.payment_disposition
+    assert d("Strategic", 150000, "day_1_14") == "automated_dunning"
+    assert d("Scaled", 5000, "day_1_14") == "automated_dunning"
+    assert d("Strategic", 150000, "day_15_plus") == "payment_risk_escalation"
+    assert d("Strategic", 50000, "day_15_plus") == "auto_suspend"   # below high-ARR
+    assert d("Scaled", 200000, "day_15_plus") == "auto_suspend"
+    assert d("Strategic", 150000, "none") == "none"
+
+
+def test_task_engine_and_automation_agree_via_shared_helper():
+    """The Day-15 task branch and payment_automation_status() must never disagree,
+    because both dispatch on payment_disposition()."""
+    account = {
+        "hubspot": {"name": "PayCo", "segment": "Strategic", "arr_usd": 250000, "contacts": []},
+        "stripe": {"dunning_stage": "day_15_plus", "days_past_due": 20, "amount_due_usd": 9000},
+        "usage": {}, "churn": {}, "zendesk": {}, "onboarding": {},
+    }
+    tasks, _ = orchestrate.evaluate("au1-pay", account)
+    day15 = [t for t in tasks if t["rule_id"] == orchestrate.RULE_DAY15_PAYMENT]
+    assert day15, "high-ARR Strategic day_15_plus should create a Day-15 task"
+    auto = orchestrate.payment_automation_status("au1-pay", account)
+    assert auto["workflow"] == "payment_risk_escalation"
+    assert auto["requires_csm"] is True
+
+
+def test_every_task_carries_account_id_for_stable_joins():
+    """Tasks must carry account_id so downstream joins don't rely on display name
+    (which can collide)."""
+    result = orchestrate.orchestrate()
+    assert result["tasks"]
+    for t in result["tasks"]:
+        assert t.get("account_id"), t
+    # account_id must correspond to a real account key.
+    accounts = orchestrate.load_accounts()
+    for t in result["tasks"]:
+        assert t["account_id"] in accounts, t["account_id"]
+
+
 def test_must_use_creates_adoption_intervention():
     account = {
         "hubspot": {"name": "Adoption Gap", "segment": "Strategic", "contacts": []},
@@ -356,15 +397,17 @@ def test_playbook_judge_catches_violations():
     scaled_name = scaled["hubspot"]["name"]
 
     broken = [
-        # priority ordering wrong (P5 before P1) + bad mandate + no evidence + no draft on P1 risk
+        # priority ordering wrong (P5 before P1) + bad mandate + no evidence
         {"priority": 5, "account": scaled_name, "segment": "Scaled",
-         "mandate": "MUST_USE", "trigger": "x", "evidence": {"a": 1}},
+         "mandate": "MUST_USE", "rule_id": "contact_hygiene", "trigger": "x", "evidence": {"a": 1}},
         {"priority": 1, "account": scaled_name, "segment": "Scaled",
-         "mandate": "MUST_PROTECT", "trigger": "Predictive Risk Playbook (24h SLA)",
+         "mandate": "MUST_PROTECT", "rule_id": "predictive_risk_playbook",
+         "trigger": "Predictive Risk Playbook (24h SLA)",
          "evidence": {}},  # no evidence + no draft_message
         # Scaled account getting a proactive expansion task (routing violation)
         {"priority": 3, "account": scaled_name, "segment": "Scaled",
-         "mandate": "MUST_EXPAND", "trigger": "Expansion trigger", "evidence": {"x": 1}},
+         "mandate": "MUST_EXPAND", "rule_id": "expansion_license_utilization",
+         "trigger": "Expansion trigger", "evidence": {"x": 1}},
     ]
     v = judge(broken, accts)
     rules = {x["rule"] for x in v["violations"]}
@@ -373,6 +416,72 @@ def test_playbook_judge_catches_violations():
     assert "evidence_grounding" in rules, rules
     assert "draft_presence" in rules, rules
     assert "segment_routing" in rules, rules
+
+
+def test_every_task_carries_a_known_rule_id():
+    """Every emitted task must carry a stable rule_id that the judge knows about.
+    This is the engine/judge contract that replaces prose matching."""
+    result = orchestrate.orchestrate()
+    assert result["tasks"]
+    for t in result["tasks"]:
+        assert t.get("rule_id"), t
+        assert t["rule_id"] in orchestrate.RULE_PRIORITY, t["rule_id"]
+
+
+def test_rule_priority_contract_matches_emitted_priorities():
+    """The priority the engine assigns must match the RULE_PRIORITY contract the
+    judge checks against (except contact hygiene, which is segment-dependent)."""
+    result = orchestrate.orchestrate()
+    for t in result["tasks"]:
+        expected = orchestrate.RULE_PRIORITY[t["rule_id"]]
+        if t["rule_id"] == orchestrate.RULE_CONTACT_HYGIENE and t["segment"] != "Strategic":
+            expected = 6
+        assert t["priority"] == expected, (t["rule_id"], t["priority"], expected)
+
+
+def test_judge_keys_priority_on_rule_id_not_trigger_prose():
+    """Renaming a trigger's wording must NOT break the judge's priority check —
+    the judge keys on rule_id. A P1 predictive-risk task with a totally rewritten
+    trigger string but the correct rule_id still passes the priority mapping."""
+    from playbook_judge import judge
+    accts = orchestrate.load_accounts()
+    name = next(iter(accts.values()))["hubspot"]["name"]
+    task = {"priority": 1, "account": name, "segment": "Strategic",
+            "mandate": "MUST_PROTECT", "rule_id": "predictive_risk_playbook",
+            "trigger": "Totally Reworded Risk Headline",   # prose changed
+            "evidence": {"drivers": ["sev1_open"]}, "draft_message": "Hi."}
+    v = judge([task], accts)
+    rules = {x["rule"] for x in v["violations"]}
+    assert "priority_mapping" not in rules, v["violations"]
+
+
+def test_judge_flags_wrong_priority_by_rule_id():
+    """A task whose priority contradicts its rule_id's contract is flagged,
+    regardless of trigger wording."""
+    from playbook_judge import judge
+    accts = orchestrate.load_accounts()
+    name = next(iter(accts.values()))["hubspot"]["name"]
+    task = {"priority": 4, "account": name, "segment": "Strategic",   # wrong: should be P1
+            "mandate": "MUST_PROTECT", "rule_id": "predictive_risk_playbook",
+            "trigger": "Predictive Risk Playbook (24h SLA)",
+            "evidence": {"drivers": ["sev1_open"]}, "draft_message": "Hi."}
+    v = judge([task], accts)
+    rules = {x["rule"] for x in v["violations"]}
+    assert "priority_mapping" in rules, v["violations"]
+
+
+def test_judge_flags_missing_rule_id():
+    """A task with no rule_id is flagged so the engine/judge contract can't silently
+    degrade back to prose matching."""
+    from playbook_judge import judge
+    accts = orchestrate.load_accounts()
+    name = next(iter(accts.values()))["hubspot"]["name"]
+    task = {"priority": 1, "account": name, "segment": "Strategic",
+            "mandate": "MUST_PROTECT", "trigger": "Predictive Risk Playbook (24h SLA)",
+            "evidence": {"drivers": ["sev1_open"]}, "draft_message": "Hi."}  # no rule_id
+    v = judge([task], accts)
+    rules = {x["rule"] for x in v["violations"]}
+    assert "rule_id_missing" in rules, v["violations"]
 
 
 def test_grounding_gate_flags_fabricated_number():

@@ -73,6 +73,62 @@ def test_redshift_data_api_score_mode(monkeypatch):
     assert "ORDER BY scored_at DESC" in fake.sql["Sql"]
 
 
+def test_redshift_cold_start_is_not_prematurely_timed_out(monkeypatch):
+    """Regression: a cold Redshift Serverless workgroup takes ~20-30s to resume on
+    the first query (measured ~24s live). The poll loop must wait through several
+    SUBMITTED/PICKED/STARTED polls and still succeed, rather than timing out at 20s
+    as it did before. We verify a statement that only reaches FINISHED after several
+    polls is read successfully."""
+    from adapters import sources
+
+    class SlowClient:
+        def __init__(self):
+            self.polls = 0
+
+        def execute_statement(self, **kwargs):
+            return {"Id": "cold-1"}
+
+        def describe_statement(self, Id):
+            self.polls += 1
+            # Warm up only after several polls (simulates cold-start resume).
+            return {"Status": "FINISHED" if self.polls >= 6 else "STARTED"}
+
+        def get_statement_result(self, Id):
+            return {"Records": [[{"stringValue": "Not churned"}]]}
+
+    fake = SlowClient()
+    monkeypatch.setattr(sources.CHURN, "_client", lambda: fake)
+    monkeypatch.setattr(sources.CHURN, "POLL_INTERVAL_S", 0)   # no real sleep in test
+    monkeypatch.setattr(sources.CHURN, "POLL_TIMEOUT_S", 45)   # the fixed default
+    monkeypatch.setenv("REDSHIFT_DATABASE", "dwh")
+    monkeypatch.setenv("REDSHIFT_WORKGROUP", "warehouse")
+    monkeypatch.setenv("REDSHIFT_CHURN_TABLE", "marts.cs_account_churn_scores")
+    monkeypatch.setenv("REDSHIFT_CHURN_MODE", "status")
+
+    result = sources.CHURN.score("au6-2733")
+    assert result["churn_status"] == "Not churned"
+    assert result["computed"] is False
+    assert fake.polls >= 6   # proves we waited through the cold-start polls
+
+
+def test_redshift_poll_timeout_is_configurable(monkeypatch):
+    """The cold-start poll ceiling is overridable via CS_REDSHIFT_POLL_TIMEOUT_S so
+    an operator can widen it for an especially slow workgroup, and defaults to 45s."""
+    import importlib
+    from adapters import sources as _s
+    # Default (no override) is the cold-start-safe 45s.
+    monkeypatch.delenv("CS_REDSHIFT_POLL_TIMEOUT_S", raising=False)
+    importlib.reload(_s)
+    assert _s.Churn.POLL_TIMEOUT_S == 45
+    # Explicit override is honoured.
+    monkeypatch.setenv("CS_REDSHIFT_POLL_TIMEOUT_S", "90")
+    importlib.reload(_s)
+    assert _s.Churn.POLL_TIMEOUT_S == 90
+    # Restore module to default for the rest of the suite.
+    monkeypatch.delenv("CS_REDSHIFT_POLL_TIMEOUT_S", raising=False)
+    importlib.reload(_s)
+
+
 def test_jiminny_adapter_maps_latest_call(monkeypatch):
     from adapters import config, sources
 
@@ -129,6 +185,289 @@ def test_pendo_configured_nested_metric_is_live(monkeypatch):
     assert result["active_users_pct"] == 72
 
 
+def test_pendo_unmapped_expansion_metrics_are_data_gaps(monkeypatch):
+    """Without an explicit PENDO_<METRIC>_KEY mapping, expansion metrics are a data
+    gap (None) — the adapter never guesses vendor field names or returns 0."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("PENDO_KEY", "test-key")
+    monkeypatch.delenv("CS_PENDO_ACTIVITY", raising=False)   # activity off
+    # No PENDO_*_KEY overrides configured.
+    monkeypatch.setattr(config, "http_get", lambda *args, **kwargs: {
+        "metadata": {"custom": {"license_utilization_pct": 88}, "auto": {"lastvisit": None}}
+    })
+    result = sources.PENDO.metrics("AU1_5005")
+    assert result["license_utilization_pct"] is None
+    assert result["api_calls_last_7d"] is None
+    assert result["active_users_pct"] is None
+    assert result["key_feature_adoption_pct"] is None
+    assert result["api_velocity_source"] is None
+
+
+def test_pendo_activity_velocity_feeds_api_calls_when_enabled(monkeypatch):
+    """With CS_PENDO_ACTIVITY=1, the Pendo Aggregation API supplies per-account event
+    counts (last-7d vs prior-7d) into api_calls_*, tagged as an activity proxy."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("PENDO_KEY", "test-key")
+    monkeypatch.setenv("CS_PENDO_ACTIVITY", "1")
+    monkeypatch.setattr(config, "http_get", lambda *a, **k: {"metadata": {"auto": {"lastvisit": None}}})
+
+    calls = {"n": 0}
+    def fake_agg(pipeline, headers):
+        calls["n"] += 1
+        # first call = last7 window, second = prev7 window
+        return {"results": [{"count": 12 if calls["n"] == 1 else 2}]}
+    # Patch on the class so `self._aggregation` resolves the staticmethod correctly.
+    monkeypatch.setattr(sources.Pendo, "_aggregation", staticmethod(fake_agg))
+
+    result = sources.PENDO.metrics("au-uat_1353")
+    assert result["api_calls_last_7d"] == 12
+    assert result["api_calls_prev_7d"] == 2
+    assert result["api_velocity_source"] == "pendo_activity_events"
+
+
+def test_pendo_activity_off_by_default(monkeypatch):
+    """Activity aggregation is opt-in; off by default it makes no aggregation calls
+    and velocity stays a data gap unless explicitly mapped."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("PENDO_KEY", "test-key")
+    monkeypatch.delenv("CS_PENDO_ACTIVITY", raising=False)
+    monkeypatch.setattr(config, "http_get", lambda *a, **k: {"metadata": {"auto": {"lastvisit": None}}})
+
+    def boom(*a, **k):
+        raise AssertionError("aggregation must not be called when CS_PENDO_ACTIVITY is off")
+    monkeypatch.setattr(sources.Pendo, "_aggregation", staticmethod(boom))
+
+    result = sources.PENDO.metrics("au-uat_1353")
+    assert result["api_calls_last_7d"] is None
+    assert result["api_velocity_source"] is None
+
+
+def test_entitlements_reports_explicit_utilization(monkeypatch):
+    """The env-gated Entitlements connector returns an explicit license_utilization_pct."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("ENTITLEMENTS_API_URL", "https://ent.example")
+    monkeypatch.setenv("ENTITLEMENTS_KEY", "test-key")
+    captured = {}
+    def fake_get(url, headers, timeout=12):
+        captured["url"] = url
+        return {"data": {"license_utilization_pct": 91}}
+    monkeypatch.setattr(config, "http_get", fake_get)
+
+    assert sources.ENTITLEMENTS.live() is True
+    r = sources.ENTITLEMENTS.utilization("au1-5005")
+    assert r["license_utilization_pct"] == 91
+    assert captured["url"].endswith("/accounts/AU1-5005")
+
+
+def test_entitlements_computes_utilization_from_seats(monkeypatch):
+    """When no explicit pct is given, utilization is computed from active/licensed seats."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("ENTITLEMENTS_API_URL", "https://ent.example")
+    monkeypatch.setenv("ENTITLEMENTS_KEY", "test-key")
+    monkeypatch.setattr(config, "http_get", lambda *a, **k: {
+        "licensed_seats": 200, "active_seats": 184})
+    r = sources.ENTITLEMENTS.utilization("au1-5005")
+    assert r["license_utilization_pct"] == 92   # round(100*184/200)
+
+
+def test_entitlements_not_configured_is_data_gap(monkeypatch):
+    """Unconfigured entitlements => not live; the platform reports a data gap, never
+    a fabricated utilization value."""
+    from adapters import sources
+
+    monkeypatch.delenv("ENTITLEMENTS_API_URL", raising=False)
+    monkeypatch.delenv("ENTITLEMENTS_KEY", raising=False)
+    assert sources.ENTITLEMENTS.live() is False
+
+
+def test_entitlements_utilization_fires_expansion_trigger():
+    """End-to-end: an entitlements-sourced license utilization >= 85% on a healthy
+    Strategic account fires the expansion trigger through the rules engine."""
+    import orchestrate
+    account = {
+        "hubspot": {"name": "GrowCo", "segment": "Strategic", "arr_usd": 300000, "contacts": [],
+                    "instances": [{"instance_id": "au1-grow", "instance_type": "primary"}]},
+        "usage": {"license_utilization_pct": 88, "licensed_seats": 200, "active_seats": 176,
+                  "days_since_last_visit": 3},
+        "churn": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
+    }
+    tasks, _ = orchestrate.evaluate("au1-grow", account)
+    exp = [t for t in tasks if t["rule_id"] == orchestrate.RULE_EXPANSION_UTILIZATION]
+    assert exp, "license utilization 88% on a healthy Strategic account should fire expansion"
+    assert exp[0]["evidence"]["license_utilization_pct"] == 88
+
+
+def test_pendo_aggregation_uses_retry_backed_readonly_post(monkeypatch):
+    """The Pendo aggregation call must go through config.http_post_readonly so it
+    inherits the shared 429 retry/backoff (not a bare urllib POST) under fan-out."""
+    from adapters import config, sources
+
+    seen = {}
+    def fake_readonly(url, headers, body, timeout=12):
+        seen["url"] = url
+        seen["pipeline"] = body["request"]["pipeline"]
+        return {"results": [{"count": 5}]}
+    monkeypatch.setattr(config, "http_post_readonly", fake_readonly)
+
+    out = sources.Pendo._aggregation([{"source": {"events": None}}], {"x": "y"})
+    assert out == {"results": [{"count": 5}]}
+    assert seen["url"] == "https://app.pendo.io/api/v1/aggregation"
+
+
+def test_zendesk_csat_is_bounded_to_30_day_window(monkeypatch):
+    """CSAT (field `csat_30d`) must query only the trailing 30 days of rated
+    tickets, so the satisfaction queries carry a `created>=` bound."""
+    from adapters import config, sources
+
+    monkeypatch.setenv("ZENDESK_SUBDOMAIN", "jobadder")
+    monkeypatch.setenv("ZENDESK_EMAIL", "ops@example.com")
+    monkeypatch.setenv("ZENDESK_TOKEN", "tok")
+    queries = []
+
+    def fake_get(url, headers, timeout=12):
+        queries.append(url)
+        if "external_id" in url or "workato" in url:
+            return {"organizations": [{"id": 7, "name": "Org"}],
+                    "results": [{"id": 7, "name": "Org"}]}
+        if "satisfaction%3Agood" in url or "satisfaction:good" in url:
+            return {"count": 8}
+        if "satisfaction%3Abad" in url or "satisfaction:bad" in url:
+            return {"count": 2}
+        return {"count": 1}
+
+    monkeypatch.setattr(config, "http_get", fake_get)
+    result = sources.ZENDESK.tickets("AU1-10094")
+    assert result["csat_30d"] == 80  # 8 / (8+2)
+    sat_queries = [q for q in queries if "satisfaction" in q]
+    assert sat_queries, "expected satisfaction queries"
+    # Every satisfaction query is date-bounded (created>= appears url-encoded).
+    assert all("created%3E%3D" in q for q in sat_queries), sat_queries
+
+
+def test_redshift_cross_account_assume_role(monkeypatch):
+    """When REDSHIFT_ASSUME_ROLE_ARN is set, the churn client is built from assumed-role
+    temp credentials (cross-account Data Platform access); unset = ambient creds."""
+    import sys as _sys, types
+    from adapters import sources, config
+
+    calls = {"assumed": False, "client_kwargs": None}
+
+    class FakeSTS:
+        def assume_role(self, RoleArn, RoleSessionName):
+            calls["assumed"] = (RoleArn, RoleSessionName)
+            return {"Credentials": {"AccessKeyId": "AK", "SecretAccessKey": "SK",
+                                     "SessionToken": "TOK"}}
+
+    def fake_client(service, **kwargs):
+        if service == "sts":
+            return FakeSTS()
+        calls["client_kwargs"] = kwargs
+        return object()
+
+    fake_boto3 = types.ModuleType("boto3")
+    fake_boto3.client = fake_client
+    monkeypatch.setitem(_sys.modules, "boto3", fake_boto3)
+    monkeypatch.setenv("REDSHIFT_ASSUME_ROLE_ARN", "arn:aws:iam::503561421603:role/cs-platform-churn-reader")
+    monkeypatch.setenv("AWS_REGION", "ap-southeast-2")
+
+    sources.CHURN._client()
+    assert calls["assumed"][0].endswith(":role/cs-platform-churn-reader")
+    assert calls["assumed"][1] == "cs-platform-churn"
+    # The redshift-data client was built with the assumed temp credentials.
+    assert calls["client_kwargs"]["aws_access_key_id"] == "AK"
+    assert calls["client_kwargs"]["aws_session_token"] == "TOK"
+
+
+def test_redshift_cross_account_assume_role_default_ambient(monkeypatch):
+    """Without REDSHIFT_ASSUME_ROLE_ARN, no assume_role happens (ambient creds)."""
+    import sys as _sys, types
+    from adapters import sources
+
+    calls = {"assumed": False}
+
+    def fake_client(service, **kwargs):
+        if service == "sts":
+            calls["assumed"] = True
+        return object()
+
+    fake_boto3 = types.ModuleType("boto3")
+    fake_boto3.client = fake_client
+    monkeypatch.setitem(_sys.modules, "boto3", fake_boto3)
+    monkeypatch.delenv("REDSHIFT_ASSUME_ROLE_ARN", raising=False)
+
+    sources.CHURN._client()
+    assert calls["assumed"] is False
+
+
+def test_jiminny_negative_sentiment_lowers_health():
+    """Live Jiminny negative call sentiment must reduce the health score and appear
+    as an explainable driver."""
+    import engine
+    base = {"hubspot": {}, "zendesk": {"csat_30d": 90}, "usage": {}, "churn": {},
+            "stripe": {}, "jiminny": {}}
+    neg = {"hubspot": {}, "zendesk": {"csat_30d": 90}, "usage": {}, "churn": {},
+           "stripe": {}, "jiminny": {"sentiment": "negative"}}
+    h_base = engine.health_score(base)
+    h_neg = engine.health_score(neg)
+    assert h_neg["score"] < h_base["score"]
+    assert any("sentiment: negative" in r for r in h_neg["reasons"])
+    assert h_neg["computable"] is True
+
+
+def test_jiminny_negative_sentiment_raises_computed_risk():
+    """Negative Jiminny sentiment must contribute to the transparent computed risk
+    score when Jiminny is a live source."""
+    import dataaccess
+    risk = dataaccess._computed_risk(
+        usage={}, zendesk={}, stripe={}, jiminny={"sentiment": "negative"},
+        sources={"jiminny": "live"})
+    assert risk, "a live jiminny signal should make risk computable"
+    assert risk["ml_churn_score"] >= 0.15
+    assert any("negative call sentiment" in r for r in risk["reasons"])
+    assert risk["computed"] is True
+
+
+def test_retention_metrics_compute_grr_and_expansion_pipeline():
+    """GRR must compute from real churn; expansion is reported as a SEPARATE pipeline
+    figure (opportunity), never folded into an inflated NDR percentage."""
+    import engine
+    accounts = {
+        "au1-1": {"hubspot": {"name": "A", "segment": "Strategic", "arr_usd": 400000},
+                  "sources": {"hubspot": "live"}, "churn": {}, "usage": {}, "zendesk": {},
+                  "stripe": {}, "jiminny": {}, "onboarding": {}},
+        "au1-2": {"hubspot": {"name": "B", "segment": "Strategic", "arr_usd": 100000,
+                              "lifecycle_stage": "Churned Customer"},
+                  "sources": {"hubspot": "live"}, "churn": {"churn_status": "churned"},
+                  "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+    }
+    tasks_by_account = {"au1-1": [{"rule_id": "expansion_license_utilization"}]}
+    r = engine._retention_metrics(accounts, tasks_by_account)
+    assert r["computable"] is True
+    assert r["grr_pct"] == 80.0            # (500k - 100k) / 500k
+    assert "ndr_pct" not in r              # no inflated NDR published
+    assert r["base_arr_usd"] == 500000
+    assert r["churned_arr_usd"] == 100000
+    # Expansion is a separate PIPELINE figure (opportunity), not retention.
+    assert r["expansion_pipeline_arr_usd"] == 400000
+    assert r["expansion_pipeline_accounts"] == 1
+    assert r["target"] == {"grr_pct": 92}
+
+
+def test_retention_not_computable_without_live_arr():
+    """No live ARR -> retention is explicitly not computable (no fabricated 0%)."""
+    import engine
+    accounts = {"au1-1": {"hubspot": {}, "sources": {}, "churn": {}, "usage": {},
+                          "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}}}
+    r = engine._retention_metrics(accounts, {})
+    assert r["computable"] is False
+    assert r["grr_pct"] is None
+
+
 def test_rocket_lane_adapter_maps_onboarding(monkeypatch):
     from adapters import config, sources
 
@@ -163,6 +502,66 @@ def test_live_roster_enriches_instance_family(monkeypatch):
     instances = accounts["au1-12345"]["hubspot"]["instances"]
     assert {item["instance_id"] for item in instances} == {"au1-12345", "au1-12345-dev", "au2-12345"}
     assert any(item["instance_type"] == "test" for item in instances)
+
+
+def test_live_zendesk_per_instance_suppression(monkeypatch):
+    """WoW §5 multi-instance suppression must work on LIVE Zendesk data, not just
+    fixtures. Each sibling instance is fetched as its own roster entry with its own
+    Zendesk org; the family merge must fold those per-instance counts into one
+    `by_instance` map so a spike concentrated on a test instance is detected and
+    then suppressed as non-primary-driven."""
+    import dataaccess
+    import orchestrate
+    from suppression import ticket_spike_on_primary, primary_instance_ids
+
+    # Primary sees a normal ticket volume; the -dev test instance carries a spike.
+    per_instance_zd = {
+        "au1-12345":     {"tickets_last_7d": 2,  "tickets_prev_7d": 3,
+                          "by_instance": {"au1-12345": 2}},
+        "au1-12345-dev": {"tickets_last_7d": 16, "tickets_prev_7d": 4,
+                          "by_instance": {"au1-12345-dev": 16}},
+    }
+
+    def fake_account(aid):
+        norm = dataaccess._src.identity.normalise(aid)
+        return {
+            "hubspot": {"name": aid, "segment": "Strategic", "arr_usd": 200000, "contacts": []},
+            "sources": {"hubspot": "live", "zendesk": "live"},
+            "zendesk": dict(per_instance_zd.get(norm, {"tickets_last_7d": 0, "tickets_prev_7d": 0})),
+            "usage": {}, "jiminny": {}, "churn": {}, "stripe": {}, "onboarding": {},
+        }
+
+    monkeypatch.setattr(dataaccess._src.HUBSPOT, "live", lambda: True)
+    monkeypatch.setattr(dataaccess._src.HUBSPOT, "roster",
+                        lambda: ["AU1-12345", "AU1-12345-dev"])
+    monkeypatch.setattr(dataaccess, "account", fake_account)
+    monkeypatch.setenv("CS_CACHE_TTL", "0")
+
+    accounts = dataaccess.all_accounts()
+    primary = accounts["au1-12345"]
+    zd = primary["zendesk"]
+
+    # The merge folded both instances' volume into one by_instance map...
+    assert zd["by_instance"] == {"au1-12345": 2, "au1-12345-dev": 16}
+    # ...and used family-wide totals so the spike is detectable at account level.
+    assert zd["tickets_last_7d"] == 18
+    assert zd["tickets_prev_7d"] == 7
+
+    # The spike is real (18 >= 2*7) but concentrated on the non-primary instance,
+    # so ticket_spike_on_primary must NOT fire it as primary-driven risk.
+    primary_ids = primary_instance_ids(primary["hubspot"])
+    assert primary_ids == {"au1-12345"}
+    fired, evidence = ticket_spike_on_primary(zd, primary_ids)
+    assert evidence["raw_spike"] is True
+    assert fired is False
+    assert evidence["primary_tickets"] == 2
+    assert evidence["non_primary_tickets"] == 16
+
+    # End-to-end: the account produces a suppressed-signal entry, and no P1
+    # predictive-risk task is created from the test-instance noise.
+    tasks, suppressed = orchestrate.evaluate("au1-12345", primary)
+    assert any(s["signal"] == "support_ticket_spike" for s in suppressed)
+    assert not any(t["rule_id"] == "predictive_risk_playbook" for t in tasks)
 
 
 def test_hubspot_roster_scopes_to_csm_owner(monkeypatch):
@@ -622,7 +1021,8 @@ def test_judge_rejects_suppressed_risk_and_wrong_priority():
         "stripe": {}, "usage": {}, "churn": {},
     }}
     tasks = [{"account": "Umbrella", "segment": "Strategic", "priority": 3,
-              "mandate": "MUST_PROTECT", "trigger": "Predictive Risk Playbook (24h SLA)",
+              "mandate": "MUST_PROTECT", "rule_id": "predictive_risk_playbook",
+              "trigger": "Predictive Risk Playbook (24h SLA)",
               "evidence": {"drivers": ["ticket_spike(4->18)"]},
               "draft_message": "Review the account."}]
     result = judge(tasks, accounts)
