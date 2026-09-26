@@ -146,6 +146,58 @@ def parse_cookies(cookie_header_value: str | None) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
+# Stateless OIDC flow state (PKCE verifier + state) — carried in a signed,
+# short-lived cookie instead of server memory, so ANY task/replica behind the ALB
+# can complete the /auth/callback (in-memory state broke with >1 task -> loop).
+# --------------------------------------------------------------------------- #
+FLOW_COOKIE = "cs_oidc_flow"
+FLOW_TTL_S = 600  # 10 minutes to complete the SSO round-trip
+
+
+def make_flow_token(state: str, verifier: str) -> str:
+    payload = {"state": state, "verifier": verifier, "exp": int(time.time()) + FLOW_TTL_S}
+    body = _b64e(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = _b64e(hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest())
+    return f"{body}.{sig}"
+
+
+def read_flow_token(token: str | None) -> dict[str, Any] | None:
+    if not token or "." not in token:
+        return None
+    body, _, sig = token.partition(".")
+    expected = _b64e(hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        payload = json.loads(_b64d(body))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if int(payload.get("exp", 0)) < int(time.time()):
+        return None
+    return payload
+
+
+def flow_cookie_name() -> str:
+    return ("__Secure-" + FLOW_COOKIE) if _secure_cookie() else FLOW_COOKIE
+
+
+def flow_cookie_header(token: str) -> str:
+    name = flow_cookie_name()
+    parts = [f"{name}={token}", "Path=/", "HttpOnly", "SameSite=Lax", f"Max-Age={FLOW_TTL_S}"]
+    if _secure_cookie():
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def clear_flow_cookie_header() -> str:
+    name = flow_cookie_name()
+    parts = [f"{name}=", "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"]
+    if _secure_cookie():
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+# --------------------------------------------------------------------------- #
 # OIDC (Cognito) Authorization Code + PKCE
 # --------------------------------------------------------------------------- #
 def _cognito_endpoints() -> dict[str, str]:

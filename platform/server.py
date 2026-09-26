@@ -327,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
         scheme = "https" if os.environ.get("CS_SECURE_COOKIE") else "http"
         return f"{scheme}://{host}/auth/callback"
 
-    def _finish_login(self, principal_core: dict) -> None:
+    def _finish_login(self, principal_core: dict, extra_set_cookie: str | None = None) -> None:
         """Resolve the HubSpot owner for the authenticated email, mint the session
         cookie, and redirect to the dashboard. Enforces the CS Platform entitlement:
         a user who authenticated but is not entitled (no CS admin/user group) is
@@ -349,30 +349,55 @@ class Handler(BaseHTTPRequestHandler):
             email=email, name=principal_core.get("name") or email,
             role=principal_core.get("role", rbac.CSM), owner_id=owner_id,
             groups=principal_core.get("groups", ""))
-        self._redirect("/", {"Set-Cookie": auth.cookie_header(token)})
+        # Emit the session cookie and (on the OIDC path) clear the transient flow
+        # cookie — two separate Set-Cookie headers.
+        cookies = [auth.cookie_header(token)]
+        if extra_set_cookie:
+            cookies.append(extra_set_cookie)
+        self._redirect_cookies("/", cookies)
+
+    def _redirect_cookies(self, location: str, set_cookies: list[str]) -> None:
+        """302 redirect emitting one or more Set-Cookie headers."""
+        try:
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            for c in set_cookies:
+                self.send_header("Set-Cookie", c)
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def _handle_login(self) -> None:
         # Dev-login: no Cognito needed. Renders a tiny form that posts an email.
         if not auth.cognito_configured() and auth.dev_login_enabled():
             self._send(200, _DEV_LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
-        # OIDC: start Authorization Code + PKCE against Cognito.
+        # OIDC: start Authorization Code + PKCE against Cognito. The state+verifier
+        # go in a signed, short-lived cookie (NOT server memory) so any task behind
+        # the ALB can complete the callback — in-memory state caused a redirect loop
+        # under >1 replica.
         import secrets as _secrets
         verifier, challenge = auth.pkce_pair()
         state = _secrets.token_urlsafe(24)
-        _OIDC_FLOWS[state] = verifier
-        self._redirect(auth.authorize_url(self._redirect_uri(), state, challenge))
+        flow = auth.make_flow_token(state, verifier)
+        self._redirect(auth.authorize_url(self._redirect_uri(), state, challenge),
+                       {"Set-Cookie": auth.flow_cookie_header(flow)})
 
     def _handle_callback(self, query: dict) -> None:
         code = (query.get("code") or [None])[0]
         state = (query.get("state") or [None])[0]
-        verifier = _OIDC_FLOWS.pop(state, None) if state else None
-        if not code or not verifier:
+        cookies = auth.parse_cookies(self.headers.get("Cookie"))
+        flow = auth.read_flow_token(cookies.get(auth.flow_cookie_name()))
+        # State must match the value bound into the signed flow cookie (CSRF guard).
+        if not code or not flow or not state or flow.get("state") != state:
             self._redirect("/login?error=invalid_state"); return
+        verifier = flow.get("verifier")
         try:
             tokens = auth.exchange_code(code, self._redirect_uri(), verifier)
             info = auth.fetch_userinfo(tokens["access_token"])
-            self._finish_login(auth.principal_from_userinfo(info))
+            self._finish_login(auth.principal_from_userinfo(info),
+                               extra_set_cookie=auth.clear_flow_cookie_header())
         except Exception as exc:  # noqa: BLE001
             self._redirect(f"/login?error={urllib.parse.quote(type(exc).__name__)}")
 
