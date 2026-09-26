@@ -218,4 +218,8 @@ def principal_from_userinfo(info: dict[str, Any]) -> dict[str, Any]:
     if isinstance(groups, list):
         groups = "[" + ", ".join(str(g) for g in groups) + "]"
     role = rbac.resolve_role(email, groups)
-    return {"email": email, "name": name, "role": role, "groups": groups}
+    return {
+        "email": email, "name": name, "role": role, "groups": groups,
+        # Hard entitlement: may this user use the CS Platform at all?
+        "has_access": rbac.has_cs_access(email, groups),
+    }

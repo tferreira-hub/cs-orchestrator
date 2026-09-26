@@ -55,6 +55,42 @@ def test_rbac_admin_group_matches_by_id(monkeypatch):
     assert rbac.resolve_role("x@jobadder.com", "[a4d8e4c8-5041-7005-a1cf-87f1c635306b]") == rbac.ADMIN
 
 
+def test_has_cs_access_admin_user_and_denied(monkeypatch):
+    """The hard entitlement gate: admin group OR user group OR break-glass email
+    grants access; everyone else is denied. Role: admin group -> admin, else csm."""
+    import rbac
+    monkeypatch.setenv("CS_ADMIN_GROUPS", "CS-Platform-Admins")
+    monkeypatch.setenv("CS_USER_GROUPS", "CS-Platform-Users")
+    monkeypatch.delenv("AUTH_ADMIN_EMAILS", raising=False)
+    # Admin group: access + admin role.
+    assert rbac.has_cs_access("a@x.com", "[CS-Platform-Admins]") is True
+    assert rbac.resolve_role("a@x.com", "[CS-Platform-Admins]") == rbac.ADMIN
+    # User group: access + csm (own-book) role.
+    assert rbac.has_cs_access("u@x.com", "[CS-Platform-Users]") is True
+    assert rbac.resolve_role("u@x.com", "[CS-Platform-Users]") == rbac.CSM
+    # JA Observe user without any CS group: DENIED.
+    assert rbac.has_cs_access("o@x.com", "[JA-Observe-Users]") is False
+
+
+def test_has_cs_access_secure_by_default(monkeypatch):
+    """With no CS groups and no break-glass configured, access is denied."""
+    import rbac
+    monkeypatch.delenv("CS_ADMIN_GROUPS", raising=False)
+    monkeypatch.delenv("CS_USER_GROUPS", raising=False)
+    monkeypatch.delenv("AUTH_ADMIN_EMAILS", raising=False)
+    assert rbac.has_cs_access("anyone@x.com", "[JA-Observe-Users]") is False
+
+
+def test_has_cs_access_breakglass_email(monkeypatch):
+    """Break-glass admin email grants access even with no CS group."""
+    import rbac
+    monkeypatch.delenv("CS_ADMIN_GROUPS", raising=False)
+    monkeypatch.delenv("CS_USER_GROUPS", raising=False)
+    monkeypatch.setenv("AUTH_ADMIN_EMAILS", "boss@jobadder.com")
+    assert rbac.has_cs_access("boss@jobadder.com", "") is True
+    assert rbac.resolve_role("boss@jobadder.com", "") == rbac.ADMIN
+
+
 # --------------------------------------------------------------------------- #
 # Session token
 # --------------------------------------------------------------------------- #

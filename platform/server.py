@@ -90,6 +90,23 @@ button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;backgr
 <div class=dev>Dev login (AUTH_DEV_LOGIN). Production uses Okta via Cognito SSO.</div>
 </form></body></html>"""
 
+# Shown when a user authenticates successfully but is NOT entitled to the CS Platform
+# (not in a CS admin or user group). Defense-in-depth behind the UI launcher.
+_NOT_AUTHORISED_HTML = """<!doctype html><html><head><meta charset=utf-8>
+<title>CS Platform — Access required</title><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:40px;max-width:440px;text-align:center}
+h1{font-size:1.25em;margin:0 0 10px}p{color:#9ab;line-height:1.5;font-size:.9em}
+a{color:#8ab4ff}</style></head>
+<body><div class=card>
+<h1>You don't have access to the CS Platform</h1>
+<p>Your JobAdder sign-in worked, but your account isn't a member of a Customer Success
+access group. If you believe you should have access, ask your CS lead or platform
+admin to add you to the CS Platform group.</p>
+<p><a href="https://observe.jobadder.cloud/portal">Back to applications</a></p>
+</div></body></html>"""
+
 UI_PATH = Path(__file__).resolve().parent / "ui" / "index.html"
 PORT = int(os.environ.get("CS_PORT", "8787"))
 FEEDBACK_LOG = Path(__file__).resolve().parents[1] / ".cs-agent-feedback.jsonl"
@@ -311,8 +328,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _finish_login(self, principal_core: dict) -> None:
         """Resolve the HubSpot owner for the authenticated email, mint the session
-        cookie, and redirect to the dashboard."""
+        cookie, and redirect to the dashboard. Enforces the CS Platform entitlement:
+        a user who authenticated but is not entitled (no CS admin/user group) is
+        DENIED — no session is minted — rather than admitted as a scoped CSM."""
         email = principal_core.get("email", "")
+        # Hard entitlement gate (defense-in-depth behind the UI launcher).
+        allowed = principal_core.get("has_access")
+        if allowed is None:  # dev-login path builds a minimal core
+            allowed = rbac.has_cs_access(email, principal_core.get("groups", ""))
+        if not allowed:
+            self._send(403, _NOT_AUTHORISED_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
         owner_id = None
         try:
             owner_id = _src.HUBSPOT.owner_id_for_email(email) if _src.HUBSPOT.live() else None
