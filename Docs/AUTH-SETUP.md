@@ -85,8 +85,6 @@ AUTH_DEV_LOGIN=1 AUTH_ADMIN_EMAILS=you@jobadder.com python3 platform/server.py
 `/login` serves a simple email form; sign in as any email to exercise scoping. Dev-login
 is automatically disabled once `AUTH_COGNITO_*` is configured.
 
-## 5. Optional — launcher on the JA Observe login page
-
 ## 5. Launcher on the JA Observe login page (DONE, optional to merge)
 
 Added on branch **`feat/cs-platform-launcher`** in **`ja-observe-ui`**: the signed-out
@@ -103,8 +101,38 @@ it is optional and independent of the SSO working.
 | In `CS_ADMIN_GROUPS` or `AUTH_ADMIN_EMAILS` | admin | ALL accounts + portfolio-wide KPIs |
 | Any other authenticated user | csm | ONLY the accounts they own (their book) |
 
-Enforcement is server-side on every endpoint (scoped queries + hard 403 on another
-CSM's account); the role is read only from the signed session, never a client value.
+## 7. DNS — making `cs.jobadder.cloud` resolve (required)
+
+`cs.jobadder.cloud` is served by the **same ALB** as `observe.jobadder.cloud`, routed by
+an ALB host-header rule (in `devops/cs-platform.tf`), and covered by the existing
+`*.jobadder.cloud` wildcard cert — so **no new cert or load balancer is needed**. What is
+needed is a DNS record, exactly like `observe.jobadder.cloud`:
+
+- **Public record lives in Cloudflare** (not Terraform — same as `observe.jobadder.cloud`,
+  see the note in `devops/dns.tf`). Add in the Cloudflare dashboard/API:
+  - Type: `CNAME` (or A/AAAA), Name: `cs`, Target: the ALB hostname
+    (`terraform output alb_dns_name` in devops), **Proxied (orange cloud)**, TLS **Full (Strict)**.
+  This mirrors the existing `observe` record 1:1.
+- **Internal alias** `cs.jobadder.devops` → ALB is Terraform-managed in `devops/dns.tf`
+  (mirrors `observe.jobadder.devops`).
+
+Until the Cloudflare record exists, `cs.jobadder.cloud` returns NXDOMAIN (an unresolved
+domain / Cloudflare error page) — which is what a "wrong page" looks like; it is not the
+CS Platform failing.
+
+## 8. What the sign-in → CS Platform flow looks like
+
+Both apps use the **same Cognito user pool**, so it is one SSO session:
+
+1. From the JA Observe login launcher, clicking **CS Platform** opens `https://cs.jobadder.cloud`.
+2. The CS Platform runs its **own** OIDC round-trip (`/login` → Cognito → `/auth/callback`).
+   Because the Cognito session already exists (or is created once), the user is **not asked
+   to log in a second time** — Cognito silently returns them.
+3. They land on the **CS Platform dashboard**, scoped to their book (or all accounts if admin).
+
+So "click CS Platform → after SSO, land on the CS page" is exactly the behaviour, once DNS
+(§7) and the deployed service exist. The launcher card is only a link; the CS Platform
+itself performs the redirect.
 
 ---
 
