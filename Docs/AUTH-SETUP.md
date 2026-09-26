@@ -176,7 +176,11 @@ reports not-live and the platform falls back to the transparent computed-risk sc
 (Pendo/Zendesk/Stripe/Jiminny). Live ML churn can be enabled later without code change —
 just set the env var once the role/trust exist.
 
-> NOTE: There is not yet a CS Platform ECS service/task-definition in `ja-observe-api`
-> infra (only `api` and `ui`). Adding a dedicated `cs-platform` service + task role to
-> the existing cluster is the recommended next infra step; it is intentionally out of
-> scope of the auth work committed so far.
+> The CS Platform ECS service + task role (SSM read + cross-account `sts:AssumeRole`
+> to the Data Platform churn reader) + host-based ALB routing are added in
+> `ja-observe-api` PR #317 (stacked on the Cognito client PR #316). The cross-account
+> `cs-platform-churn-reader` role is provided as `cs-platform-cross-account.tf.example`
+> to apply in the Data Platform account (503561421603). Remaining owner actions before
+> apply: create the `CS-Platform-Admins` Identity Center group, populate the
+> `/cs-platform/*` SSM parameters, build/push the container image (Dockerfile in
+> cs-orchestrator) to ECR, and point `cs.jobadder.cloud` DNS at the ALB.
