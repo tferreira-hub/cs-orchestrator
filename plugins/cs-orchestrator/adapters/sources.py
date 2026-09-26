@@ -77,6 +77,7 @@ class Zendesk:
         now = datetime.now(timezone.utc)
         d7 = (now - timedelta(days=7)).strftime("%Y-%m-%d")
         d14 = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+        d30 = (now - timedelta(days=30)).strftime("%Y-%m-%d")
 
         def _count(query: str) -> int:
             r = config.http_get(f"{base}/search.json?query={urllib.parse.quote(query)}", headers)
@@ -87,11 +88,11 @@ class Zendesk:
         prev7 = _count(f"{base_q} created>={d14} created<{d7}")
         open_tickets = _count(f"{base_q} status<solved")
 
-        # CSAT from the org's recent rated tickets (good / good+bad).
-        rated = config.http_get(
-            f"{base}/search.json?query={urllib.parse.quote(base_q + ' satisfaction:good')}", headers).get("count", 0)
-        bad = config.http_get(
-            f"{base}/search.json?query={urllib.parse.quote(base_q + ' satisfaction:bad')}", headers).get("count", 0)
+        # CSAT over the trailing 30 days only (the field is `csat_30d`), from the
+        # org's rated tickets: good / (good + bad). Bounding the window keeps the
+        # score current instead of drifting toward an all-time average.
+        rated = _count(f"{base_q} satisfaction:good created>={d30}")
+        bad = _count(f"{base_q} satisfaction:bad created>={d30}")
         csat = round(100 * rated / (rated + bad)) if (rated + bad) else None
 
         return {
@@ -109,7 +110,16 @@ class Zendesk:
 # -------------------------------------------------------------------- Pendo ---
 class Pendo:
     """Product telemetry -> {logins_last_7d, logins_prev_7d, active_users_pct,
-    license_utilization_pct, key_feature_adoption_pct, api_calls_*}. Read-only."""
+    license_utilization_pct, key_feature_adoption_pct, api_calls_*}. Read-only.
+
+    Expansion metrics (utilization / API velocity / active users / feature adoption)
+    are only returned when EXPLICITLY mapped to a Pendo metadata field via the
+    corresponding PENDO_<METRIC>_KEY environment variable (see adapters/config.py).
+    We deliberately do NOT guess field names: JobAdder's Pendo tenant exposes these
+    under install-specific metadata keys, and inventing default paths risks either
+    silently returning nothing or, worse, reading the wrong field. An unmapped metric
+    stays None (a data gap), never fabricated. Days-since-last-visit and the Pendo
+    Predict risk-advisor signals are read directly because their locations are known."""
 
     def live(self) -> bool:
         return config.live_enabled() and bool(config.env("PENDO_KEY"))
@@ -144,9 +154,11 @@ class Pendo:
         def configured_metric(name):
             configured_key = config.env(f"PENDO_{name.upper()}_KEY")
             if not configured_key:
+                # No explicit mapping -> data gap. We do NOT guess vendor field names
+                # or present absent telemetry as zero.
                 return None
-            # Mappings are explicit; support nested metadata and dotted paths without
-            # guessing vendor fields or presenting absent telemetry as zero.
+            # Explicit mapping: resolve the configured dotted path, falling back to a
+            # nested key search. The mapping is authoritative and install-specific.
             current = md
             for part in configured_key.split("."):
                 if not isinstance(current, dict) or part not in current:
@@ -161,6 +173,25 @@ class Pendo:
         if last_visit_ms:
             days_since_visit = int((time.time() * 1000 - last_visit_ms) / 86400000)
 
+        # Behavioural activity velocity from the Pendo Aggregation API (read-only).
+        # The account-metadata endpoint carries no usage counters, but the aggregation
+        # API can count product events per account over a window. We use event volume
+        # as a real ACTIVITY proxy for the API/usage-velocity expansion signal, split
+        # into last-7d vs prior-7d. Explicit PENDO_*_KEY mappings (below) still win if
+        # an install exposes true counters as metadata; otherwise these derived counts
+        # feed api_calls_last_7d/prev_7d. On any failure they stay None (data gap).
+        #
+        # Opt-in: each account costs two extra aggregation calls, so this is gated by
+        # CS_PENDO_ACTIVITY=1 to keep the default portfolio fan-out bounded. When off,
+        # velocity relies solely on explicit metadata mappings (data gap if unmapped).
+        if config.env("CS_PENDO_ACTIVITY") == "1":
+            activity_last7, activity_prev7 = self._activity_velocity(ref, headers)
+        else:
+            activity_last7, activity_prev7 = None, None
+
+        mapped_api_last = configured_metric("api_calls_last_7d")
+        mapped_api_prev = configured_metric("api_calls_prev_7d")
+
         return {
             # Real usage recency (Pendo doesn't expose 7d login counts on this endpoint;
             # days-since-last-visit is the available real signal).
@@ -170,8 +201,14 @@ class Pendo:
             "active_users_pct": configured_metric("active_users_pct"),
             "license_utilization_pct": configured_metric("license_utilization_pct"),
             "key_feature_adoption_pct": configured_metric("key_feature_adoption_pct"),
-            "api_calls_last_7d": configured_metric("api_calls_last_7d"),
-            "api_calls_prev_7d": configured_metric("api_calls_prev_7d"),
+            # Explicit metadata mapping wins; else the derived aggregation activity count.
+            "api_calls_last_7d": mapped_api_last if mapped_api_last is not None else activity_last7,
+            "api_calls_prev_7d": mapped_api_prev if mapped_api_prev is not None else activity_prev7,
+            # Provenance: mark when the velocity numbers are the derived activity proxy
+            # rather than a true API-call counter, so nothing is over-claimed.
+            "api_velocity_source": ("pendo_metadata" if mapped_api_last is not None
+                                    else "pendo_activity_events" if activity_last7 is not None
+                                    else None),
             # Real Pendo Predict "JobAdder risk advisor" signals.
             "pendo_risk_score": predict.get("jobadder_risk_advisor___score"),
             "pendo_adoption": predict.get("jobadder_risk_advisor___adoption"),
@@ -184,6 +221,48 @@ class Pendo:
             "by_instance": {ref: {"days_since_last_visit": days_since_visit}},
             "_source": "pendo-live",
         }
+
+    def _activity_velocity(self, ref: str, headers: dict) -> tuple[int | None, int | None]:
+        """Per-account product-event counts for the last 7 days and the prior 7 days,
+        via the Pendo Aggregation API. Returns (last7, prev7), or (None, None) if the
+        aggregation is unavailable — never fabricated. This is an ACTIVITY proxy (event
+        volume), not a literal API-call meter; provenance is recorded by the caller."""
+        import time as _time
+        day = 86400 * 1000
+        now = int(_time.time() * 1000)
+
+        def _count(first_ms: int) -> int | None:
+            pipeline = [
+                {"source": {"events": None,
+                            "timeSeries": {"period": "dayRange", "first": first_ms, "count": 7}}},
+                {"filter": f'accountId == "{ref}"'},
+                {"group": {"group": [], "fields": [{"count": {"count": None}}]}},
+            ]
+            try:
+                res = self._aggregation(pipeline, headers)
+            except Exception:  # noqa: BLE001 - activity is best-effort; absence = data gap
+                return None
+            rows = res.get("results") if isinstance(res, dict) else None
+            if not rows:
+                return 0  # account resolved, simply no events in the window
+            return int(rows[0].get("count", 0))
+
+        last7 = _count(now - 7 * day)
+        prev7 = _count(now - 14 * day)
+        if last7 is None and prev7 is None:
+            return None, None
+        return last7, prev7
+
+    @staticmethod
+    def _aggregation(pipeline: list, headers: dict) -> dict:
+        """Read-only POST to the Pendo Aggregation API. Routed through
+        config.http_post_readonly so it shares the same 429 rate-limit retry/backoff
+        as every other adapter call (important under the per-account fan-out when
+        CS_PENDO_ACTIVITY is on). The endpoint is analytics-only — it never mutates."""
+        body = {"response": {"mimeType": "application/json"},
+                "request": {"pipeline": pipeline}}
+        return config.http_post_readonly("https://app.pendo.io/api/v1/aggregation",
+                                         headers, body, timeout=20)
 
 
 # ----------------------------------------------------------- Rocket Lane ---
@@ -214,6 +293,56 @@ class RocketLane:
             "target_time_to_value_days": data.get("target_time_to_value_days") or data.get("targetTimeToValueDays"),
             "health": data.get("health") or data.get("onboarding_health"),
             "_source": "rocket-lane-live",
+        }
+
+
+# ------------------------------------------------------------- Entitlements ---
+class Entitlements:
+    """Licensed-seat / entitlement source for TRUE license utilization.
+
+    License utilization (% of purchased seats actually in use) is a contract-vs-usage
+    metric whose authoritative source is the billing / entitlement system, NOT product
+    telemetry — Pendo can show activity, but only entitlements know how many seats were
+    sold. This adapter is an explicit, env-gated seam: point it at whatever internal
+    endpoint owns seat counts. It is READ-ONLY and fabricates nothing — when the
+    connector is not configured, or an account has no record, license utilization
+    remains a data gap (None) and the UI shows "not connected".
+
+    Configuration (all optional; unset => connector reports not-live):
+      ENTITLEMENTS_API_URL      base URL of the entitlements service
+      ENTITLEMENTS_KEY          bearer token
+      ENTITLEMENTS_ACCOUNT_PATH account route template, default /accounts/{account_ref}
+    The response is read flexibly: an explicit `license_utilization_pct`, or computed
+    from `active_seats`/`seats_used` over `licensed_seats`/`seats_purchased`.
+    """
+
+    def live(self) -> bool:
+        return config.live_enabled() and bool(
+            config.env("ENTITLEMENTS_API_URL") and config.env("ENTITLEMENTS_KEY")
+        )
+
+    def utilization(self, account_ref: str) -> dict[str, Any]:
+        import urllib.parse
+        base = config.env("ENTITLEMENTS_API_URL").rstrip("/")
+        route = config.env("ENTITLEMENTS_ACCOUNT_PATH") or "/accounts/{account_ref}"
+        route = route.format(account_ref=urllib.parse.quote(identity.normalise(account_ref).upper(), safe=""))
+        headers = {"Authorization": f"Bearer {config.env('ENTITLEMENTS_KEY')}", "Accept": "application/json"}
+        payload = config.http_get(f"{base}/{route.lstrip('/')}", headers)
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+
+        pct = data.get("license_utilization_pct")
+        licensed = data.get("licensed_seats") or data.get("seats_purchased")
+        used = data.get("active_seats") or data.get("seats_used")
+        if pct is None and licensed:
+            try:
+                pct = round(100 * float(used or 0) / float(licensed))
+            except (ValueError, TypeError, ZeroDivisionError):
+                pct = None
+        return {
+            "license_utilization_pct": pct,
+            "licensed_seats": licensed,
+            "active_seats": used,
+            "_source": "entitlements-live",
         }
 
 
@@ -287,7 +416,11 @@ class Churn:
     auth is whatever AWS credentials boto3 resolves - profile, role, etc.)."""
 
     POLL_INTERVAL_S = 0.5
-    POLL_TIMEOUT_S = 20
+    # A cold Redshift Serverless workgroup can take ~20-30s to resume on the FIRST
+    # query before it warms up (measured ~24s live); subsequent queries are ~1-2s.
+    # 20s was too tight and failed every churn call until the workgroup was warm, so
+    # the default covers cold start. Overridable via CS_REDSHIFT_POLL_TIMEOUT_S.
+    POLL_TIMEOUT_S = int(config.env("CS_REDSHIFT_POLL_TIMEOUT_S") or 45)
 
     def live(self) -> bool:
         if not config.live_enabled() or not config.env("REDSHIFT_DATABASE"):
@@ -308,6 +441,22 @@ class Churn:
     def _client(self):
         import boto3
         region = config.env("AWS_REGION") or config.env("AWS_DEFAULT_REGION") or "ap-southeast-2"
+        # Cross-account access: the churn model lives in the Data Platform account,
+        # while the CS Platform typically runs elsewhere. When REDSHIFT_ASSUME_ROLE_ARN
+        # is set, assume that role (in the Data Platform account) and build the Data API
+        # client with the returned temporary credentials. When unset, use the ambient
+        # credentials (local AWS_PROFILE, or a same-account task role) unchanged.
+        role_arn = config.env("REDSHIFT_ASSUME_ROLE_ARN")
+        if role_arn:
+            sts = boto3.client("sts", region_name=region)
+            session_name = config.env("REDSHIFT_ASSUME_ROLE_SESSION") or "cs-platform-churn"
+            creds = sts.assume_role(RoleArn=role_arn, RoleSessionName=session_name)["Credentials"]
+            return boto3.client(
+                "redshift-data", region_name=region,
+                aws_access_key_id=creds["AccessKeyId"],
+                aws_secret_access_key=creds["SecretAccessKey"],
+                aws_session_token=creds["SessionToken"],
+            )
         return boto3.client("redshift-data", region_name=region)
 
     def _target_kwargs(self) -> dict[str, str]:
@@ -531,6 +680,7 @@ class HubSpot:
             "renewal_date": _first("hs_next_renewal_date", "renewal_date", "contract_renewal_date"),
             "subscription_type": p.get("subscription_type"),
             "csm_owner": self._owner_name(p.get("hubspot_owner_id")),
+            "csm_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
             "industry": (p.get("industry") or "").replace("_", " ").title() or None,
             "lifecycle_stage": {
                 "20251280": "Churned Customer",
@@ -545,8 +695,8 @@ class HubSpot:
     # Map HubSpot buying-role / job-title text to the WoW required roles.
     _ROLE_MAP = {
         "decision maker": "Executive Sponsor", "budget holder": "Executive Sponsor",
-        "executive sponsor": "Executive Sponsor", "champion": "Primary Champion",
-        "influencer": "Primary Champion", "end user": "Primary Champion",
+        "executive sponsor": "Executive Sponsor", "champion": "Primary Champion / Admin",
+        "influencer": "Primary Champion / Admin", "end user": "Primary Champion / Admin",
         "billing": "Finance Contact", "finance": "Finance Contact",
     }
 
@@ -619,6 +769,43 @@ class HubSpot:
         self._OWNER_CACHE[oid] = name
         return name
 
+    # email (lowercased) -> owner id, cached. Used to scope a logged-in CSM to the
+    # accounts they own. The SSO email is the join to the HubSpot owner record.
+    _OWNER_EMAIL_CACHE: dict[str, str | None] = {}
+
+    def owner_id_for_email(self, email: str) -> str | None:
+        """Resolve a HubSpot owner id from an email address (the SSO identity join).
+
+        Owners are paged from /crm/v3/owners and matched on email, case-insensitively.
+        Result cached across the process. Returns None if no owner matches that email
+        (a CSM with no HubSpot ownership sees an empty book, never everyone's)."""
+        if not email:
+            return None
+        key = email.strip().lower()
+        if key in self._OWNER_EMAIL_CACHE:
+            return self._OWNER_EMAIL_CACHE[key]
+        found: str | None = None
+        after = None
+        try:
+            while True:
+                url = "https://api.hubapi.com/crm/v3/owners?limit=100"
+                if after:
+                    url += f"&after={after}"
+                page = config.http_get(url, self._headers())
+                for o in page.get("results", []):
+                    if str(o.get("email") or "").strip().lower() == key:
+                        found = str(o.get("id"))
+                        break
+                if found:
+                    break
+                after = (page.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
+        except Exception:  # noqa: BLE001
+            found = None
+        self._OWNER_EMAIL_CACHE[key] = found
+        return found
+
     WRITEBACK_PROPERTIES = {
         "cs_health_score": {"label": "CS Health Score", "type": "number", "fieldType": "number", "groupName": "companyinformation"},
         "cs_risk_status": {"label": "CS Risk Status", "type": "enumeration", "fieldType": "select", "groupName": "companyinformation",
@@ -675,5 +862,5 @@ class HubSpot:
 
 
 # Singletons the router uses.
-ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT = (
-    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot())
+ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS = (
+    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements())

@@ -156,7 +156,7 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
   <div class="main">
     <div class="topbar">
       <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and priority actions</div></div>
-      <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span></div>
+      <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span> <span id="principalBox" style="display:none;margin-left:10px"><span id="principalName" class="src live"></span> <a id="logoutLink" href="/logout" class="src" style="text-decoration:none">Sign out</a></span></div>
     </div>
     <div class="content">
       <section class="view on" id="v-dash">
@@ -180,6 +180,8 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
       </section>
       <section class="view" id="v-life"><div class="panel"><div class="head"><h2>Lifecycle and adoption</h2><span class="note">Onboarding velocity alongside product adoption</span></div><div class="body" id="life-body"></div></div></section>
       <section class="view" id="v-kpi">
+      <section class="view" id="v-kpi">
+        <div class="panel"><div class="head"><h2>Revenue retention</h2><span class="note">GRR against target · expansion pipeline shown separately · live ARR only</span></div><div class="body"><div class="stats" id="kpi-retention"></div></div></div>
         <div class="panel"><div class="head"><h2>Portfolio and capacity by CSM</h2><span class="note">Informs resourcing and headcount</span></div><div class="body" id="kpi-csm"></div></div>
         <div class="panel"><div class="head"><h2>Task load by mandate</h2></div><div class="body pad"><div class="chips" id="kpi-mandate"></div></div></div>
       </section>
@@ -228,6 +230,16 @@ function go(v){
 }
 
 async function boot(){
+  // Who am I? (drives principal display + agent identity inheritance)
+  try{
+    const me=await (await fetch('/api/me')).json();
+    if(me&&me.authenticated){
+      window.CS_PRINCIPAL=me;
+      const box=document.getElementById('principalBox');
+      if(box){box.style.display='';
+        document.getElementById('principalName').textContent=(me.name||me.email)+' · '+(me.role==='admin'?'Admin':'CSM');}
+    }
+  }catch(e){/* open mode / no auth */}
   try{
     DATA=await (await fetch('/api/portfolio')).json();
   }catch(e){
@@ -336,7 +348,7 @@ function acctTable(rows){
       const arr=!hc?NC:(a.arr_usd!=null?fmt(a.arr_usd):ND);
       const renews=!hc?NC:(a.renewal_date?a.renewal_date:ND);
       const coverage=a.connected?Object.values(a.connected).filter(Boolean).length+'/'+Object.keys(a.connected).length:NC;
-      return '<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+name+'</strong></td><td class="muted">'+seg+'</td>'+
+      return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+name+'</strong></td><td class="muted">'+seg+'</td>'+
         '<td>'+health+'</td><td class="mono">'+arr+'</td><td class="muted">'+renews+'</td><td><span class="pill '+(coverage===Object.keys(a.connected||{}).length+'/'+Object.keys(a.connected||{}).length?'g':'pln')+'">'+coverage+' sources</span></td></tr>';
     }).join('')+
     '</tbody></table>';
@@ -355,6 +367,19 @@ async function loadKpis(){
     k.by_csm.map(c=>'<tr><td><strong>'+escapeHtml(c.csm)+'</strong></td><td>'+c.accounts+'</td><td class="mono">'+fmt(c.arr_usd)+'</td><td>'+c.open_tasks+'</td>'+
       '<td>'+(c.priority1_tasks?'<span class="pill r">'+c.priority1_tasks+'</span>':'0')+'</td><td>'+(c.at_risk_accounts?'<span class="pill r">'+c.at_risk_accounts+'</span>':'<span class="muted">0</span>')+'</td></tr>').join('')+'</tbody></table>';
   document.getElementById('kpi-mandate').innerHTML=Object.entries(k.mandate_load).map(kv=>'<span class="pill '+mand[kv[0]][0]+'">'+mand[kv[0]][1]+': '+kv[1]+'</span>').join('');
+  const ret=k.retention||{};
+  const retEl=document.getElementById('kpi-retention');
+  if(retEl){
+    if(!ret.computable){
+      retEl.innerHTML='<div class="empty" style="grid-column:1/-1">Revenue retention needs live contract ARR. Connect HubSpot to compute GRR. No figure is invented.</div>';
+    }else{
+      const grrMeets=ret.grr_pct>=ret.target.grr_pct;
+      retEl.innerHTML=
+        '<div class="stat"><div class="l">Gross Revenue Retention</div><div class="v '+(grrMeets?'good':'warn')+'">'+ret.grr_pct+'%</div><div class="d">target '+ret.target.grr_pct+'% · churn only, no upside</div></div>'+
+        '<div class="stat"><div class="l">Base ARR</div><div class="v">'+fmt(ret.base_arr_usd)+'</div><div class="d">churned '+fmt(ret.churned_arr_usd)+'</div></div>'+
+        '<div class="stat"><div class="l">Expansion pipeline</div><div class="v">'+fmt(ret.expansion_pipeline_arr_usd)+'</div><div class="d">'+ret.expansion_pipeline_accounts+' account(s) · opportunity, not booked</div></div>';
+    }
+  }
 }
 async function loadLifecycle(){
   let l;
@@ -422,10 +447,6 @@ async function submitPlaybookProposal(){
 function agentAsk(q){document.getElementById('agentQ').value=q;askAgent();}
 function askAgentAbout(q){go('agent');agentAsk(q);}
 function sourceSummary(s){return Object.entries(s||{}).filter(kv=>kv[1]==='live').map(kv=>kv[0]).join(', ')||'No live source';}
-function renderAgentAnswer(text){
-  const safe=escapeHtml(text||'');
-  return safe.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
-}
 async function sendAgentFeedback(rating,reason){
   const d=window.LAST_AGENT_RESULT||{}, q=document.getElementById('agentQ').value;
   const button=arguments[2], container=button&&button.closest('.agent-feedback');
@@ -483,6 +504,12 @@ function renderAgentConversation(){
   out.innerHTML=agentConversation.map(turn=>'<div class="agent-turn '+turn.role+'"><div class="agent-avatar">'+(turn.role==='user'?'YOU':'CS')+'</div><div class="agent-bubble">'+turn.content+'</div></div>').join('');
 }
 function resolveCsmOwner(question){
+  // When the user is authenticated, the agent inherits that identity directly —
+  // no need to ask the user who they are. Their portfolio is already scoped
+  // server-side, so we pass the authenticated name as the owner context.
+  if(window.CS_PRINCIPAL&&window.CS_PRINCIPAL.authenticated){
+    return window.CS_PRINCIPAL.role==='admin'?null:(window.CS_PRINCIPAL.name||window.CS_PRINCIPAL.email);
+  }
   const owners=[...new Set((DATA.accounts||[]).map(account=>account.csm_owner).filter(Boolean))];
   const rejected=owners.find(owner=>question.toLowerCase().includes(('i am not '+owner).toLowerCase()));
   if(rejected){sessionStorage.removeItem('csCsmOwner');return null;}
@@ -576,7 +603,7 @@ async function loadGaps(){
   document.getElementById('gaps-body').innerHTML=
     '<div class="pad" style="padding:14px 22px"><b>HubSpot field gaps (accounts missing each):</b><div class="chips" style="margin-top:8px">'+fieldGaps+'</div><div class="sub" style="margin-top:10px"><b>Source legend:</b> green means a live account record was returned; amber means the connector is live but this account has no matching record; grey means the connector is unavailable. Only the named missing system requires account mapping work.</div></div>'+
     '<table><thead><tr><th>Account</th><th>Coverage</th><th>Missing systems</th><th>Missing HubSpot fields</th><th>Missing roles</th></tr></thead><tbody>'+
-    g.accounts.map(a=>'<tr class="click" onclick="openAccount(\''+a.account_id+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
+    g.accounts.map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
       '<td>'+covDots(a.coverage_status||a.coverage)+'</td>'+
       '<td>'+(a.missing_systems.length?a.missing_systems.map(escapeHtml).join(', '):'<span class="pill g">All tracked records present</span>')+'</td>'+
       '<td>'+(a.missing_fields.length?a.missing_fields.map(escapeHtml).join(', '):'<span class="muted">-</span>')+'</td>'+
@@ -643,7 +670,7 @@ async function openAccount(id){
 }
 function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
 function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');}
-function escapeHtml(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 const agentInput=document.getElementById('agentQ');
 const qualityHeading=document.querySelector('#v-agent .panel .head h2');
 if(qualityHeading) qualityHeading.textContent='Improve the harness';

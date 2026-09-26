@@ -21,6 +21,7 @@ import json
 import hashlib
 import os
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -57,6 +58,37 @@ _load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engine  # noqa: E402
+import auth  # noqa: E402
+import rbac  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"))
+from adapters import sources as _src  # noqa: E402
+
+# Transient OIDC flow state (state -> code_verifier), in-process. Fine for a single
+# server; a multi-instance deployment would use a shared store.
+_OIDC_FLOWS: dict[str, str] = {}
+
+# Local dev-login page (only served when AUTH_DEV_LOGIN=1 and Cognito is NOT
+# configured). Lets you sign in as any email to exercise per-user scoping without
+# a real IdP. Admin-ness comes from AUTH_ADMIN_EMAILS / CS_ADMIN_GROUPS.
+_DEV_LOGIN_HTML = """<!doctype html><html><head><meta charset=utf-8>
+<title>CS Platform — Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:36px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+h1{font-size:1.3em;margin:0 0 4px}.sub{color:#8aa;font-size:.85em;margin-bottom:22px}
+label{display:block;font-size:.8em;color:#9ab;margin:14px 0 6px}
+input{width:100%;box-sizing:border-box;padding:11px 13px;border-radius:9px;border:1px solid #2c3854;background:#0f1626;color:#e8edf5;font-size:1em}
+button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#7c3aed);color:#fff;font-weight:600;font-size:1em;cursor:pointer}
+.dev{margin-top:16px;font-size:.75em;color:#7788aa;text-align:center}.apps{display:flex;gap:10px;margin-bottom:20px}
+.app{flex:1;text-align:center;padding:10px;border:1px solid #2c3854;border-radius:9px;font-size:.8em;color:#9ab}
+.app.on{border-color:#3b82f6;color:#cfe;background:#12203a}</style></head>
+<body><form class=card method=POST action="/auth/dev-login">
+<h1>CS Platform</h1><div class=sub>Customer Success · sign in to your book</div>
+<div class=apps><div class="app on">CS Platform</div><div class=app>JA Observe</div></div>
+<label>Work email</label><input name=email type=email placeholder="you@jobadder.com" autofocus required>
+<button type=submit>Sign in</button>
+<div class=dev>Dev login (AUTH_DEV_LOGIN). Production uses Okta via Cognito SSO.</div>
+</form></body></html>"""
 
 UI_PATH = Path(__file__).resolve().parent / "ui" / "index.html"
 PORT = int(os.environ.get("CS_PORT", "8787"))
@@ -238,27 +270,132 @@ def _record_playbook_review(proposal_id: str, body: dict) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code: int, body: bytes, content_type: str, extra_headers: dict | None = None) -> None:
         try:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             # The browser navigated away or cancelled the request before delivery.
             return
 
-    def _json(self, code: int, payload) -> None:
-        self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
+    def _json(self, code: int, payload, extra_headers: dict | None = None) -> None:
+        self._send(code, json.dumps(payload).encode("utf-8"), "application/json", extra_headers)
+
+    # --- Authentication helpers ------------------------------------------- #
+    def _principal(self) -> dict | None:
+        """Decode the signed session cookie into a principal, or None."""
+        cookies = auth.parse_cookies(self.headers.get("Cookie"))
+        token = cookies.get(auth.session_cookie_name())
+        return auth.read_session(token)
+
+    def _redirect(self, location: str, extra_headers: dict | None = None) -> None:
+        headers = {"Location": location}
+        if extra_headers:
+            headers.update(extra_headers)
+        self._send(302, b"", "text/plain", headers)
+
+    def _redirect_uri(self) -> str:
+        """The OIDC callback URL for this server (honour a configured public URL)."""
+        base = os.environ.get("CS_PUBLIC_URL")
+        if base:
+            return base.rstrip("/") + "/auth/callback"
+        host = self.headers.get("Host", "localhost:8787")
+        scheme = "https" if os.environ.get("CS_SECURE_COOKIE") else "http"
+        return f"{scheme}://{host}/auth/callback"
+
+    def _finish_login(self, principal_core: dict) -> None:
+        """Resolve the HubSpot owner for the authenticated email, mint the session
+        cookie, and redirect to the dashboard."""
+        email = principal_core.get("email", "")
+        owner_id = None
+        try:
+            owner_id = _src.HUBSPOT.owner_id_for_email(email) if _src.HUBSPOT.live() else None
+        except Exception:  # noqa: BLE001
+            owner_id = None
+        token = auth.make_session(
+            email=email, name=principal_core.get("name") or email,
+            role=principal_core.get("role", rbac.CSM), owner_id=owner_id,
+            groups=principal_core.get("groups", ""))
+        self._redirect("/", {"Set-Cookie": auth.cookie_header(token)})
+
+    def _handle_login(self) -> None:
+        # Dev-login: no Cognito needed. Renders a tiny form that posts an email.
+        if not auth.cognito_configured() and auth.dev_login_enabled():
+            self._send(200, _DEV_LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        # OIDC: start Authorization Code + PKCE against Cognito.
+        import secrets as _secrets
+        verifier, challenge = auth.pkce_pair()
+        state = _secrets.token_urlsafe(24)
+        _OIDC_FLOWS[state] = verifier
+        self._redirect(auth.authorize_url(self._redirect_uri(), state, challenge))
+
+    def _handle_callback(self, query: dict) -> None:
+        code = (query.get("code") or [None])[0]
+        state = (query.get("state") or [None])[0]
+        verifier = _OIDC_FLOWS.pop(state, None) if state else None
+        if not code or not verifier:
+            self._redirect("/login?error=invalid_state"); return
+        try:
+            tokens = auth.exchange_code(code, self._redirect_uri(), verifier)
+            info = auth.fetch_userinfo(tokens["access_token"])
+            self._finish_login(auth.principal_from_userinfo(info))
+        except Exception as exc:  # noqa: BLE001
+            self._redirect(f"/login?error={urllib.parse.quote(type(exc).__name__)}")
+
+    def _handle_dev_login(self, body: dict) -> None:
+        """Dev-login POST: trust the submitted email (LOCAL ONLY — gated by
+        AUTH_DEV_LOGIN and never active once Cognito is configured)."""
+        email = str(body.get("email") or "").strip()
+        if not email:
+            self._json(400, {"error": "email required"}); return
+        role = rbac.resolve_role(email, None)
+        self._finish_login({"email": email, "name": email, "role": role, "groups": ""})
+
+    def _handle_logout(self) -> None:
+        self._redirect("/login?logged_out=1", {"Set-Cookie": auth.clear_cookie_header()})
 
     def log_message(self, *args):  # quiet console
         pass
 
     def do_GET(self):  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        query = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
         try:
+            # --- Auth routes (always available when auth is enabled) --------- #
+            if auth.auth_required():
+                if path == "/login":
+                    self._handle_login(); return
+                if path == "/auth/callback":
+                    self._handle_callback(query); return
+                if path == "/logout":
+                    self._handle_logout(); return
+
+            principal = self._principal()
+            engine.set_principal(principal)
+
+            # /api/me is the UI's "who am I" — returns principal or unauthenticated.
+            if path == "/api/me":
+                if principal:
+                    self._json(200, {"authenticated": True, "email": principal.get("email"),
+                                     "name": principal.get("name"), "role": principal.get("role"),
+                                     "owner_id": principal.get("owner_id")})
+                else:
+                    self._json(200, {"authenticated": False, "auth_required": auth.auth_required()})
+                return
+
+            # --- Auth gate: unauthenticated requests are turned away --------- #
+            if auth.auth_required() and not principal:
+                if path == "/" or not path.startswith("/api/"):
+                    self._redirect("/login"); return
+                self._json(401, {"error": "authentication required", "login": "/login"}); return
+
             if path == "/":
                 if UI_PATH.exists():
                     self._send(200, UI_PATH.read_bytes(), "text/html; charset=utf-8")
@@ -293,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
                 account_id = path[len("/api/accounts/"):-len("/why-not")].strip("/")
                 try:
                     self._json(200, engine.why_not(account_id))
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "not your account", "account_id": account_id})
                 except KeyError:
                     self._json(404, {"error": f"unknown account {account_id}"})
                 return
@@ -300,6 +439,8 @@ class Handler(BaseHTTPRequestHandler):
                 acct = path.rsplit("/", 1)[-1]
                 try:
                     self._json(200, engine.account_detail(acct))
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "not your account", "account_id": acct})
                 except KeyError:
                     self._json(404, {"error": f"unknown account {acct}"})
                 return
@@ -311,8 +452,22 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            raw = self.rfile.read(length) if length else b"{}"
-            body = json.loads(raw or b"{}")
+            raw = self.rfile.read(length) if length else b""
+            ctype = self.headers.get("Content-Type", "")
+
+            # Dev-login POST (local only; the HTML form submits form-encoded data).
+            if path == "/auth/dev-login" and auth.dev_login_enabled() and not auth.cognito_configured():
+                form = urllib.parse.parse_qs(raw.decode("utf-8", "replace"))
+                self._handle_dev_login({"email": (form.get("email") or [""])[0]}); return
+
+            body = json.loads(raw or b"{}") if raw else {}
+            if not isinstance(body, dict):
+                body = {}
+
+            principal = self._principal()
+            engine.set_principal(principal)
+            if auth.auth_required() and not principal:
+                self._json(401, {"error": "authentication required", "login": "/login"}); return
             if path == "/api/agent":
                 question = (body.get("question") or "").strip() or "What are my top CS actions today?"
                 account_id = (body.get("account_id") or "").strip() or None

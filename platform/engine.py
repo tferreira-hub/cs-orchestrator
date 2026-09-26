@@ -28,7 +28,62 @@ from suppression import primary_instance_ids, suppressed_signals  # noqa: E402
 # (live per-source with fixture fallback). One source of truth for UI + agent.
 import dataaccess  # noqa: E402
 from adapters import sources as _src  # noqa: E402
-orchestrate.set_account_provider(dataaccess.all_accounts)
+
+# --------------------------------------------------------------------------- #
+# Per-request identity scoping
+# --------------------------------------------------------------------------- #
+# A CSM sees ONLY the accounts they own; an Admin sees all. We enforce this at the
+# single source of truth: the account provider the rules engine reads from. The
+# server sets the authenticated principal per request (thread-local); every
+# downstream computation (portfolio, KPIs, data gaps, lifecycle, tasks, and the
+# agent, which all read orchestrate.load_accounts()) is then automatically scoped,
+# so no endpoint can accidentally leak another CSM's book.
+import threading  # noqa: E402
+
+_REQUEST = threading.local()
+
+
+class ForbiddenError(Exception):
+    """Raised when the current principal may not access a specific account (-> 403)."""
+
+
+def set_principal(principal: dict | None) -> None:
+    """Set the authenticated principal for the current request thread.
+    principal = {"email","name","role","owner_id",...} or None (unscoped/admin)."""
+    _REQUEST.principal = principal
+
+
+def get_principal() -> dict | None:
+    return getattr(_REQUEST, "principal", None)
+
+
+def _owns(account: dict, owner_id: str | None) -> bool:
+    return bool(owner_id) and str(account.get("hubspot", {}).get("csm_owner_id") or "") == str(owner_id)
+
+
+def _scoped_accounts() -> dict:
+    """The account roster visible to the current principal. Admin (or no principal,
+    for legacy/open mode) sees everything; a CSM sees only accounts they own."""
+    accounts = dataaccess.all_accounts()
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return accounts
+    owner_id = p.get("owner_id")
+    return {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
+
+
+def can_view_account(account_id: str) -> bool:
+    """Whether the current principal may view a specific account (for hard 403s)."""
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return True
+    accounts = dataaccess.all_accounts()
+    a = accounts.get(account_id)
+    return bool(a) and _owns(a, p.get("owner_id"))
+
+
+# The rules engine reads accounts through this provider, so scoping is uniform.
+orchestrate.set_account_provider(_scoped_accounts)
 
 
 # --------------------------------------------------------------------------- #
@@ -120,6 +175,7 @@ def health_score(account: dict) -> dict:
     usage = account.get("usage", {})
     churn = account.get("churn", {})
     stripe = account.get("stripe", {})
+    jiminny = account.get("jiminny", {})
 
     score = 100.0
     reasons: list[str] = []
@@ -173,6 +229,17 @@ def health_score(account: dict) -> dict:
         score -= 8
         reasons.append("Pendo risk advisor: Medium (-8)")
 
+    # Live Jiminny conversational intelligence: negative call sentiment is a real
+    # relationship-health signal. Weighted modestly — it colours the score but does
+    # not, on its own, dominate hard risk signals like churn or an open Sev-1.
+    sentiment = str(jiminny.get("sentiment") or "").lower()
+    if sentiment == "negative":
+        score -= 10
+        reasons.append("latest call sentiment: negative (-10)")
+    elif sentiment == "positive":
+        score = min(100.0, score + 3)
+        reasons.append("latest call sentiment: positive (+3)")
+
     if str(churn.get("churn_status") or "").lower() == "churned":
         score = min(score, 49)
     score = max(0, min(100, round(score)))
@@ -187,6 +254,7 @@ def health_score(account: dict) -> dict:
         or usage.get("days_since_last_visit") is not None
         or usage.get("pendo_risk_score")
         or stripe.get("dunning_stage")
+        or jiminny.get("sentiment")
     )
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
@@ -197,9 +265,10 @@ def portfolio() -> dict:
     accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
 
+    # Join tasks to accounts by the stable account_id (a display name can collide).
     tasks_by_account: dict[str, list] = {}
     for t in result["tasks"]:
-        tasks_by_account.setdefault(t["account"], []).append(t)
+        tasks_by_account.setdefault(t.get("account_id"), []).append(t)
 
     rows = []
     for aid, a in accounts.items():
@@ -217,7 +286,7 @@ def portfolio() -> dict:
             "lifecycle_stage": hsobj.get("lifecycle_stage"),
             "health": h,
             "connected": _connected(a),
-            "open_task_count": len(tasks_by_account.get(a.get("hubspot", {}).get("name"), [])),
+            "open_task_count": len(tasks_by_account.get(aid, [])),
         })
     rows.sort(key=lambda r: r["health"]["score"])  # worst health first
 
@@ -235,8 +304,11 @@ def portfolio() -> dict:
             "at_risk_arr_usd": at_risk_arr,
             "live_sources": dataaccess.live_sources(),
             "data_mode": "live" if dataaccess.any_live() else "sample",
-            "account_scope": os.environ.get("CS_ACCOUNT_SCOPE", "all").strip().lower(),
-            "scope_owner": os.environ.get("CS_CSM_OWNER_ID") or os.environ.get("CS_CSM_OWNER"),
+            "account_scope": ("all" if (not get_principal() or get_principal().get("role") == "admin")
+                              else "csm"),
+            "scope_owner": (get_principal() or {}).get("name") or (get_principal() or {}).get("email"),
+            "principal": ({"name": get_principal().get("name"), "email": get_principal().get("email"),
+                           "role": get_principal().get("role")} if get_principal() else None),
             "judge": result.get("judge", {"verdict": "UNKNOWN", "violations": []}),
         },
         "accounts": rows,
@@ -260,10 +332,10 @@ def daily_brief() -> dict:
     """Human-ready daily brief derived only from the deterministic queue."""
     accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
-    by_name = {a.get("hubspot", {}).get("name"): a for a in accounts.values()}
+    by_id = dict(accounts)
     actions = []
     for task in result["tasks"][:3]:
-        account = by_name.get(task.get("account"), {})
+        account = by_id.get(task.get("account_id"), {})
         hs = account.get("hubspot", {})
         actions.append({
             "account": task.get("account"), "priority": task.get("priority"),
@@ -288,6 +360,8 @@ def daily_brief() -> dict:
 
 
 def why_not(account_id: str) -> dict:
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
     accounts = orchestrate.load_accounts()
     account = accounts.get(account_id)
     if not account:
@@ -313,6 +387,8 @@ def why_not(account_id: str) -> dict:
 
 
 def account_detail(account_id: str) -> dict:
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
     accounts = orchestrate.load_accounts()
     if account_id not in accounts:
         raise KeyError(account_id)
@@ -399,6 +475,79 @@ def writeback(account_id: str, apply: bool = False) -> dict:
     }
 
 
+def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
+    """Portfolio revenue retention, computed transparently from LIVE signals only.
+
+    GRR (Gross Revenue Retention) is the headline retention metric and is computed
+    from real churn: (base_arr - churned_arr) / base_arr, capped at 100% (no upside
+    counted). It tracks the CS brief's GRR >= 92% goal.
+
+    We deliberately DO NOT publish an NDR percentage here. True NDR requires *booked*
+    expansion/contraction revenue, which this platform does not yet have. Reporting an
+    NDR inflated by unrealised opportunity would be misleading for a board-level metric.
+    Instead we surface the expansion PIPELINE separately: the ARR of healthy accounts
+    carrying an active expansion trigger (license utilization / API surge / strong
+    adoption). This is opportunity, not retention — labelled as such.
+
+    Definitions (annualised, book-level):
+      base_arr          = sum of live contract ARR across the book
+      churned_arr       = ARR of accounts flagged churned (Redshift status or HubSpot
+                          lifecycle) — revenue lost
+      expansion_pipeline_arr = ARR of healthy accounts with an active expansion trigger
+                          (pipeline/opportunity, NOT booked expansion)
+
+    `computable` is False when no live ARR is available, so the UI shows "no data"
+    rather than a misleading 0%.
+    """
+    base_arr = 0
+    churned_arr = 0
+    expansion_pipeline_arr = 0
+    expansion_accounts = 0
+    for aid, a in accounts.items():
+        live = _live_account(a)
+        hs = live.get("hubspot", {})
+        arr = hs.get("arr_usd") or 0
+        if not arr:
+            continue
+        base_arr += arr
+        churn = live.get("churn", {})
+        churned = str(churn.get("churn_status") or "").lower() == "churned" \
+            or str(hs.get("lifecycle_stage") or "").lower() in {"churned", "churned customer"}
+        if churned:
+            churned_arr += arr
+            continue  # a churned account is not an expansion opportunity
+        acct_tasks = tasks_by_account.get(aid, [])
+        if any(t.get("rule_id") in {
+            orchestrate.RULE_EXPANSION_UTILIZATION,
+            orchestrate.RULE_EXPANSION_API_SURGE,
+            orchestrate.RULE_EXPANSION_ADOPTION,
+        } for t in acct_tasks):
+            expansion_pipeline_arr += arr
+            expansion_accounts += 1
+
+    if not base_arr:
+        return {"computable": False, "grr_pct": None,
+                "base_arr_usd": 0, "churned_arr_usd": 0,
+                "expansion_pipeline_arr_usd": 0, "expansion_pipeline_accounts": 0,
+                "target": {"grr_pct": 92},
+                "note": "No live contract ARR available; retention is not computable."}
+
+    grr = round(100 * (base_arr - churned_arr) / base_arr, 1)
+    return {
+        "computable": True,
+        "grr_pct": grr,
+        "base_arr_usd": base_arr,
+        "churned_arr_usd": churned_arr,
+        # Expansion PIPELINE (opportunity), reported separately from retention. Not NDR.
+        "expansion_pipeline_arr_usd": expansion_pipeline_arr,
+        "expansion_pipeline_accounts": expansion_accounts,
+        "target": {"grr_pct": 92},
+        "method": "live ARR; GRR from Redshift/HubSpot churned status. Expansion "
+                  "pipeline = active expansion-trigger accounts (opportunity, not booked "
+                  "revenue); no NDR is published until booked expansion data exists.",
+    }
+
+
 def kpis() -> dict:
     """Leadership KPI & capacity tracking (req §3): per-CSM portfolio allocation,
     task load, at-risk ARR, and health mix, to inform headcount/resourcing."""
@@ -407,7 +556,7 @@ def kpis() -> dict:
     task_metrics = _task_metrics(result["tasks"])
     tasks_by_account = {}
     for t in result["tasks"]:
-        tasks_by_account.setdefault(t["account"], []).append(t)
+        tasks_by_account.setdefault(t.get("account_id"), []).append(t)
     status_by_id = task_metrics["status_by_id"]
     active_tasks = [t for t in result["tasks"]
                     if status_by_id.get(t.get("task_id"), "open") != "completed"]
@@ -421,9 +570,8 @@ def kpis() -> dict:
         live = _live_account(a)
         hs = live.get("hubspot", {})              # {} unless HubSpot live
         csm = hs.get("csm_owner") or "Unassigned"
-        name = a.get("hubspot", {}).get("name")   # task join key (name is a routing field)
         h = health_score(live)
-        tasks = tasks_by_account.get(name, [])
+        tasks = tasks_by_account.get(aid, [])      # join by stable account_id
         active_account_tasks = [task for task in tasks
                     if status_by_id.get(task.get("task_id"), "open") != "completed"]
         rec = by_csm.setdefault(csm, {
@@ -447,6 +595,7 @@ def kpis() -> dict:
     return {
         "by_csm": sorted(by_csm.values(), key=lambda r: -r["open_tasks"]),
         "mandate_load": mandate_counts,
+        "retention": _retention_metrics(accounts, tasks_by_account),
         "task_metrics": {key: (sorted(value) if key == "overdue_task_ids" else value)
                  for key, value in task_metrics.items() if key != "status_by_id"},
         "totals": {
@@ -586,6 +735,10 @@ def integrations() -> dict:
              "direction": "read-only", "access": "read-only",
              "status": st("Churn Model"), "accounts_synced": synced("churn"),
              "pulls": ["ML churn score", "model version", "top risk drivers"], "pushes": []},
+            {"system": "Entitlements", "category": "Licensing / Billing",
+             "direction": "read-only", "access": "read-only",
+             "status": st("Entitlements"), "accounts_synced": synced("entitlements"),
+             "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
         ]
     }
 
@@ -603,7 +756,7 @@ def datagaps() -> dict:
         ("csm_owner", "CSM owner"),
         ("subscription_type", "Subscription type"),
     ]
-    ROLES = ["Executive Sponsor", "Primary Champion", "Finance Contact"]
+    ROLES = ["Executive Sponsor", "Primary Champion / Admin", "Finance Contact"]
 
     rows = []
     totals = {"zendesk": 0, "stripe": 0, "usage": 0, "hubspot": 0}
