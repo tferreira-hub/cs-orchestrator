@@ -207,7 +207,7 @@ just set the env var once the role/trust exist.
 > The CS Platform ECS service + task role (SSM read + cross-account `sts:AssumeRole`
 > to the Data Platform churn reader) + host-based ALB routing are added in
 > `ja-observe-api` PR #317 (stacked on the Cognito client PR #316), in the **`devops/`
-> environment** — the active observe deployment (DevOps account `962430324941`); `prod/`
+> environment** — the active observe deployment (DevOps account `880082283556`); `prod/`
 > is the pre-migration env. The cross-account `cs-platform-churn-reader` role is provided
 > as `cs-platform-cross-account.tf.example` to apply in the Data Platform account
 > (`503561421603`), trusting the CS Platform task role in the DevOps account. Remaining

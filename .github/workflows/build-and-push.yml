@@ -1,7 +1,7 @@
 name: build-and-push
 
 # Builds the CS Platform container image and pushes it to the DevOps ECR
-# (962430324941) on every push to main, tagged with the immutable git SHA.
+# (880082283556) on every push to main, tagged with the immutable git SHA.
 # Authenticates via GitHub OIDC (no long-lived keys). The ECR repo `cs-platform`
 # is created by ja-observe-api devops Terraform (storage.tf).
 
@@ -22,7 +22,7 @@ permissions:
 
 env:
   AWS_REGION: ap-southeast-2
-  ECR_ACCOUNT: "962430324941" # DevOps account
+  ECR_ACCOUNT: "880082283556" # DevOps account
   IMAGE_NAME: cs-platform
 
 jobs:
