@@ -1,0 +1,4 @@
+# Runtime dependencies for the CS Platform container.
+# The server itself is Python-stdlib-only; boto3 is required solely by the live
+# Redshift Data API churn adapter. All vendor API calls use urllib (stdlib).
+boto3>=1.34,<2.0
