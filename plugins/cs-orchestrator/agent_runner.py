@@ -76,7 +76,7 @@ def _identity_line(principal: dict | None, scoped_count: int, total_count: int) 
     who = (principal or {}).get("name") or (principal or {}).get("email") or "this session"
     if _principal_role(principal) == "csm":
         return (f"You're signed in as {who} (CSM). I'm scoped to your book of "
-                f"{scoped_count} account{'s' if scoped_count != 1 else ''} — everything below is "
+                f"{scoped_count} account{'s' if scoped_count != 1 else ''}, so everything below is "
                 f"limited to accounts you own.")
     return (f"You're signed in as {who} (Admin). I can see the full portfolio of "
             f"{total_count} account{'s' if total_count != 1 else ''} across every CSM book.")
@@ -192,8 +192,15 @@ def _answer_numbers(answer: str) -> set[str]:
 
 
 def _clean_agent_text(text: str) -> str:
-    """Keep model prose presentation-neutral and consistent with the UI style."""
-    return text.replace("—", " - ").replace("–", " - ")
+    """Keep model prose natural and consistent with the UI style.
+
+    Remove em/en dashes entirely (the user does not want them). A dash used as a
+    parenthetical becomes a comma; keep the sentence readable."""
+    out = text.replace(" — ", ", ").replace(" – ", ", ")
+    out = out.replace("—", ", ").replace("–", ", ")
+    # Collapse any accidental double punctuation from the substitution.
+    out = out.replace(", ,", ",").replace(",,", ",").replace(" ,", ",")
+    return out
 
 
 def _evidence_numbers(queue: dict, accounts: dict) -> set[str]:
@@ -287,14 +294,23 @@ def _portfolio_evidence_numbers(queue: dict, accounts: dict) -> set[str]:
     return values
 
 
-def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool, question: str = "") -> list[str]:
-    """Return blocking harness findings for a model answer."""
+def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool,
+                    question: str = "", account_focus: bool = False) -> list[str]:
+    """Return blocking harness findings for a model answer.
+
+    `account_focus` is True when the question is about a single named account (or one
+    is in view). Such questions are answered from that account's own tool evidence and
+    do not require the portfolio task queue, so we do not demand get_task_queue for them.
+    """
     findings = []
     judge = queue.get("judge", {})
-    if not queue_called:
-        findings.append("deterministic get_task_queue was not called")
-    if judge.get("verdict") != "PASS":
-        findings.append(f"queue judge verdict is {judge.get('verdict', 'UNKNOWN')}")
+    # The deterministic queue is required only for portfolio-level / recommendation
+    # answers. A single-account explainer is grounded by that account's own tools.
+    if not account_focus:
+        if not queue_called:
+            findings.append("deterministic get_task_queue was not called")
+        if judge.get("verdict") != "PASS":
+            findings.append(f"queue judge verdict is {judge.get('verdict', 'UNKNOWN')}")
     by_name = {a.get("hubspot", {}).get("name"): a for a in accounts.values()}
     mentioned = [name for name in by_name if name and name in answer]
     queue_tasks = queue.get("tasks", [])
@@ -324,7 +340,7 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
         local_text = window[name_position:name_position + 260] if name_position >= 0 else ""
         if "churned" in local_text and not is_churned:
             findings.append(f"unsupported churn status for account: {name}")
-    if queue.get("tasks") and not mentioned:
+    if queue.get("tasks") and not mentioned and not account_focus:
         findings.append("answer does not reference any account from the deterministic queue")
     return findings
 
@@ -388,12 +404,26 @@ def _owner_account_answer(question: str, accounts: dict, queue: dict,
     all_owner_terms = ("who are the owners", "portfolio owners", "all owners",
                        "list owners", "who are all portfolio owners")
     if any(term in question_lower for term in all_owner_terms):
+        assigned = {o: v for o, v in grouped.items() if o != "Unassigned"}
+        unassigned = grouped.get("Unassigned", [])
         lines = []
-        for owner in sorted(grouped, key=lambda value: (value == "Unassigned", value.casefold())):
+        for owner in sorted(assigned, key=lambda value: value.casefold()):
             names = sorted(account.get("hubspot", {}).get("name") or "Unnamed account"
                            for account in grouped[owner])
-            lines.append(f"- **{owner}**: {', '.join(names)}")
-        return "**Portfolio owners and accounts**\n\n" + "\n".join(lines)
+            n = len(names)
+            lines.append(f"- {owner} looks after {n} account{'s' if n != 1 else ''}: {', '.join(names)}.")
+        intro = (f"There are {len(assigned)} CSMs with named accounts across the portfolio. "
+                 "Here is who owns what:")
+        body = "\n".join(lines)
+        tail = ""
+        if unassigned:
+            un = sorted(a.get("hubspot", {}).get("name") or "Unnamed account" for a in unassigned)
+            tail = (f"\n\n{len(un)} account{'s are' if len(un) != 1 else ' is'} currently unassigned: "
+                    f"{', '.join(un)}. These are worth routing to an owner, since no one is actively "
+                    "watching them today.")
+        follow = ("\n\nWould you like me to show which of these owners is carrying the most risk right "
+                  "now, or dig into any single owner's book?")
+        return intro + "\n\n" + body + tail + follow
 
     selected_owner = next((owner for owner in grouped if owner != "Unassigned" and
                            ((csm_owner and owner.casefold() == csm_owner.casefold())
@@ -446,10 +476,16 @@ def _owner_account_answer(question: str, accounts: dict, queue: dict,
 
 def _conversation_answer(question: str, csm_owner: str | None = None) -> str | None:
     question_lower = question.lower()
+    q_stripped = question_lower.strip().rstrip("!.").strip()
+    # Short acknowledgements / social replies get a brief, human response, never the menu.
+    ACKS = {"ok", "okay", "k", "thanks", "thank you", "ty", "cool", "great", "nice",
+            "got it", "sure", "yes", "yep", "no", "nope", "cheers", "perfect", "awesome"}
+    if q_stripped in ACKS:
+        return "Anytime. Just tell me what you'd like to look at next and I'll dig in."
     if any(term in question_lower for term in ("who are you", "what are you", "how are you")):
-        answer = "I’m your AI Customer Success partner. I help you understand your account book, explain live signals, and identify the next governed action."
+        answer = "I'm your AI Customer Success partner. I help you understand your account book, explain live signals, and identify the next governed action."
         if csm_owner:
-            answer += f" I’ll use **{csm_owner}** as the current portfolio owner."
+            answer += f" I'll use **{csm_owner}** as the current portfolio owner."
         return answer
     return None
 
@@ -480,11 +516,10 @@ def _maybe_clarify(question: str, accounts: dict, account_id: str | None) -> str
     if any(term in q for term in _CONCRETE):
         return None  # a concrete intent is present
     if q in _VAGUE or len(q) <= 12:
-        return ("Happy to help. To point you at the right thing, which would you like:\n"
-                "- **Top actions today** across your accounts, ranked by priority;\n"
-                "- **Risk** — accounts that need protecting first;\n"
-                "- **Expansion** — where the growth signals are; or\n"
-                "- A **single account** — name it and I'll give you the full picture.")
+        return ("Happy to help. What would be most useful right now? I can walk you through "
+                "your top actions for today ranked by priority, show you which accounts need "
+                "protecting first, point out where the expansion signals are, or dig into a "
+                "single account if you name it. Which one would you like to start with?")
     return None
 
 
@@ -594,13 +629,13 @@ def run(question: str, account_id: str | None = None,
     # narrow, offer one focused question rather than guessing.
     clarify = _maybe_clarify(question, accounts, account_id)
     if clarify is not None:
-        return {"ok": True, "answer": identity_line + "\n\n" + clarify, "transcript": [],
+        return {"ok": True, "answer": clarify, "scope": identity_line, "transcript": [],
                 "accounts_available": len(accounts), "actions": [],
                 "harness": {"route": "clarifying_question"}}
 
     owner_answer = _owner_account_answer(question, accounts, tools[3], csm_owner=csm_owner)
     if owner_answer is not None:
-        return {"ok": True, "answer": identity_line + "\n\n" + owner_answer, "transcript": transcript,
+        return {"ok": True, "answer": owner_answer, "scope": identity_line, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
                 "accounts_available": len(accounts),
                 "actions": _structured_actions(tools[3], accounts),
@@ -639,23 +674,39 @@ def run(question: str, account_id: str | None = None,
               "\n\n[Harness requirement] Call get_task_queue before making portfolio recommendations. Treat its evidence and judge verdict as authoritative; do not invent figures.\n" +
               "\n[Response style] Speak like a thoughtful senior CS partner, not a system log. For top-actions questions, lead with the requested actions and keep the answer concise (roughly 150-250 words). Use natural prose or a short numbered list, not a repeated full queue table. For each action, give the account, what to do, why it matters, and the exact SLA from its priority: P1 means within 24 hours, P2 means today, P3 means this week, P4 means before the renewal milestone, and P5 means this week. Distinguish active risk from churned-account recovery and contact hygiene. Do not say all Protect actions have a 24-hour SLA. Do not mention tool calls, harness checks, judge verdicts, correction attempts, raw source JSON, null values, or internal implementation terms. Mention data gaps only when they change the recommendation, in one short closing note. Do not repeat the structured action packet because the UI already displays it.\n"+
               "[Evidence rule] Do not generalize categorical facts such as Churned status across accounts. Say an account is Churned only when that account's own Redshift evidence says Churned. "
-              "Do not claim that an external dunning, suspension, write-back, or outreach action has executed unless the tool result explicitly confirms execution; describe a handoff as a handoff.")
+              "Do not claim that an external dunning, suspension, write-back, or outreach action has executed unless the tool result explicitly confirms execution; describe a handoff as a handoff.\n"
+              "[Voice] Write like a warm, sharp CS colleague talking to another person: natural sentences, plain English, no jargon dumps. NEVER use an em dash or en dash (— or –); use a comma or a full stop instead. Do not answer with a bare bullet list of facts when a sentence would read better. Always close with one short, specific follow-up question that offers a sensible next step (for example, offering to draft an outreach, open an account, or compare owners), so it feels like a real conversation.")
     try:
+        # Single-account questions are grounded by that account's own tools and do not
+        # require the portfolio queue. Detect focus from an explicit account_id or a
+        # named account in the question.
+        q_lower = question.lower()
+        named_account = any((a.get("hubspot", {}).get("name") or "").lower() in q_lower
+                            for a in accounts.values() if a.get("hubspot", {}).get("name"))
+        account_focus = bool(account_id) or named_account
         answer = ""
         findings = []
         for attempt in range(MAX_CORRECTIONS + 1):
             if attempt:
-                correction = ("Your previous answer failed harness validation:\n- " +
-                              "\n- ".join(findings) +
-                              "\nRegenerate using only the deterministic queue evidence. Call get_task_queue first. "
-                              "Do not mention internal policy thresholds or rule constants; explain the customer action in plain language.")
+                if account_focus:
+                    correction = ("Your previous answer failed validation:\n- " +
+                                  "\n- ".join(findings) +
+                                  "\nUse only that account's own tool evidence (hubspot_get_account, "
+                                  "usage_get_metrics, zendesk_get_tickets, churn_get_score, stripe_get_payment). "
+                                  "Do not invent figures. Write naturally, like a CS colleague.")
+                else:
+                    correction = ("Your previous answer failed harness validation:\n- " +
+                                  "\n- ".join(findings) +
+                                  "\nRegenerate using only the deterministic queue evidence. Call get_task_queue first. "
+                                  "Do not mention internal policy thresholds or rule constants; explain the customer action in plain language.")
                 task = primed + "\n\n" + correction
             else:
                 task = primed
             answer = _run_agent(client, orchestrator, task, tools, tool_specs, transcript, history=history)
             answer = _clean_agent_text(answer)
             queue_called = tools[2]["queue_called"]
-            findings = validate_answer(answer, tools[3], accounts, queue_called, question)
+            findings = validate_answer(answer, tools[3], accounts, queue_called, question,
+                                       account_focus=account_focus)
             transcript.append({"harness": "answer_validation", "attempt": attempt + 1,
                                "findings": findings})
             if not findings:
@@ -664,7 +715,7 @@ def run(question: str, account_id: str | None = None,
             return {"ok": False, "error": "Agent answer blocked by harness after two corrections: " +
                     "; ".join(findings), "transcript": transcript,
                     "harness": {"corrections": MAX_CORRECTIONS, "findings": findings}}
-        return {"ok": True, "answer": identity_line + "\n\n" + answer, "transcript": transcript,
+        return {"ok": True, "answer": answer, "scope": identity_line, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
             "accounts_available": len(tools[0]),
                 "actions": _structured_actions(tools[3], tools[0]),

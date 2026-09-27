@@ -902,16 +902,19 @@ def test_owner_directory_and_named_owner_brief_are_grounded():
     all_owners = _owner_account_answer("Who are all portfolio owners?", accounts, queue,
                                        csm_owner="Chris Coombs")
 
-    assert "Chris Coombs**: Account A" in directory
-    assert "Other Owner**: Account B" in directory
+    assert "Chris Coombs" in directory and "Account A" in directory
+    assert "Other Owner" in directory and "Account B" in directory
     assert "Account A" in brief
     assert "Update contacts" in brief
     assert "Account B" not in brief
     assert "Account A" in follow_up
     assert "Account B" not in follow_up
     assert ownership == "No. **Account B** is owned by **Other Owner**, not **Chris Coombs**."
-    assert "Chris Coombs**: Account A" in all_owners
-    assert "Other Owner**: Account B" in all_owners
+    assert "Chris Coombs" in all_owners and "Account A" in all_owners
+    assert "Other Owner" in all_owners and "Account B" in all_owners
+    # New conversational format: no em dashes, ends with a follow-up question.
+    assert "—" not in all_owners and "–" not in all_owners
+    assert "?" in all_owners
 
 
 def test_identity_conversation_does_not_load_actions():
@@ -1342,5 +1345,24 @@ def test_agent_run_scopes_to_csm_book(monkeypatch):
     assert result["ok"] is True
     # Scoped to exactly the owned account
     assert list(captured["scoped"]) == ["A1"]
-    # Identity/scope stated up front
-    assert "CSM" in result["answer"] and "book of 1" in result["answer"]
+    # Identity/scope is returned as a separate field (shown once in the panel header),
+    # not prepended to every answer.
+    assert "CSM" in result["scope"] and "book of 1" in result["scope"]
+
+
+def test_single_account_answer_does_not_require_queue():
+    """A single-account explainer is grounded by that account's own tools and must not
+    be blocked for skipping the portfolio task queue (regression: Kain Colasanto)."""
+    from agent_runner import validate_answer
+    queue = {"tasks": [{"account": "Other Co", "priority": 1}], "judge": {"verdict": "PASS"}}
+    accounts = {"au1-9": {"hubspot": {"name": "Kain Colasanto, LLC", "arr_usd": 11504}}}
+    answer = "Kain Colasanto, LLC is a small agency and looks stable today."
+    # Portfolio question with no queue call -> should be flagged.
+    portfolio_findings = validate_answer(answer, queue, accounts, queue_called=False,
+                                         question="what are my top actions?", account_focus=False)
+    assert any("get_task_queue" in f for f in portfolio_findings)
+    # Single-account question -> queue not required, no block.
+    account_findings = validate_answer(answer, queue, accounts, queue_called=False,
+                                       question="tell me about Kain Colasanto", account_focus=True)
+    assert not any("get_task_queue" in f for f in account_findings)
+    assert not any("does not reference any account" in f for f in account_findings)
