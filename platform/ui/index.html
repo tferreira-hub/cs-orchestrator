@@ -216,6 +216,7 @@ body.dock-open .drawer{right:420px}
 .trend-badge.down{background:var(--redbg);color:var(--red)}
 .trend-badge.up{background:var(--greenbg);color:var(--green)}
 .trend-badge.flat{background:#eef1f6;color:var(--ink2)}
+.lc-badge{font-size:.5em;font-weight:800;vertical-align:middle;border-radius:999px;padding:3px 10px;background:var(--brandsoft);color:var(--brand);letter-spacing:.02em}
 .tl{display:flex;flex-direction:column;gap:2px}
 .tl-row{display:flex;gap:11px;align-items:flex-start;padding:7px 0;position:relative}
 .tl-row:not(:last-child):before{content:"";position:absolute;left:4px;top:16px;bottom:-7px;width:2px;background:var(--line)}
@@ -1474,6 +1475,8 @@ async function openAccount(id){
   const tr=d.health_trend;
   const trendBadge=tr?('<span class="trend-badge '+(tr.direction==='down'?'down':tr.direction==='up'?'up':'flat')+'">'+(tr.delta>0?'+':'')+tr.delta+' pts / '+tr.days+'d</span>'):'';
   const spark=sparkline((d.health_history||[]).map(r=>r.health));
+  const lc=d.lifecycle_state;
+  const lcBadge=lc?('<span class="lc-badge">'+escapeHtml(lc.stage)+'</span>'):'';
   const title=conn.hubspot?(hs.name||id):id;
   window.ACTIVE_ACCOUNT_NAME=title;
   if(typeof adSyncScope==='function') adSyncScope();
@@ -1483,7 +1486,7 @@ async function openAccount(id){
     :'HubSpot not connected';
   document.getElementById('drawer').innerHTML=
     '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
-      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+' '+trendBadge+'</div>'+
+      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+' '+trendBadge+' '+lcBadge+'</div>'+
       '<div class="sub" style="margin-top:4px">'+meta+'</div>'+
       '<button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane about this account</button></div>'+
     '<div class="dbody">'+

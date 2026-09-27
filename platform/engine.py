@@ -655,6 +655,7 @@ def account_detail(account_id: str) -> dict:
         "timeline": _timeline_for(account_id, tasks),
         "expansion": expansion_score(live),
         "adoption": adoption_score(live),
+        "lifecycle_state": lifecycle_state(live),
         "sources": a.get("sources", {}),
         "connected": _connected(a),
         "primary_instances": sorted(primary_instance_ids(live.get("hubspot", {}))),
@@ -1087,6 +1088,46 @@ def expansion_opportunities() -> dict:
                   "product engagement, licence utilisation, API growth, renewal timing and "
                   "revenue headroom to surface the strongest upsell opportunities first.",
     }
+
+
+def lifecycle_state(account: dict) -> dict:
+    """Derive the customer lifecycle stage as a state machine (Customer 360 §6) from live
+    signals, rather than a manual field. Stages: Implementation, Onboarding, Adoption,
+    Value Realisation, Mature, plus the reverse path At Risk / Recovery. Returns the stage
+    and a short reason so it is explainable and evidence-driven."""
+    hs = account.get("hubspot", {}) or {}
+    ob = account.get("onboarding", {}) or {}
+    churn = account.get("churn", {}) or {}
+    stage_raw = str(hs.get("lifecycle_stage") or "").lower()
+    health = health_score(account)
+    band = health.get("band")
+
+    # Terminal / reverse states first.
+    if stage_raw in {"churned", "churned customer"} or str(churn.get("churn_status") or "").lower() == "churned":
+        return {"stage": "Churned", "reason": "HubSpot lifecycle marks this account churned.", "flow": "exited"}
+    if band == "red":
+        return {"stage": "At Risk", "reason": "Health is red; the account has moved backwards and needs recovery.", "flow": "reverse"}
+
+    # Onboarding / implementation when explicit onboarding signal says so.
+    ob_status = str(ob.get("status") or "").lower()
+    if ob_status in {"implementation", "implementing", "kickoff"}:
+        return {"stage": "Implementation", "reason": "Onboarding status is implementation.", "flow": "forward"}
+    if ob_status in {"onboarding", "in_progress", "training"} or (ob.get("time_to_value_days") is None and ob_status):
+        return {"stage": "Onboarding", "reason": "Onboarding is in progress.", "flow": "forward"}
+
+    # Forward maturity from adoption + health.
+    ad = adoption_score(account)
+    ascore = ad.get("score") if ad.get("computable") else None
+    if ascore is not None:
+        if ascore >= 70 and band == "green":
+            return {"stage": "Value Realisation", "reason": f"Strong adoption ({ascore}) and healthy relationship.", "flow": "forward"}
+        if ascore >= 40:
+            return {"stage": "Adoption", "reason": f"Building adoption ({ascore}); engagement is growing.", "flow": "forward"}
+        return {"stage": "Onboarding", "reason": f"Low adoption ({ascore}); still ramping.", "flow": "forward"}
+    # No adoption signal: infer from health.
+    if band == "green":
+        return {"stage": "Mature", "reason": "Healthy, established customer.", "flow": "forward"}
+    return {"stage": "Adoption", "reason": "Established but still building steady usage.", "flow": "forward"}
 
 
 def lifecycle() -> dict:

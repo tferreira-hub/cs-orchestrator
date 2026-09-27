@@ -825,6 +825,12 @@ def run(question: str, account_id: str | None = None,
                     flags += f" | adoption={ad.get('score')}({ad.get('band')})"
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                ls = _engine.lifecycle_state(a)
+                if ls.get("stage"):
+                    flags += f" | stage={ls.get('stage')}"
+            except Exception:  # noqa: BLE001
+                pass
         roster_lines.append(
             f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | "
             f"ARR={hs.get('arr_usd')} | state={hs.get('state') or 'unknown'} | "
