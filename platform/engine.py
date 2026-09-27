@@ -374,6 +374,16 @@ def portfolio() -> dict:
     accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
 
+    # Persist a daily health snapshot per account so the platform can show trajectories
+    # ("health -18 over 45 days") and drive trend-based risk. Idempotent per day; guarded
+    # so history never breaks the main payload.
+    try:
+        import history
+        history.record_portfolio({aid: _live_account(a) for aid, a in accounts.items()},
+                                 health_score)
+    except Exception:  # noqa: BLE001
+        pass
+
     # Join tasks to accounts by the stable account_id (a display name can collide).
     tasks_by_account: dict[str, list] = {}
     for t in result["tasks"]:
@@ -495,6 +505,22 @@ def why_not(account_id: str) -> dict:
             "data_gaps": [key for key, value in account.get("sources", {}).items() if value == "not_live"]}
 
 
+def _health_trend_for(account_id: str):
+    try:
+        import history
+        return history.health_trend(account_id, window_days=45)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _health_history_for(account_id: str):
+    try:
+        import history
+        return history.history_for(account_id)[-30:]  # last 30 points for a sparkline
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def account_detail(account_id: str) -> dict:
     if not can_view_account(account_id):
         raise ForbiddenError(account_id)
@@ -517,6 +543,9 @@ def account_detail(account_id: str) -> dict:
         },
         "onboarding": live.get("onboarding", {}),
         "health": h,
+        "health_trend": _health_trend_for(account_id),
+        "health_history": _health_history_for(account_id),
+        "expansion": expansion_score(live),
         "sources": a.get("sources", {}),
         "connected": _connected(a),
         "primary_instances": sorted(primary_instance_ids(live.get("hubspot", {}))),

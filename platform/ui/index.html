@@ -212,6 +212,10 @@ body.dock-open .drawer{right:420px}
 .exp-meta{color:var(--ink2);font-size:.78em;margin-top:4px}
 .exp-drivers{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
 .exp-chip{font-size:.72em;background:var(--greenbg);color:var(--green);border-radius:6px;padding:2px 8px}
+.trend-badge{font-size:.5em;font-weight:800;vertical-align:middle;border-radius:999px;padding:3px 9px;letter-spacing:.02em}
+.trend-badge.down{background:var(--redbg);color:var(--red)}
+.trend-badge.up{background:var(--greenbg);color:var(--green)}
+.trend-badge.flat{background:#eef1f6;color:var(--ink2)}
 /* Detail drawer redesign */
 .dt-head{flex:0 0 auto;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
 .dt-head.pos{background:linear-gradient(135deg,#0ca678,#0e9f6e)}
@@ -584,6 +588,23 @@ function svgGauge(pct,target,opts){
     +arc(0,100,'#eef1f6',th)+arc(0,val,col,th)
     +'<line x1="'+tx+'" y1="'+ty+'" x2="'+(cx+(r+8)*Math.cos(A+(target/100)*A))+'" y2="'+(cy+(r+8)*Math.sin(A+(target/100)*A))+'" stroke="#0b1220" stroke-width="2"></line>'
     +'</svg>';
+}
+function sparkline(values){
+  const v=(values||[]).filter(x=>typeof x==='number');
+  if(v.length<2) return '';
+  const w=220,h=44,pad=4;
+  const min=Math.min(...v),max=Math.max(...v),range=(max-min)||1;
+  const pts=v.map((val,i)=>{
+    const x=pad+(i/(v.length-1))*(w-2*pad);
+    const y=h-pad-((val-min)/range)*(h-2*pad);
+    return x.toFixed(1)+','+y.toFixed(1);
+  });
+  const last=v[v.length-1], first=v[0];
+  const col=last<first?'#e5484d':last>first?'#0ca678':'#5b5bf0';
+  const lastPt=pts[pts.length-1].split(',');
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="max-width:100%">'
+    +'<polyline points="'+pts.join(' ')+'" fill="none" stroke="'+col+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'
+    +'<circle cx="'+lastPt[0]+'" cy="'+lastPt[1]+'" r="3" fill="'+col+'"/></svg>';
 }
 function renderScopeBar(sm){
   const el=document.getElementById('scopebar'); if(!el)return;
@@ -1161,6 +1182,22 @@ async function adRate(idx,rating,reason){
         judge_verdict:((d.harness||{}).queue_judge||{}).verdict||null})});
   }catch(e){/* feedback is best-effort */}
 }
+function extractName(q){
+  let s=(q||'').trim();
+  // 1) Explicit patterns, tolerant of common typos ('my name is/it/s X', "i'm X", 'call me X').
+  let m=s.match(/(?:my name(?:'?s| is| it|)|i\s*am|i'?m|call me|this is|it'?s|the name'?s)\s+([a-zA-Z][a-zA-Z'-]{1,30})/i);
+  if(m){const w=m[1]; if(!/^(is|it|the|a|an|my|me|name)$/i.test(w)) return cap(w);}
+  // 2) Strip a leading greeting and the assistant's own name, then skip filler words.
+  s=s.replace(/^(hi|hie|hey|hello|hiya|yo|good\s+(morning|afternoon|evening))[\s,!.]+/i,'');
+  s=s.replace(/^jane[\s,!.]+/i,'');
+  const FILLER=new Set(['my','name','is','it','the','a','an','me','im','am','call','this']);
+  const words=s.split(/[\s,!.?]+/).filter(Boolean);
+  for(const w of words){
+    if(/^[a-zA-Z][a-zA-Z'-]{1,30}$/.test(w) && !FILLER.has(w.toLowerCase())) return cap(w);
+  }
+  return '';
+}
+function cap(w){return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();}
 async function sendDockMessage(){
   if(adBusy) return;
   const input=document.getElementById('adInput');
@@ -1169,12 +1206,12 @@ async function sendDockMessage(){
   input.style.height='auto';
   // If Jane asked for the user's name, capture this reply as their name.
   if(window._JANE_ASKING_NAME){
-    const name=q.replace(/^(i'?m|i am|my name is|it'?s|call me|this is|hi|hello|hey)[,!.\s]+/i,'').replace(/[.!,?]+$/,'').trim().split(/\s+/)[0];
+    const name=extractName(q);
     const BAD=['hi','hie','hey','hello','yo','ok','okay','thanks','thank','help','hola','good','morning','afternoon','evening','jane','you','user','test','sup','na',''];
     if(!name || BAD.indexOf(name.toLowerCase())>=0){
       // Not a real name, keep asking gently, do not store it.
       adThread.push({role:'user',content:q});
-      adThread.push({role:'assistant',content:"I'd love to get your name right, what should I call you?"});
+      adThread.push({role:'assistant',content:"Sorry, I didn't catch your name, what should I call you?"});
       adRender();
       return;
     }
@@ -1400,6 +1437,9 @@ async function openAccount(id){
     }).join('<br>')||'<span class="muted">No contacts in HubSpot</span>'):NC;
   const health=d.health||{};
   const healthPill=health.computable?'<span class="pill '+hband(health.band)+'">'+health.score+'</span>':'<span class="nc">no data</span>';
+  const tr=d.health_trend;
+  const trendBadge=tr?('<span class="trend-badge '+(tr.direction==='down'?'down':tr.direction==='up'?'up':'flat')+'">'+(tr.delta>0?'+':'')+tr.delta+' pts / '+tr.days+'d</span>'):'';
+  const spark=sparkline((d.health_history||[]).map(r=>r.health));
   const title=conn.hubspot?(hs.name||id):id;
   window.ACTIVE_ACCOUNT_NAME=title;
   if(typeof adSyncScope==='function') adSyncScope();
@@ -1409,7 +1449,7 @@ async function openAccount(id){
     :'HubSpot not connected';
   document.getElementById('drawer').innerHTML=
     '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
-      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+'</div>'+
+      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+' '+trendBadge+'</div>'+
       '<div class="sub" style="margin-top:4px">'+meta+'</div>'+
       '<button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane about this account</button></div>'+
     '<div class="dbody">'+
@@ -1433,6 +1473,7 @@ async function openAccount(id){
       kv('Industry',conn.hubspot?nd(hs.industry):NC)+
       kv('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
       kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
+      (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
       (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
         '<div class="writeback"><b>Prepared (dry-run):</b> '+(d.hubspot_writeback.cs_health_score==null?'<span class="muted">no health data available</span>':'health '+d.hubspot_writeback.cs_health_score+', status <b>'+String(d.hubspot_writeback.cs_risk_status||'').replace(/_/g,' ')+'</b>')+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.<br><span class="muted">'+escapeHtml(d.hubspot_writeback.note||'No HubSpot mutation is sent. The guarded write-back endpoint verifies/creates missing properties and applies only when both CS_ALLOW_WRITE=1 and apply=true are supplied.')+'</span></div>'):'')+
