@@ -189,6 +189,28 @@ body.dock-open .drawer{right:420px}
 .rc-card.await{border-left:3px solid var(--muted);background:#f8f9fc}
 .rc-card.warn{border-left:3px solid var(--red)}
 .rc-card.warn .rc-value{color:var(--red)}
+.seg-bars{width:100%;display:flex;flex-direction:column;gap:11px}
+.seg-row{display:flex;flex-direction:column;gap:5px}
+.seg-top{display:flex;justify-content:space-between;align-items:baseline;font-size:.82em}
+.seg-name{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.seg-val{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.seg-pct{color:var(--muted);font-weight:600;font-size:.9em;margin-left:3px}
+.churn-list{display:flex;flex-direction:column;gap:2px}
+.churn-row{border:1px solid var(--line);border-radius:9px;background:#fcfcfe;overflow:hidden}
+.churn-row>summary{display:grid;grid-template-columns:2fr 1.3fr 1.3fr 90px;gap:10px;align-items:center;padding:10px 13px;cursor:pointer;list-style:none;font-size:.86em}
+.churn-row>summary::-webkit-details-marker{display:none}
+.churn-row>summary:before{content:"▸";color:var(--muted);margin-right:2px}
+.churn-row[open]>summary:before{content:"▾"}
+.churn-row>summary:hover{background:#f6f7ff}
+.churn-row .cr-name{font-weight:700;color:var(--ink)}
+.churn-row .cr-seg,.churn-row .cr-owner{color:var(--ink2)}
+.churn-row .cr-arr{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.cr-detail{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:12px 16px;border-top:1px solid var(--line);background:#fff;font-size:.82em}
+.cr-detail>div{display:flex;flex-direction:column}
+.cr-detail b{font-size:.85em;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.cr-detail span{color:var(--ink);margin-top:2px}
+.cr-open{grid-column:1/-1}.cr-open a{color:var(--brand);font-weight:600}
+@media(max-width:700px){.churn-row>summary{grid-template-columns:1fr auto}.churn-row .cr-seg,.churn-row .cr-owner{display:none}.cr-detail{grid-template-columns:1fr 1fr}}
 .rc-title{font-size:.74em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)}
 .rc-value{font-size:1.5em;font-weight:800;margin:5px 0 6px;letter-spacing:-.02em}
 .rc-card.await .rc-value{color:var(--muted)}
@@ -499,12 +521,14 @@ function renderCharts(portfolio,kpis,rm){
     +'<div class="cc-legend"><div><i style="background:'+RAG.green+'"></i><b>'+counts.green+'</b> Healthy</div><div><i style="background:'+RAG.amber+'"></i><b>'+counts.amber+'</b> Watch</div><div><i style="background:'+RAG.red+'"></i><b>'+counts.red+'</b> At risk</div></div>'
     +'</div></div>';
 
-  // 2. ARR by segment (Chartio 'ARR by...' distribution) — where the revenue sits.
-  const segs=(rm.by_segment||[]).slice(0,5);
+  // 2. ARR by segment (Chartio 'ARR by...' distribution) - where the revenue sits.
+  const segsAll=(rm.by_segment||[]).filter(s=>(s.arr_usd||0)>0);
+  const segTotal=segsAll.reduce((a,s)=>a+(s.arr_usd||0),0)||1;
+  const segs=segsAll.slice(0,5);
   const smax=Math.max(1,...segs.map(s=>s.arr_usd||0));
   const segColors=['#5b5bf0','#2f6bf0','#0ca678','#d98b0b','#8b5cf6'];
-  const c2=segs.length?'<div class="chartcard"><h3>ARR by segment</h3><div class="cc-sub">Where revenue is concentrated</div><div class="cc-body"><div class="cc-bars">'
-    +segs.map((s,i)=>'<div class="cc-bar-row"><span class="cc-lbl" title="'+escapeHtml(s.segment)+'">'+escapeHtml((s.segment||'').replace(/Agency /,'Agy ').slice(0,10))+'</span><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.round(((s.arr_usd||0)/smax)*100)+'%;background:'+segColors[i%segColors.length]+'"></div></div><span class="cc-val">'+fmt(s.arr_usd)+'</span></div>').join('')
+  const c2=segs.length?'<div class="chartcard"><h3>ARR by segment</h3><div class="cc-sub">Where revenue is concentrated</div><div class="cc-body"><div class="cc-bars seg-bars">'
+    +segs.map((s,i)=>'<div class="seg-row"><div class="seg-top"><span class="seg-name" title="'+escapeHtml(s.segment)+'">'+escapeHtml(s.segment)+'</span><span class="seg-val">'+fmt(s.arr_usd)+' <span class="seg-pct">'+Math.round((s.arr_usd/segTotal)*100)+'%</span></span></div><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.round(((s.arr_usd||0)/smax)*100)+'%;background:'+segColors[i%segColors.length]+'"></div></div></div>').join('')
     +'</div></div></div>'
     :'<div class="chartcard"><h3>ARR by segment</h3><div class="cc-sub">Awaiting live segment data</div><div class="cc-body"><span class="muted" style="font-size:.8em">Connect HubSpot segments to break ARR down by tier.</span></div></div>';
 
@@ -576,11 +600,25 @@ function dealsTable(title,deals,tone){
 function churnedTable(rm){
   const rows=(rm&&rm.churned_detail)||[];
   if(!rows.length) return '';
-  const totalLost=rows.reduce((s,r)=>s+(r.arr_usd||0),0);
-  return '<div style="margin-top:18px"><div class="sect" style="font-weight:700;margin-bottom:8px">Churned accounts ('+rows.length+') · '+fmt(totalLost)+' ARR lost</div>'
-    +'<table><thead><tr><th>Account</th><th>Segment</th><th>Owner</th><th style="text-align:right">ARR lost</th></tr></thead><tbody>'
-    +rows.map(r=>'<tr><td><strong>'+escapeHtml(r.name)+'</strong></td><td class="muted">'+escapeHtml(r.segment)+'</td><td>'+escapeHtml(r.owner)+'</td><td style="text-align:right" class="mono">'+(r.arr_usd?fmt(r.arr_usd):'<span class="muted">no ARR recorded</span>')+'</td></tr>').join('')
-    +'</tbody></table></div>';
+  const withArr=rows.filter(r=>r.arr_usd>0);
+  const totalLost=withArr.reduce((s,r)=>s+(r.arr_usd||0),0);
+  const note=rows.length>withArr.length?(' · '+(rows.length-withArr.length)+' show no current ARR (zeroed on churn in HubSpot)'):'';
+  return '<div style="margin-top:18px"><div class="sect" style="font-weight:700;margin-bottom:8px">Churned accounts ('+rows.length+') · '+fmt(totalLost)+' last-known ARR'+note+'</div>'
+    +'<div class="churn-list">'+rows.map(r=>{
+      const arr=r.arr_usd>0?fmt(r.arr_usd):'<span class="muted">no current ARR</span>';
+      const aid=r.account_id?" onclick=\"openAccount('"+escapeHtml(r.account_id)+"')\" style=\"cursor:pointer\"":"";
+      return '<details class="churn-row"><summary><span class="cr-name">'+escapeHtml(r.name)+'</span>'
+        +'<span class="cr-seg">'+escapeHtml(r.segment)+'</span>'
+        +'<span class="cr-owner">'+escapeHtml(r.owner)+'</span>'
+        +'<span class="cr-arr">'+arr+'</span></summary>'
+        +'<div class="cr-detail">'
+        +'<div><b>Lifecycle</b><span>'+escapeHtml(r.lifecycle_stage||'unknown')+'</span></div>'
+        +'<div><b>Health</b><span>'+(r.health!=null?r.health:'—')+'</span></div>'
+        +'<div><b>Renewal</b><span>'+(r.renewal_date?escapeHtml(r.renewal_date):'—')+'</span></div>'
+        +'<div><b>Last product visit</b><span>'+(r.days_since_visit!=null?r.days_since_visit+' days ago':'—')+'</span></div>'
+        +(r.account_id?'<div class="cr-open"><a href="javascript:void(0)"'+aid+'>Open full account</a></div>':'')
+        +'</div></details>';
+    }).join('')+'</div></div>';
 }
 
 async function boot(){

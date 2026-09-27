@@ -697,9 +697,15 @@ def revenue_motion() -> dict:
     churned = [la for la in scoped if _is_churned(la)]
     churned_detail = sorted(
         [{"name": la.get("hubspot", {}).get("name") or "Unnamed",
+          "account_id": la.get("account_id") or la.get("hubspot", {}).get("account_id"),
           "owner": la.get("hubspot", {}).get("csm_owner") or "Unassigned",
           "segment": la.get("hubspot", {}).get("segment_label") or la.get("hubspot", {}).get("segment") or "Unsegmented",
-          "arr_usd": _arr(la)} for la in churned],
+          "arr_usd": _arr(la),
+          "lifecycle_stage": la.get("hubspot", {}).get("lifecycle_stage") or "unknown",
+          "health": health_score(la).get("score"),
+          "renewal_date": la.get("hubspot", {}).get("renewal_date"),
+          "days_since_visit": (la.get("usage") or {}).get("days_since_last_visit")}
+         for la in churned],
         key=lambda r: -r["arr_usd"])
     bands = {"green": 0, "amber": 0, "red": 0}
     at_risk_arr = 0
