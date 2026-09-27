@@ -537,7 +537,8 @@ class Handler(BaseHTTPRequestHandler):
                 plugin = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"
                 sys.path.insert(0, str(plugin))
                 import agent_runner  # noqa: E402
-                self._json(200, agent_runner.run(question, account_id=account_id, csm_owner=csm_owner))
+                self._json(200, agent_runner.run(question, account_id=account_id,
+                                                 csm_owner=csm_owner, principal=principal))
                 return
             if path == "/api/agent/feedback":
                 rating = body.get("rating")

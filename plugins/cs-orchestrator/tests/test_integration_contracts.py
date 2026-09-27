@@ -1257,3 +1257,90 @@ def test_playbook_proposal_review_records_approval_audit(monkeypatch, tmp_path):
     current = summary["proposals"][0]
     assert current["review_history"][0]["decision"] == "approve_for_implementation"
     assert current["review_note"] == "Evidence and rollback reviewed."
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2: CS Agent identity + role scoping + clarifying questions
+# --------------------------------------------------------------------------- #
+def test_agent_scope_accounts_admin_sees_all_csm_sees_own():
+    import agent_runner
+    accts = {
+        "A1": {"hubspot": {"name": "Northwind", "csm_owner_id": "89671346", "csm_owner": "Sam CSM"}},
+        "A2": {"hubspot": {"name": "Globex", "csm_owner_id": "99999999", "csm_owner": "Other"}},
+    }
+    admin = {"role": "admin", "name": "Tiago", "email": "t@x", "owner_id": None}
+    csm = {"role": "csm", "name": "Sam", "email": "s@x", "owner_id": "89671346"}
+
+    scoped_admin, owner_admin = agent_runner._scope_accounts(accts, admin)
+    assert len(scoped_admin) == 2 and owner_admin is None
+
+    scoped_csm, owner_csm = agent_runner._scope_accounts(accts, csm)
+    assert list(scoped_csm) == ["A1"]
+    assert owner_csm == "Sam CSM"
+
+
+def test_agent_csm_without_owner_id_sees_empty_book():
+    import agent_runner
+    accts = {"A1": {"hubspot": {"name": "Northwind", "csm_owner_id": "89671346"}}}
+    csm = {"role": "csm", "name": "New Hire", "email": "n@x", "owner_id": None}
+    scoped, owner = agent_runner._scope_accounts(accts, csm)
+    assert scoped == {}  # no owner id -> empty, never the whole portfolio
+    assert owner == "New Hire"
+
+
+def test_agent_identity_line_states_role_and_scope():
+    import agent_runner
+    admin = {"role": "admin", "name": "Tiago"}
+    csm = {"role": "csm", "name": "Sam"}
+    assert "Admin" in agent_runner._identity_line(admin, 25, 25)
+    assert "full portfolio of 25" in agent_runner._identity_line(admin, 25, 25)
+    csm_line = agent_runner._identity_line(csm, 4, 25)
+    assert "CSM" in csm_line and "book of 4" in csm_line
+
+
+def test_agent_clarify_only_on_ambiguous():
+    import agent_runner
+    accts = {"A1": {"hubspot": {"name": "Northwind"}}}
+    # Vague opener -> clarify offered
+    assert agent_runner._maybe_clarify("help", accts, None) is not None
+    assert agent_runner._maybe_clarify("hi", accts, None) is not None
+    # Concrete intent -> no clarify
+    assert agent_runner._maybe_clarify("what should I do today?", accts, None) is None
+    assert agent_runner._maybe_clarify("top actions", accts, None) is None
+    assert agent_runner._maybe_clarify("where are the expansion signals?", accts, None) is None
+    # Named account -> no clarify
+    assert agent_runner._maybe_clarify("how is Northwind", accts, None) is None
+    # Viewing a specific account -> never clarify
+    assert agent_runner._maybe_clarify("help", accts, "A1") is None
+
+
+def test_agent_run_scopes_to_csm_book(monkeypatch):
+    """A CSM principal must make run() load and scope accounts to their owner id."""
+    import agent_runner
+    full = {
+        "A1": {"hubspot": {"name": "Northwind", "csm_owner_id": "89671346", "csm_owner": "Sam CSM", "contacts": []}, "sources": {"hubspot": "live"}},
+        "A2": {"hubspot": {"name": "Globex", "csm_owner_id": "99999999", "csm_owner": "Other", "contacts": []}, "sources": {"hubspot": "live"}},
+    }
+    monkeypatch.setattr(agent_runner, "dataaccess", type("DA", (), {"all_accounts": staticmethod(lambda: full)}), raising=False)
+    # Also patch the imported module symbol used inside run()
+    import dataaccess as _da
+    monkeypatch.setattr(_da, "all_accounts", lambda: full)
+
+    captured = {}
+
+    def fake_tools_impl(accounts_override=None):
+        captured["scoped"] = accounts_override
+        queue = {"tasks": [], "judge": {"verdict": "PASS"}, "suppressed": []}
+        return (accounts_override or {}, {"get_task_queue": (lambda _: queue, "q")}, {"queue_called": True}, queue)
+
+    monkeypatch.setattr(agent_runner, "_tools_impl", fake_tools_impl)
+    monkeypatch.setattr(agent_runner, "_client", lambda: type("C", (), {"meta": type("M", (), {"region_name": "us-east-1"})()})())
+    monkeypatch.setattr(agent_runner, "_run_agent", lambda *a, **k: "Nothing urgent in your book right now.")
+
+    csm = {"role": "csm", "name": "Sam", "email": "s@x", "owner_id": "89671346"}
+    result = agent_runner.run("What should I do today?", principal=csm)
+    assert result["ok"] is True
+    # Scoped to exactly the owned account
+    assert list(captured["scoped"]) == ["A1"]
+    # Identity/scope stated up front
+    assert "CSM" in result["answer"] and "book of 1" in result["answer"]

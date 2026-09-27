@@ -44,6 +44,44 @@ POLICY_NUMBERS = {"0.4", "0.45", "0.6", "0.7", "0.85", "1.4", "24", "60", "85", 
 # queue provenance, judge status, and evidence validation are required first.
 
 
+def _principal_role(principal: dict | None) -> str:
+    """admin (all accounts) or csm (own book). Unknown/absent → admin-equivalent read."""
+    if not principal:
+        return "admin"
+    return "csm" if str(principal.get("role")) == "csm" else "admin"
+
+
+def _scope_accounts(accounts: dict, principal: dict | None) -> tuple[dict, str | None]:
+    """Return (accounts_in_scope, owner_name). Admins see all; CSMs see only the
+    accounts they own (matched on hubspot.csm_owner_id == principal.owner_id),
+    mirroring the platform's engine._owns scoping so the agent and dashboard agree."""
+    if _principal_role(principal) != "csm":
+        return accounts, None
+    owner_id = str((principal or {}).get("owner_id") or "")
+    if not owner_id:
+        # A CSM with no resolvable owner id sees an empty book rather than everything.
+        return {}, ((principal or {}).get("name") or (principal or {}).get("email"))
+    scoped = {aid: a for aid, a in accounts.items()
+              if str(a.get("hubspot", {}).get("csm_owner_id") or "") == owner_id}
+    # Prefer the actual HubSpot owner name from the scoped accounts; fall back to session name.
+    owner_name = None
+    for a in scoped.values():
+        owner_name = a.get("hubspot", {}).get("csm_owner") or owner_name
+    owner_name = owner_name or (principal or {}).get("name") or (principal or {}).get("email")
+    return scoped, owner_name
+
+
+def _identity_line(principal: dict | None, scoped_count: int, total_count: int) -> str:
+    """A short, honest identity + scope statement the agent leads with."""
+    who = (principal or {}).get("name") or (principal or {}).get("email") or "this session"
+    if _principal_role(principal) == "csm":
+        return (f"You're signed in as {who} (CSM). I'm scoped to your book of "
+                f"{scoped_count} account{'s' if scoped_count != 1 else ''} — everything below is "
+                f"limited to accounts you own.")
+    return (f"You're signed in as {who} (Admin). I can see the full portfolio of "
+            f"{total_count} account{'s' if total_count != 1 else ''} across every CSM book.")
+
+
 # --------------------------------------------------------------------------- #
 # Agent definitions: parse .agent.md (frontmatter + body)
 # --------------------------------------------------------------------------- #
@@ -70,10 +108,10 @@ def load_agent(name: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Tools exposed to the model — backed by the SAME live data as the platform
 # --------------------------------------------------------------------------- #
-def _tools_impl():
+def _tools_impl(accounts_override: dict | None = None):
     import dataaccess
     import orchestrate
-    accounts = dataaccess.all_accounts()  # live (HubSpot/Zendesk/Stripe/Pendo) or {}
+    accounts = accounts_override if accounts_override is not None else dataaccess.all_accounts()  # live or scoped
     previous_provider = orchestrate._ACCOUNT_PROVIDER
     orchestrate.set_account_provider(lambda: accounts)
     try:
@@ -416,6 +454,40 @@ def _conversation_answer(question: str, csm_owner: str | None = None) -> str | N
     return None
 
 
+# Vague openers that carry no concrete CS intent on their own.
+_VAGUE = ("help", "hi", "hey", "hello", "what can you do", "what do you do",
+          "anything", "something", "update me")
+# Concrete CS intents that never need clarification.
+_CONCRETE = ("action", "risk", "protect", "expand", "renewal", "churn", "expansion",
+             "adopt", "onboard", "payment", "invoice", "health", "ticket", "top ",
+             "priority", "who owns", "owner", "csm", "book", "brief", "next", "account",
+             "today", "do ", "should", "focus", "attention", "urgent")
+
+
+def _maybe_clarify(question: str, accounts: dict, account_id: str | None) -> str | None:
+    """Offer one focused clarifying question when the ask is genuinely ambiguous.
+
+    Deterministic and cheap (no model call). Only triggers when: the user is not
+    looking at a specific account, names no account, expresses no concrete intent,
+    and there is a real book to narrow. This makes the agent feel attentive without
+    guessing what the user meant."""
+    q = question.strip().lower().rstrip("?").strip()
+    if account_id or not accounts:
+        return None
+    names = [a.get("hubspot", {}).get("name") for a in accounts.values() if a.get("hubspot", {}).get("name")]
+    if any(n and n.lower() in q for n in names):
+        return None  # a specific account is named
+    if any(term in q for term in _CONCRETE):
+        return None  # a concrete intent is present
+    if q in _VAGUE or len(q) <= 12:
+        return ("Happy to help. To point you at the right thing, which would you like:\n"
+                "- **Top actions today** across your accounts, ranked by priority;\n"
+                "- **Risk** — accounts that need protecting first;\n"
+                "- **Expansion** — where the growth signals are; or\n"
+                "- A **single account** — name it and I'll give you the full picture.")
+    return None
+
+
 def _run_agent(client, agent, user_task, tools, tool_specs, transcript, depth=0):
     """Run one agent to completion (resolving its tool calls). Returns final text."""
     accounts, tool_fns = tools[:2]
@@ -458,8 +530,18 @@ def _run_agent(client, agent, user_task, tools, tool_specs, transcript, depth=0)
 
 
 def run(question: str, account_id: str | None = None,
-    csm_owner: str | None = None) -> dict:
-    """Execute the cs-orchestrator agent on a question. Returns {ok, answer, transcript}."""
+    csm_owner: str | None = None, principal: dict | None = None) -> dict:
+    """Execute the cs-orchestrator agent on a question. Returns {ok, answer, transcript}.
+
+    The authenticated principal scopes what the agent can see: admins get the whole
+    portfolio; CSMs are limited to the accounts they own, matching the platform's
+    engine scoping so the agent and dashboard never disagree.
+    """
+    role = _principal_role(principal)
+    # Derive the owner name from the session when the caller is a CSM (so the agent
+    # can answer "my accounts" without the client having to pass csm_owner).
+    if role == "csm" and not csm_owner:
+        csm_owner = (principal or {}).get("name") or (principal or {}).get("email")
     conversation_answer = _conversation_answer(question, csm_owner)
     if conversation_answer is not None:
         return {"ok": True, "answer": conversation_answer, "transcript": [],
@@ -476,16 +558,39 @@ def run(question: str, account_id: str | None = None,
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"Bedrock client init failed: {e}"}
 
-    tools = _tools_impl()
+    # Load accounts and scope to the caller's book if they are a CSM. Admins keep the
+    # original path (tools load the full roster) so the tool layer stays mockable.
+    if role == "csm":
+        import dataaccess
+        all_accounts = dataaccess.all_accounts()
+        scoped_accounts, owner_name = _scope_accounts(all_accounts, principal)
+        if owner_name:
+            csm_owner = owner_name
+        tools = _tools_impl(accounts_override=scoped_accounts)
+        total_count = len(all_accounts)
+    else:
+        tools = _tools_impl()
+        scoped_accounts = tools[0]
+        total_count = len(scoped_accounts)
+    identity_line = _identity_line(principal, len(scoped_accounts), total_count)
+
     tool_specs = _bedrock_tool_specs(tools[1])
     orchestrator = load_agent("cs-orchestrator")
     transcript: list[dict] = []
-    # Pre-load the roster so the orchestrator starts with the account list + segments
-    # already in context (saves several LLM round-trips vs discovering it via tools).
     accounts = tools[0]
+
+    # Clarifying question for genuinely ambiguous asks (deterministic, no model call):
+    # if the user names no account, asks nothing specific, and there is a real book to
+    # narrow, offer one focused question rather than guessing.
+    clarify = _maybe_clarify(question, accounts, account_id)
+    if clarify is not None:
+        return {"ok": True, "answer": identity_line + "\n\n" + clarify, "transcript": [],
+                "accounts_available": len(accounts), "actions": [],
+                "harness": {"route": "clarifying_question"}}
+
     owner_answer = _owner_account_answer(question, accounts, tools[3], csm_owner=csm_owner)
     if owner_answer is not None:
-        return {"ok": True, "answer": owner_answer, "transcript": transcript,
+        return {"ok": True, "answer": identity_line + "\n\n" + owner_answer, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
                 "accounts_available": len(accounts),
                 "actions": _structured_actions(tools[3], accounts),
@@ -511,7 +616,14 @@ def run(question: str, account_id: str | None = None,
         intent_guidance = ("\n[Expansion question] Answer only with eligible healthy Strategic expansion or renewal signals. "
                            "Do not discuss unrelated churn statuses or recovery accounts unless directly asked. "
                            "If there are no eligible signals, say so plainly and name the missing data gate.\n")
-    primed = (question.strip() + account_guidance + intent_guidance +
+    if role == "csm":
+        scope_guidance = ("\n[Scope] You are answering for a single CSM. The portfolio below is ONLY the "
+                          f"accounts they own ({len(accounts)} in total). Never reference or imply accounts "
+                          "outside this book, and never suggest there are more accounts you cannot see.\n")
+    else:
+        scope_guidance = ("\n[Scope] You are answering for an Admin with full-portfolio visibility across "
+                          f"every CSM book ({len(accounts)} accounts). You may compare across owners.\n")
+    primed = (question.strip() + account_guidance + intent_guidance + scope_guidance +
               "\n\n[Portfolio in scope — already fetched, use tools only for deeper per-account signals]\n" +
               "\n".join(roster_lines) +
               "\n\n[Harness requirement] Call get_task_queue before making portfolio recommendations. Treat its evidence and judge verdict as authoritative; do not invent figures.\n" +
@@ -542,7 +654,7 @@ def run(question: str, account_id: str | None = None,
             return {"ok": False, "error": "Agent answer blocked by harness after two corrections: " +
                     "; ".join(findings), "transcript": transcript,
                     "harness": {"corrections": MAX_CORRECTIONS, "findings": findings}}
-        return {"ok": True, "answer": answer, "transcript": transcript,
+        return {"ok": True, "answer": identity_line + "\n\n" + answer, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
             "accounts_available": len(tools[0]),
                 "actions": _structured_actions(tools[3], tools[0]),

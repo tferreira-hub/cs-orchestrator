@@ -734,7 +734,10 @@ function renderAgentRail(summary){
   if(!rail)return;
   const judge=(summary&&summary.judge)||{};
   const judgeLabel=judge.verdict==='PASS'?'PASS':'Needs review';
-  rail.innerHTML='<div class="agent-rail-title"><span><i class="live-dot"></i>LIVE PORTFOLIO</span><b>'+(summary.accounts||0)+' accounts in scope</b></div>'+
+  const isCsm=summary&&summary.account_scope==='csm';
+  const scopeText=isCsm?((summary.accounts||0)+' accounts · your book'):((summary.accounts||0)+' accounts · full portfolio');
+  const roleTag=isCsm?'CSM view':'Admin view';
+  rail.innerHTML='<div class="agent-rail-title"><span><i class="live-dot"></i>LIVE PORTFOLIO · '+roleTag+'</span><b>'+scopeText+'</b></div>'+
     '<div class="agent-rail-card"><b>Signed rules <span class="pill '+(judge.verdict==='PASS'?'g':'a')+'">'+escapeHtml(judgeLabel)+'</span></b><span>Priorities and routing are checked.</span></div>'+
     '<div class="agent-rail-card"><b>Clear handoff</b><span>Agent explains. CSM decides.</span></div>'+
     '<div class="agent-rail-title" style="margin-top:20px"><span>TRY A QUESTION</span><b>Start here</b></div>'+
