@@ -93,6 +93,19 @@ def account(account_id: str) -> dict:
         usage["licensed_seats"] = entitlements.get("licensed_seats")
         usage["active_seats"] = entitlements.get("active_seats")
 
+    # Real per-account business metrics from the Data Platform warehouse (NDR, user
+    # adoption, time-to-value, tenure). Merge the real user-utilisation into usage so the
+    # adoption engine uses real active-vs-committed seats when available, not just Pendo.
+    metrics, sources["metrics"] = _pull(
+        _ADAPTERS and _src.ACCOUNT_METRICS.live(),
+        lambda: _src.ACCOUNT_METRICS.metrics(account_id), "metrics")
+    if metrics.get("user_utilization_pct") is not None:
+        usage = dict(usage)
+        # Real active-user coverage from the warehouse; the adoption engine reads active_users_pct.
+        usage.setdefault("active_users_pct", metrics["user_utilization_pct"])
+        if metrics.get("user_utilization_pct") is not None and usage.get("license_utilization_pct") is None:
+            usage["license_utilization_pct"] = metrics["user_utilization_pct"]
+
     return {
         "hubspot": hubspot,
         "zendesk": zendesk,
@@ -101,6 +114,7 @@ def account(account_id: str) -> dict:
         "churn": churn,
         "stripe": stripe,
         "onboarding": onboarding,
+        "metrics": metrics,
         "sources": sources,
     }
 

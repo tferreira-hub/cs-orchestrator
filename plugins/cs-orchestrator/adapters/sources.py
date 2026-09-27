@@ -556,6 +556,99 @@ class Churn:
         }
 
 
+# ------------------------------------------------- Account metrics (Redshift) ---
+class AccountMetrics:
+    """Real per-account business metrics from the Data Platform warehouse
+    (rpt.rpt_account_ndr_monthly): revenue/NDR, user adoption (active vs committed seats),
+    first-login (time-to-value) and tenure. Uses the same cross-account Redshift Data API
+    path as the churn adapter. Env:
+      REDSHIFT_METRICS_TABLE   (default rpt.rpt_account_ndr_monthly)
+      REDSHIFT_METRICS_ID_COLUMN (default ja_account, uppercase-hyphen AUx-yyyy)
+    Returns {} when unconfigured or no row, never fabricates."""
+
+    POLL_INTERVAL_S = 1.0
+    POLL_TIMEOUT_S = int(config.env("CS_REDSHIFT_POLL_TIMEOUT_S") or 45)
+
+    def live(self) -> bool:
+        return (config.live_enabled() and bool(config.env("REDSHIFT_DATABASE"))
+                and bool(config.env("REDSHIFT_WORKGROUP") or config.env("REDSHIFT_CLUSTER_ID"))
+                and ((config.env("REDSHIFT_METRICS_ENABLED") or "1") not in ("0", "false")))
+
+    # Reuse the churn adapter's connection helpers to avoid duplicating cross-account logic.
+    _churn = None
+
+    def _c(self):
+        if AccountMetrics._churn is None:
+            AccountMetrics._churn = Churn()
+        return AccountMetrics._churn
+
+    def metrics(self, account_ref: str) -> dict[str, Any]:
+        if not self.live():
+            return {}
+        import time
+        ch = self._c()
+        try:
+            table = ch._identifier(config.env("REDSHIFT_METRICS_TABLE") or "rpt.rpt_account_ndr_monthly", qualified=True)
+            id_col = ch._identifier(config.env("REDSHIFT_METRICS_ID_COLUMN") or "ja_account")
+        except config.SourceError:
+            return {}
+        ref = identity.normalise(account_ref).upper()
+        client = ch._client()
+        sql = (
+            "SELECT revenue, revenue_for_the_previous_year, max_daily_users_over_month, "
+            "deal_committed_users, first_user_login_date, initial_subscription_start_date, "
+            "tenure_months, user_change "
+            f"FROM {table} WHERE {id_col} = :ref "
+            "ORDER BY date_reporting_month DESC LIMIT 1"
+        )
+        try:
+            resp = client.execute_statement(Sql=sql, Parameters=[{"name": "ref", "value": ref}], **ch._target_kwargs())
+            sid = resp["Id"]
+            deadline = time.monotonic() + self.POLL_TIMEOUT_S
+            status = "SUBMITTED"
+            while status not in ("FINISHED", "FAILED", "ABORTED"):
+                if time.monotonic() > deadline:
+                    return {}
+                time.sleep(self.POLL_INTERVAL_S)
+                status = client.describe_statement(Id=sid)["Status"]
+            if status != "FINISHED":
+                return {}
+            recs = client.get_statement_result(Id=sid).get("Records", [])
+        except Exception:  # noqa: BLE001
+            return {}
+        if not recs:
+            return {}
+        row = recs[0]
+        cell = ch._cell
+        rev = cell(row[0]); rev_py = cell(row[1])
+        active_users = cell(row[2]); committed = cell(row[3])
+        ndr_pct = None
+        try:
+            if rev_py:
+                ndr_pct = round(100.0 * float(rev) / float(rev_py))
+        except (TypeError, ValueError, ZeroDivisionError):
+            ndr_pct = None
+        user_util = None
+        try:
+            if committed:
+                user_util = round(100.0 * float(active_users or 0) / float(committed))
+        except (TypeError, ValueError, ZeroDivisionError):
+            user_util = None
+        return {
+            "mrr_usd": rev,
+            "revenue_prev_year_usd": rev_py,
+            "ndr_pct": ndr_pct,
+            "active_users": active_users,
+            "committed_users": committed,
+            "user_utilization_pct": user_util,
+            "first_login_date": cell(row[4]),
+            "subscription_start_date": cell(row[5]),
+            "tenure_months": cell(row[6]),
+            "user_change": cell(row[7]),
+            "_source": "redshift-live",
+        }
+
+
 # ------------------------------------------------------------------ Jiminny ---
 class Jiminny:
     def live(self) -> bool:
@@ -967,5 +1060,5 @@ class HubSpot:
 
 
 # Singletons the router uses.
-ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS = (
-    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements())
+ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (
+    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements(), AccountMetrics())

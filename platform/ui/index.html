@@ -223,6 +223,10 @@ body.dock-open .drawer{right:420px}
 .sp-form{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
 .sp-form input{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:.85em}
 .sp-form button{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
+.mtx-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.mtx{display:flex;flex-direction:column}
+.mtx span{font-size:.7em;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.mtx b{font-size:.95em;color:var(--ink);margin-top:2px}
 .tl{display:flex;flex-direction:column;gap:2px}
 .tl-row{display:flex;gap:11px;align-items:flex-start;padding:7px 0;position:relative}
 .tl-row:not(:last-child):before{content:"";position:absolute;left:4px;top:16px;bottom:-7px;width:2px;background:var(--line)}
@@ -635,6 +639,18 @@ async function addSuccessPlan(accountId){
       body:JSON.stringify({account_id:accountId,goal:goal,metric:g('spMetric'),baseline:num(g('spBase')),target:num(g('spTarget')),deadline:g('spDue')})});
     if(r.ok){openAccount(accountId);} // reload drawer to show the new goal
   }catch(e){}
+}
+function metricsHtml(m){
+  if(!m||!m._source) return '';
+  const cell=(l,v)=>v==null?'':'<div class="mtx"><span>'+l+'</span><b>'+escapeHtml(String(v))+'</b></div>';
+  const ndr=(m.ndr_pct!=null)?(m.ndr_pct+'%'):null;
+  const users=(m.active_users!=null&&m.committed_users!=null)?(m.active_users+' / '+m.committed_users):null;
+  const tenure=(m.tenure_months!=null)?(m.tenure_months+' months'):null;
+  const body=[cell('Net revenue retention',ndr),cell('Active / committed users',users),
+    cell('First login (time to value)',m.first_login_date?String(m.first_login_date).slice(0,10):null),
+    cell('Tenure',tenure),cell('MRR',m.mrr_usd!=null?fmt(m.mrr_usd):null)].join('');
+  if(!body) return '';
+  return '<div class="sect">Business metrics</div><div class="callout"><div class="mtx-grid">'+body+'</div><div class="sub" style="margin-top:8px">Source: JobAdder data warehouse.</div></div>';
 }
 function adoptionHtml(ad){
   if(!ad) return '';
@@ -1588,6 +1604,7 @@ async function openAccount(id){
       (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
       ((d.trend_risks&&d.trend_risks.length)?('<div class="sect">Trend risks</div>'+d.trend_risks.map(r=>'<div class="callout" style="border-left:3px solid '+(r.severity==='high'?'var(--red)':'var(--amber)')+';margin-bottom:8px"><b>'+escapeHtml(r.title)+'</b><div class="sub" style="margin-top:4px">'+escapeHtml(r.evidence)+'</div></div>').join('')):'')+
       adoptionHtml(d.adoption)+
+      metricsHtml(d.signals&&d.signals.metrics)+
       successPlansHtml(d.success_plans,id)+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
       timelineHtml(d.timeline)+

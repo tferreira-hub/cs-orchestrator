@@ -151,6 +151,8 @@ def _live_account(account: dict) -> dict:
         "churn": _live_block(account, "churn"),
         "stripe": _live_block(account, "stripe"),
         "onboarding": _live_block(account, "onboarding"),
+        "metrics": _live_block(account, "metrics"),
+        "entitlements": account.get("entitlements", {}) if isinstance(account.get("entitlements"), dict) else {},
         "sources": sources,
     }
     return projected
@@ -693,6 +695,7 @@ def account_detail(account_id: str) -> dict:
             "jiminny": live.get("jiminny", {}),
             "churn": live.get("churn", {}),
             "stripe": live.get("stripe", {}),
+            "metrics": live.get("metrics", {}),
         },
         "onboarding": live.get("onboarding", {}),
         "health": h,
