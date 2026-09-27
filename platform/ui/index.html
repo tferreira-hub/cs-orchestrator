@@ -392,6 +392,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 @media(max-width:640px){.agent-dock{width:100vw}.agent-launcher .al-text{display:none}.agent-launcher{padding:14px}}
 .ask-account-btn{margin-top:12px;background:var(--brandsoft);color:var(--brand);border:1px solid #dedcff;border-radius:9px;padding:9px 13px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer}
 .ask-account-btn:hover{background:var(--brand);color:#fff}
+.prep-meeting-btn{margin-left:8px}
 .ad-ev{margin-top:9px;font-size:.82em}
 .ad-ev>summary{cursor:pointer;color:var(--brand);font-weight:600;list-style:none}
 .ad-ev>summary::-webkit-details-marker{display:none}
@@ -1338,6 +1339,20 @@ async function sendDockMessage(){
 }
 // Open the dock focused on a specific account (used from the account drawer).
 function askAgentAboutAccount(){toggleAgentDock(true);adSyncScope();}
+// One-click "Prepare my meeting": open Jane focused on the current account and ask her
+// for a meeting brief. Uses the same send path so the answer is grounded and self-learning
+// feedback still applies.
+function janePrepareMeeting(){
+  toggleAgentDock(true);
+  adSyncScope();
+  const name=(window.ACTIVE_ACCOUNT_NAME||'this account');
+  const input=document.getElementById('adInput');
+  if(input){
+    input.value='Prepare my meeting with '+name+'.';
+    // Give the dock a beat to open before sending.
+    setTimeout(function(){ if(typeof sendDockMessage==='function') sendDockMessage(); }, 120);
+  }
+}
 // Keyboard: Escape closes the dock.
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&document.getElementById('agentDock').classList.contains('open'))toggleAgentDock(false);});
 
@@ -1541,7 +1556,8 @@ async function openAccount(id){
     '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
       '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+' '+trendBadge+' '+lcBadge+'</div>'+
       '<div class="sub" style="margin-top:4px">'+meta+'</div>'+
-      '<button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane about this account</button></div>'+
+      '<button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane about this account</button>'+
+      '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare my meeting</button></div>'+
     '<div class="dbody">'+
       kv('Churn model',conn.churn?(ch.churn_status?escapeHtml(ch.churn_status)+' <span class="muted" style="font-weight:400">from Redshift</span>':(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'% <span class="muted" style="font-weight:400">'+(ch.computed?'computed from live signals':'from Redshift')+'</span>':'<span class="muted">no data</span>')):NC)+
       kv('CSAT (30 days)',val(conn.zendesk,zd.csat_30d))+

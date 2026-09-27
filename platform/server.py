@@ -91,6 +91,24 @@ button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;backgr
 <div class=dev>Dev login (AUTH_DEV_LOGIN). Production uses Okta via Cognito SSO.</div>
 </form></body></html>"""
 
+# Shown after a user clicks "Sign out". The local session cookie is already cleared;
+# we deliberately do NOT auto-redirect to Cognito here (a federated SAML logout bounces
+# the user to the AWS Identity Center portal, and a silent /login redirect re-authenticates
+# them immediately). Instead we land on a clear CS signed-out screen with an explicit
+# "Sign in again" button that the user chooses to click.
+_SIGNED_OUT_HTML = """<!doctype html><html><head><meta charset=utf-8>
+<title>CS Platform — Signed out</title><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:40px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+h1{font-size:1.25em;margin:0 0 6px}.sub{color:#8aa;font-size:.88em;margin-bottom:24px;line-height:1.5}
+a.btn{display:block;padding:12px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#7c3aed);color:#fff;font-weight:600;font-size:1em;text-decoration:none}</style></head>
+<body><div class=card>
+<h1>You're signed out</h1>
+<div class=sub>Your CS Platform session has ended.</div>
+<a class=btn href="/login">Sign in again</a>
+</div></body></html>"""
+
 # Shown when a user authenticates successfully but is NOT entitled to the CS Platform
 # (not in a CS admin or user group). Defense-in-depth behind the UI launcher.
 _NOT_AUTHORISED_HTML = """<!doctype html><html><head><meta charset=utf-8>
@@ -487,7 +505,14 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             return
 
-    def _handle_login(self) -> None:
+    def _handle_login(self, query: dict | None = None) -> None:
+        query = query or {}
+        # After sign-out we land here with ?logged_out=1. Render an explicit signed-out
+        # screen instead of bouncing straight back to Cognito (which would silently
+        # re-authenticate the user). The user clicks "Sign in again" to start a new flow.
+        if (query.get("logged_out") or [None])[0] == "1":
+            self._send(200, _SIGNED_OUT_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
         # Dev-login: no Cognito needed. Renders a tiny form that posts an email.
         if not auth.cognito_configured() and auth.dev_login_enabled():
             self._send(200, _DEV_LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
@@ -530,14 +555,12 @@ class Handler(BaseHTTPRequestHandler):
         self._finish_login({"email": email, "name": email, "role": role, "groups": ""})
 
     def _handle_logout(self) -> None:
-        # Clear the local session cookie AND end the Cognito SSO session, otherwise the
-        # user is silently signed straight back in. Fall back to the local login page when
-        # Cognito isn't configured (dev).
-        base = os.environ.get("CS_PUBLIC_URL", "").rstrip("/")
-        return_to = (base + "/login?logged_out=1") if base else "/login?logged_out=1"
-        federated = auth.logout_url(return_to) if hasattr(auth, "logout_url") else None
-        self._redirect(federated or "/login?logged_out=1",
-                       {"Set-Cookie": auth.clear_cookie_header()})
+        # Clear the local session cookie and land on the CS signed-out screen. We do NOT
+        # do a Cognito federated logout: with SAML SSO (Identity Center → Okta) that flow
+        # bounces the user to the AWS Identity Center portal instead of back to the CS app.
+        # Clearing the local cookie ends the CS session; /login?logged_out=1 shows an
+        # explicit signed-out screen (no auto-redirect), so the user stays in the CS app.
+        self._redirect("/login?logged_out=1", {"Set-Cookie": auth.clear_cookie_header()})
 
     def log_message(self, *args):  # quiet console
         pass
@@ -559,7 +582,7 @@ class Handler(BaseHTTPRequestHandler):
             # --- Auth routes (always available when auth is enabled) --------- #
             if auth.auth_required():
                 if path == "/login":
-                    self._handle_login(); return
+                    self._handle_login(query); return
                 if path == "/auth/callback":
                     self._handle_callback(query); return
                 if path == "/logout":

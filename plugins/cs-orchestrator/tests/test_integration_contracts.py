@@ -699,6 +699,41 @@ def test_agent_validator_requires_queue_and_passing_judge():
         "Northwind Traders needs review.", failing_queue, accounts, True))
 
 
+def test_agent_meeting_intent_detection():
+    sys.path.insert(0, str(PLUGIN))
+    import agent_runner
+
+    for q in ("Prepare my meeting with Northwind",
+              "prep me for the call with Globex",
+              "get me ready for my QBR",
+              "meeting brief for Umbrella",
+              "help me prepare for the check-in"):
+        assert agent_runner._is_meeting_intent(q), q
+
+    for q in ("What are my top actions today?",
+              "How is Northwind's health?",
+              "Show me the expansion pipeline"):
+        assert not agent_runner._is_meeting_intent(q), q
+
+
+def test_agent_feedback_learning_guidance_is_safe_and_metadata_only(tmp_path, monkeypatch):
+    sys.path.insert(0, str(PLUGIN))
+    import agent_runner
+
+    monkeypatch.setattr(agent_runner, "FEEDBACK_LOG", tmp_path / "missing.jsonl")
+    assert agent_runner._feedback_learning_guidance() == ""
+
+    log = tmp_path / "fb.jsonl"
+    log.write_text(
+        json.dumps({"rating": "needs_correction", "reason": "wrong_priority"}) + "\n" +
+        json.dumps({"rating": "needs_correction", "reason": "wrong_priority"}) + "\n" +
+        json.dumps({"rating": "helpful"}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(agent_runner, "FEEDBACK_LOG", log)
+    guidance = agent_runner._feedback_learning_guidance()
+    assert "wrong priority" in guidance
+    assert "Learning from CSM feedback" in guidance
+
+
 def test_agent_tools_include_portfolio_snapshot_and_parse_frontmatter():
     import agent_runner
 

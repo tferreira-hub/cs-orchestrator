@@ -43,6 +43,67 @@ POLICY_NUMBERS = {"0.4", "0.45", "0.6", "0.7", "0.85", "1.4", "24", "60", "85", 
 # The final response is not trusted merely because the model stopped generating:
 # queue provenance, judge status, and evidence validation are required first.
 
+# Self-learning signal: the same feedback log the platform writes (metadata-only, no
+# customer prose). Jane reads the aggregate so she adapts to what CSMs keep correcting.
+FEEDBACK_LOG = PLUGIN.parents[1] / ".cs-agent-feedback.jsonl"
+
+
+def _feedback_learning_guidance() -> str:
+    """Turn accumulated CSM feedback into a short 'what to do better' note for Jane.
+
+    This is the self-learning loop: every time a CSM rates an answer 'needs correction'
+    with a reason, that reason is aggregated here and fed forward into the next prompt,
+    so Jane's behaviour adapts to real usage instead of staying static. Metadata only,
+    never answer or customer content. Silent (empty string) when there is no signal.
+    """
+    try:
+        if not FEEDBACK_LOG.exists():
+            return ""
+        helpful = 0
+        reasons: dict[str, int] = {}
+        for line in FEEDBACK_LOG.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("rating") == "helpful":
+                helpful += 1
+            elif row.get("rating") == "needs_correction":
+                r = row.get("reason") or "other"
+                reasons[r] = reasons.get(r, 0) + 1
+        if not reasons and not helpful:
+            return ""
+        # Map each recurring correction reason to a concrete behavioural adjustment.
+        fixes = {
+            "wrong_priority": "double-check you are leading with the highest-priority action first and stating the correct SLA",
+            "missing_evidence": "always cite the specific live signal (churn score, usage recency, CSAT, payment) behind each claim",
+            "irrelevant_action": "only recommend actions that match this account's actual signals; drop generic advice",
+            "source_gap": "name the missing data source plainly rather than guessing around it",
+            "other": "be more precise and specific to what was asked",
+        }
+        top = sorted(reasons.items(), key=lambda kv: -kv[1])[:2]
+        if not top:
+            return ("\n[What CSMs value] Recent feedback has been positive; keep answers specific, "
+                    "warm and grounded.\n")
+        notes = "; ".join(fixes.get(r, fixes["other"]) for r, _ in top)
+        return ("\n[Learning from CSM feedback] CSMs have most often asked for improvement on: "
+                + ", ".join(f"{r.replace('_', ' ')} ({c})" for r, c in top)
+                + ". For this answer specifically: " + notes + ".\n")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# Meeting-prep intent: "prepare my meeting", "meeting brief", "prep for the call", etc.
+_MEETING_INTENT = re.compile(
+    r"\b(prepare|prep|brief|ready|get me ready|help me (?:for|with))\b.{0,30}\b(meeting|call|check[- ]?in|qbr|catch[- ]?up|review|sync)\b"
+    r"|\b(meeting|call|qbr|check[- ]?in)\b.{0,20}\b(brief|prep|preparation|notes|agenda)\b"
+    r"|prepare my meeting",
+    re.IGNORECASE)
+
+
+def _is_meeting_intent(question: str) -> bool:
+    return bool(_MEETING_INTENT.search(question or ""))
+
 
 def _principal_role(principal: dict | None) -> str:
     """admin (all accounts) or csm (own book). Unknown/absent → admin-equivalent read."""
@@ -851,6 +912,22 @@ def run(question: str, account_id: str | None = None,
         intent_guidance = ("\n[Expansion question] Answer only with eligible healthy Strategic expansion or renewal signals. "
                            "Do not discuss unrelated churn statuses or recovery accounts unless directly asked. "
                            "If there are no eligible signals, say so plainly and name the missing data gate.\n")
+    meeting_intent = _is_meeting_intent(question)
+    if meeting_intent:
+        intent_guidance += (
+            "\n[Prepare-my-meeting request] The CSM is about to walk into a customer meeting and wants you to get them "
+            "ready. Write a warm, concise meeting brief they can actually read in the corridor, in natural prose (a few "
+            "short paragraphs, not a form). Cover, in this order and only where you have real evidence:\n"
+            "1. Where the account stands right now: health score and band, churn risk, and whether things are improving "
+            "or sliding (use the trajectory/trend signal).\n"
+            "2. What has changed lately that they should know before the call (usage recency, support tickets/CSAT, "
+            "payment, sentiment, renewal timing).\n"
+            "3. The success goal on record, if any, and how product adoption is tracking against it.\n"
+            "4. Two or three things to actually raise or ask in the meeting, phrased the way a sharp CSM would say them, "
+            "tied to the evidence above.\n"
+            "Ground every point in this account's own tool evidence. If a signal is missing, skip it rather than "
+            "guessing, and only flag a gap if it genuinely matters for the conversation. Close with one natural "
+            "sentence offering to draft the follow-up or open something specific.\n")
     if role == "csm":
         scope_guidance = ("\n[Scope] You are answering for a single CSM. The portfolio below is ONLY the "
                           f"accounts they own ({len(accounts)} in total). Never reference or imply accounts "
@@ -943,15 +1020,20 @@ def run(question: str, account_id: str | None = None,
                           "figures and accounts relevant to THIS question.\n")
     persona = (
         "[You are Jane] You are Jane, a fantastic senior Customer Success specialist: sharp, "
-        "warm, and genuinely helpful. You think like a seasoned CSM who has saved big accounts "
+        "warm, and genuinely helpful. You talk like a real person, a trusted colleague leaning over "
+        "the desk, not a dashboard or a report. You think like a seasoned CSM who has saved big accounts "
         "and grown others. You do not just report data, you interpret it: connect the signals "
         "(churn score, product usage, support, payments, sentiment, renewal timing) into a clear "
         "story, say what it means, and recommend the smartest next move. You are proactive: if you "
         "spot something the user did not ask about but should know, mention it briefly. You are "
         "precise with facts (every number is grounded in the live evidence provided) but you speak "
-        "like a trusted colleague, not a dashboard. Be concise and specific; never pad.\n\n"
+        "like a trusted colleague, not a dashboard. You have a little natural warmth and personality: "
+        "you can acknowledge what the user said, react like a human ('that one's worth watching', "
+        "'good news on that front'), and vary how you open rather than using the same stock phrase every "
+        "time. Never robotic, never a wall of fields. Be concise and specific; never pad.\n\n"
     )
     primed = (persona + question.strip() + account_guidance + intent_guidance + scope_guidance + knowledge + queue_guidance +
+              _feedback_learning_guidance() +
               "\n\n[Portfolio in scope — already fetched, use tools only for deeper per-account signals]\n" +
               "\n".join(roster_lines) +
               "\n\n[Harness] The deterministic queue and its judge are authoritative for recommendations; do not invent figures.\n" +
@@ -977,7 +1059,7 @@ def run(question: str, account_id: str | None = None,
             ("retention", "grr", "ndr", "health", "arr", "revenue", "segment", "state",
              "region", "distribution", "overall", "summary", "how many", "total",
              "who owns", "owner", "expansion", "churn"))
-        account_focus = bool(account_id) or named_account or is_comparison or knowledge_intent
+        account_focus = bool(account_id) or named_account or is_comparison or knowledge_intent or meeting_intent
         # Greetings, identity and other social/non-portfolio messages are answered
         # conversationally and must not require the task queue.
         ql_s = q_low.strip()
