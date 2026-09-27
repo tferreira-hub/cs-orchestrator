@@ -148,12 +148,12 @@ details.draft .draft-body{margin-top:8px;white-space:pre-wrap}
 .dirbadge{font-size:.66em;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--brand);background:var(--brandsoft);border-radius:7px;padding:3px 8px;margin-top:6px;display:inline-block}
 
 .scrim{position:fixed;inset:0;background:rgba(11,18,32,.42);opacity:0;pointer-events:none;transition:opacity .2s}.scrim.on{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;right:0;width:480px;max-width:94vw;height:100%;background:#fff;box-shadow:var(--shadowlg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);overflow:auto;z-index:20}.drawer.on{transform:translateX(0)}
+.drawer{position:fixed;top:0;right:0;width:480px;max-width:94vw;height:100vh;background:#fff;box-shadow:var(--shadowlg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);z-index:20;display:flex;flex-direction:column;overflow:hidden}.drawer.on{transform:translateX(0)}
 /* When the docked agent is open, slide the account drawer to its left so both are visible. */
 body.dock-open .drawer{right:420px}
 @media(max-width:1200px){body.dock-open .drawer{right:0;z-index:62}}
-.drawer .dhead{padding:26px 28px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:linear-gradient(180deg,#f6f7ff,#eef0fe);z-index:1}
-.drawer .dbody{padding:20px 26px}.drawer .dbody .body.pad{padding:16px 0}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
+.drawer .dhead{flex:0 0 auto;padding:26px 28px 20px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f6f7ff,#eef0fe)}
+.drawer .dbody{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:20px 26px}.drawer .dbody .body.pad{padding:16px 0}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
 .sect{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:20px 0 9px}
 .writeback{background:linear-gradient(180deg,#f2f3ff,#eef0fe);border:1px solid #dcdffb;border-radius:12px;padding:13px 15px;font-size:.84em;color:#3b39b8}
@@ -204,7 +204,7 @@ body.dock-open .drawer{right:420px}
 .seg-val{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .seg-pct{color:var(--muted);font-weight:600;font-size:.9em;margin-left:3px}
 /* Detail drawer redesign */
-.dt-head{position:sticky;top:0;z-index:2;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
+.dt-head{flex:0 0 auto;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
 .dt-head.pos{background:linear-gradient(135deg,#0ca678,#0e9f6e)}
 .dt-head.neg{background:linear-gradient(135deg,#e5484d,#c93b40)}
 .dt-close{position:absolute;top:16px;right:18px;background:rgba(255,255,255,.18);border:none;color:#fff;width:30px;height:30px;border-radius:8px;font-size:1em;cursor:pointer}
@@ -212,7 +212,7 @@ body.dock-open .drawer{right:420px}
 .dt-title{font-size:.8em;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.9}
 .dt-big{font-size:2em;font-weight:800;letter-spacing:-.02em;margin-top:6px}
 .dt-sub{font-size:.85em;opacity:.9;margin-top:3px}
-.dt-body{padding:18px 20px 40px}
+.dt-body{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:18px 20px 40px}
 .dt-note{background:var(--amberbg);color:#8a5a04;border:1px solid #f2dca6;border-radius:9px;padding:10px 13px;font-size:.8em;line-height:1.45;margin-bottom:14px}
 .churn-cards{display:grid;gap:11px}
 .cc2{border:1px solid var(--line);border-left:3px solid var(--red);border-radius:11px;padding:13px 15px;background:var(--surface);cursor:pointer;transition:box-shadow .12s,transform .12s}
