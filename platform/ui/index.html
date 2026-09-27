@@ -946,10 +946,10 @@ async function loadExpansionOpportunities(){
   try{ d=await (await api('/api/expansion')).json(); }
   catch(e){ if(e&&e.message==='unauthenticated')return; el.innerHTML='<div class="empty">Could not load expansion opportunities.</div>'; return; }
   const cands=d.candidates||[];
-  if(!cands.length){ el.innerHTML='<div class="callout"><b>No computed expansion candidates right now</b><div class="sub" style="margin-top:6px">No healthy, engaged account currently scores high enough on the expansion signals (health, product engagement, license utilization, API surge, renewal timing, ARR headroom). This is a governed empty state, nothing invented.</div></div>'; return; }
+  if(!cands.length){ el.innerHTML='<div class="callout"><b>No accounts are expansion-ready today</b><div class="sub" style="margin-top:6px">None of your accounts currently clear the bar on the growth signals we track, healthy relationship, active product use, licence utilisation, API growth, an approaching renewal, and revenue headroom. As accounts strengthen and renewals approach, they will surface here automatically.</div></div>'; return; }
   const bandCls=b=>b==='high'?'g':b==='medium'?'a':'nc2';
   el.innerHTML='<div class="sect" style="font-weight:700;margin-bottom:4px">Expansion opportunities ('+cands.length+')</div>'
-    +'<div class="sub" style="margin-bottom:12px">Computed expansion readiness from live signals. Not an ML model, and never invented. Booked upsell is on the dashboard.</div>'
+    +'<div class="sub" style="margin-bottom:12px">Accounts ranked by expansion readiness, scored from live health, product engagement, licence utilisation, API growth, renewal timing and revenue headroom. Prioritise your next upsell conversations here.</div>'
     +'<div class="exp-cards">'+cands.map(c=>
       '<div class="exp-card" onclick="openAccount(\''+escapeHtml(c.account_id||'')+'\')">'
       +'<div class="exp-top"><span class="exp-name">'+escapeHtml(c.name)+'</span>'

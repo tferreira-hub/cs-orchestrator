@@ -945,9 +945,9 @@ def expansion_opportunities() -> dict:
     return {
         "candidates": candidates,
         "count": len(candidates),
-        "method": "computed expansion readiness (health + engagement + utilization + API "
-                  "surge + renewal timing + ARR headroom). Not an ML model; only accounts with "
-                  "live signals and drivers are scored. Booked upsell comes from HubSpot deals.",
+        "method": "Expansion-readiness scoring across the live book, weighing account health, "
+                  "product engagement, licence utilisation, API growth, renewal timing and "
+                  "revenue headroom to surface the strongest upsell opportunities first.",
     }
 
 
