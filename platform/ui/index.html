@@ -225,7 +225,30 @@ function go(v){
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   document.getElementById('title').textContent=meta[v][0];
   document.getElementById('crumb').textContent=meta[v][1];
+  // Persist the active view so a reload or shared link restores the same place.
+  try{sessionStorage.setItem('cs_view',v);}catch(e){}
+  if(('#'+v)!==location.hash) history.replaceState(null,'',('#'+v));
   render(v);
+}
+// Restore the last view on load and keep back/forward in sync, without a page reload.
+function initialView(){
+  const h=(location.hash||'').replace('#','');
+  if(h&&meta[h]) return h;
+  try{const s=sessionStorage.getItem('cs_view'); if(s&&meta[s]) return s;}catch(e){}
+  return 'dash';
+}
+window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h&&meta[h]&&DATA) go(h);});
+
+// Centralised fetch: if the signed session expires mid-use the API returns 401.
+// Send the user cleanly to sign-in once (guarded) instead of leaving a broken page.
+let _authRedirecting=false;
+async function api(path,opts){
+  const r=await fetch(path,opts);
+  if(r.status===401){
+    if(!_authRedirecting){_authRedirecting=true;location.assign('/login');}
+    throw new Error('unauthenticated');
+  }
+  return r;
 }
 
 async function boot(){
@@ -240,8 +263,9 @@ async function boot(){
     }
   }catch(e){/* open mode / no auth */}
   try{
-    DATA=await (await fetch('/api/portfolio')).json();
+    DATA=await (await api('/api/portfolio')).json();
   }catch(e){
+    if(e&&e.message==='unauthenticated') return; // api() already redirected to sign-in
     document.getElementById('stats').innerHTML='<div class="empty">Could not reach the API. Is the server running?</div>';
     return;
   }
@@ -267,7 +291,7 @@ async function boot(){
   setCount('c-protect',byMand('MUST_PROTECT'),true);
   setCount('c-expand',byMand('MUST_EXPAND'));
   setCount('c-use',byMand('MUST_USE'));
-  render('dash');
+  go(initialView());
 }
 function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.textContent=n;if(red&&n>0)e.classList.add('red');}
 
