@@ -695,6 +695,12 @@ def revenue_motion() -> dict:
 
     paying = [la for la in scoped if not _is_churned(la) and la.get("hubspot")]
     churned = [la for la in scoped if _is_churned(la)]
+    churned_detail = sorted(
+        [{"name": la.get("hubspot", {}).get("name") or "Unnamed",
+          "owner": la.get("hubspot", {}).get("csm_owner") or "Unassigned",
+          "segment": la.get("hubspot", {}).get("segment_label") or la.get("hubspot", {}).get("segment") or "Unsegmented",
+          "arr_usd": _arr(la)} for la in churned],
+        key=lambda r: -r["arr_usd"])
     bands = {"green": 0, "amber": 0, "red": 0}
     at_risk_arr = 0
     for la in paying:
@@ -723,6 +729,7 @@ def revenue_motion() -> dict:
         "health_mix": bands,
         "retention": _retention_metrics(accounts, tasks_by_account),
         "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
+        "churned_detail": churned_detail,
         # Expansion / upsell / downgrade motion. Only the expansion PIPELINE is currently
         # computable (accounts hitting an expansion trigger, opportunity not booked). Booked
         # upsell/downgrade requires ARR-change history (prior-period ARR or HubSpot deal /
