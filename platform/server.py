@@ -698,6 +698,15 @@ def main() -> int:
         return 1
     print(f"CS Platform running: http://localhost:{port}")
     print(f"  API: http://localhost:{port}/api/portfolio")
+    # Warm the live account cache in the background so the first request never waits on
+    # the cold ~30s vendor fan-out (a slow origin response can make the edge time out).
+    def _warm():
+        try:
+            engine.portfolio()
+        except Exception:  # noqa: BLE001
+            pass
+    import threading as _thr
+    _thr.Thread(target=_warm, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

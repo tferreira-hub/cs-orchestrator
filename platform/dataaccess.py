@@ -169,7 +169,7 @@ def _computed_risk(usage: dict, zendesk: dict, stripe: dict, jiminny: dict, sour
     }
 
 
-_CACHE: dict = {"ts": 0.0, "data": None}
+_CACHE: dict = {"ts": 0.0, "data": None, "refreshing": False}
 from threading import Lock
 _CACHE_LOCK = Lock()
 
@@ -185,17 +185,36 @@ def all_accounts() -> dict:
     if not (_ADAPTERS and _src.HUBSPOT.live()):
         return {}
     try:
-        ttl = float(os.environ.get("CS_CACHE_TTL", "120"))
+        ttl = float(os.environ.get("CS_CACHE_TTL", "600"))
     except ValueError:
-        ttl = 120.0
+        ttl = 600.0
     now = time.time()
-    if _CACHE["data"] is not None and (now - _CACHE["ts"]) < ttl:
+    age = now - _CACHE["ts"]
+    if _CACHE["data"] is not None and age < ttl:
         return _CACHE["data"]
+    # Stale-while-revalidate: if we have (stale) data, return it immediately and refresh
+    # in the background. This guarantees the dashboard never blocks on a ~30s cold fan-out,
+    # which is what could make Cloudflare time out and the browser reload. Enabled in
+    # production via CS_STALE_REVALIDATE=1; off by default so tests stay deterministic.
+    if _CACHE["data"] is not None and os.environ.get("CS_STALE_REVALIDATE") == "1":
+        if not _CACHE.get("refreshing"):
+            _CACHE["refreshing"] = True
+            def _bg():
+                try:
+                    _refresh_accounts()
+                finally:
+                    _CACHE["refreshing"] = False
+            from threading import Thread
+            Thread(target=_bg, daemon=True).start()
+        return _CACHE["data"]
+    # Cold start (or SWR disabled): build synchronously.
+    return _refresh_accounts()
+
+
+def _refresh_accounts() -> dict:
+    import os, time
     with _CACHE_LOCK:
-        # Another request may have filled the cache while this request waited.
         now = time.time()
-        if _CACHE["data"] is not None and (now - _CACHE["ts"]) < ttl:
-            return _CACHE["data"]
         try:
             roster = _src.HUBSPOT.roster()
         except Exception as exc:  # noqa: BLE001
@@ -205,7 +224,7 @@ def all_accounts() -> dict:
         # Keep fan-out bounded because each account makes several vendor calls.
         from concurrent.futures import ThreadPoolExecutor
         try:
-            workers = int(os.environ.get("CS_FETCH_WORKERS", "2"))
+            workers = int(os.environ.get("CS_FETCH_WORKERS", "6"))
         except ValueError:
             workers = 2
         data: dict = {}
