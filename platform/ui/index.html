@@ -302,6 +302,7 @@ body.dock-open .drawer{right:420px}
 .nav-jane{background:linear-gradient(135deg,var(--brand),var(--brand2))!important;color:#fff!important;font-weight:700!important;margin-top:4px}
 .nav-jane .ico{color:#fff!important}
 .nav-jane:hover{filter:brightness(1.08)}
+.nav-jane-bottom{margin-top:auto;margin-bottom:10px;width:100%;border:none;border-radius:11px;padding:13px 14px;text-align:left;font:700 14px Inter,system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 6px 18px rgba(91,91,240,.35)}
 .agent-launcher:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(91,91,240,.55)}
 .agent-launcher .al-ico{font-size:1.05em}
 .agent-launcher.hidden{display:none}
@@ -372,7 +373,6 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
       <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
       <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
-      <button class="nav-jane" onclick="toggleAgentDock(true)"><span class="ico">✦</span> Ask Jane</button>
     </div></div>
     <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
       <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Actions <span class="count" id="c-protect"></span></button>
@@ -387,6 +387,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button data-v="playbook" onclick="go('playbook')"><span class="ico">⚙</span> Playbook Controls</button>
       <button data-v="audit" onclick="go('audit')"><span class="ico">🛡</span> Audit Trail</button>
     </div></div>
+    <button class="nav-jane nav-jane-bottom" onclick="toggleAgentDock(true)"><span class="ico">✦</span> Ask Jane</button>
     <div class="foot">One standardised way of working. Live signals are synthesised into one prioritised queue.</div>
   </aside>
 
