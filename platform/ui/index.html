@@ -131,6 +131,11 @@ tbody tr:nth-child(even).click:hover td{background:#f6f7ff}
 .evi{font-size:.78em;color:var(--muted);margin-top:4px}
 .draft{background:linear-gradient(180deg,#fafbff,#f6f7fe);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:10px;padding:11px 13px;margin-top:9px;font-size:.85em;color:var(--ink2)}
 .draft b{color:var(--brand)}
+details.draft>summary{cursor:pointer;color:var(--brand);font-weight:700;list-style:none;user-select:none}
+details.draft>summary::-webkit-details-marker{display:none}
+details.draft>summary::before{content:'\25B8';display:inline-block;margin-right:6px;transition:transform .15s}
+details.draft[open]>summary::before{transform:rotate(90deg)}
+details.draft .draft-body{margin-top:8px;white-space:pre-wrap}
 .supp{background:var(--amberbg);border:1px solid #f6e2b8;border-radius:12px;padding:12px 14px;font-size:.83em;color:#8a5a06;margin:8px}
 .empty{padding:30px;text-align:center;color:var(--muted);font-size:.88em}
 .chips .pill{margin:0 8px 8px 0;font-size:.8em;padding:5px 13px}
@@ -147,8 +152,8 @@ tbody tr:nth-child(even).click:hover td{background:#f6f7ff}
 /* When the docked agent is open, slide the account drawer to its left so both are visible. */
 body.dock-open .drawer{right:420px}
 @media(max-width:1200px){body.dock-open .drawer{right:0;z-index:62}}
-.drawer .dhead{padding:24px 26px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
-.drawer .dbody{padding:20px 26px}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
+.drawer .dhead{padding:26px 28px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:linear-gradient(180deg,#f6f7ff,#eef0fe);z-index:1}
+.drawer .dbody{padding:20px 26px}.drawer .dbody .body.pad{padding:16px 0}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
 .sect{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:20px 0 9px}
 .writeback{background:linear-gradient(180deg,#f2f3ff,#eef0fe);border:1px solid #dcdffb;border-radius:12px;padding:13px 15px;font-size:.84em;color:#3b39b8}
@@ -186,7 +191,7 @@ body.dock-open .drawer{right:420px}
 .rc-more{font-size:.8em;color:var(--brand);font-weight:600;margin-left:6px}
 @media(max-width:1100px){.rev-strip,.chartgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.rev-strip,.chartgrid{grid-template-columns:1fr}}
-.rc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.rc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
 .rc-card{border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:#fcfcfe}
 .rc-card.ok{border-left:3px solid var(--green)}
 .rc-card.await{border-left:3px solid var(--muted);background:#f8f9fc}
@@ -606,7 +611,7 @@ function openRevDetail(kind){
   else if(kind==='churn'){title='Churn deals (booked)';html=dealsTable(((rm.booked||{}).churn||{}).deals||[]);}
   else if(kind==='churned'){title='Churned accounts';html=churnedListHtml(rm);}
   const d=document.getElementById('drawer');
-  d.innerHTML='<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span><div style="font-size:1.2em;font-weight:800">'+escapeHtml(title)+'</div></div><div class="dbody">'+html+'</div>';
+  d.innerHTML='<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span><div style="font-size:1.2em;font-weight:800">'+escapeHtml(title)+'</div></div><div class="dbody"><div class="body pad">'+html+'</div></div>';
   d.classList.add('on');document.getElementById('scrim').classList.add('on');
 }
 function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
@@ -765,7 +770,7 @@ function taskTable(tasks,withDraft){
       '<td><strong>'+escapeHtml(t.account)+'</strong><div class="sub">'+escapeHtml(t.segment||'-')+'</div></td>'+
       '<td><span class="pill '+mand[t.mandate][0]+'">'+mand[t.mandate][1]+'</span></td>'+
       '<td>'+escapeHtml(t.trigger)+'<div class="evi">'+escapeHtml(prettyEv(t.evidence))+'</div>'+
-      (withDraft&&t.draft_message?'<div class="draft"><b>'+escapeHtml(t.draft_type==='internal_recovery'?'Internal recovery note':'Evidence-grounded draft · review before sending')+'</b><br>'+escapeHtml(t.draft_message)+'</div>':'')+'</td></tr>').join('')+
+      (withDraft&&t.draft_message?'<details class="draft" onclick="event.stopPropagation()"><summary>'+escapeHtml(t.draft_type==='internal_recovery'?'Internal recovery note':'Evidence-grounded draft · review before sending')+'</summary><div class="draft-body">'+escapeHtml(t.draft_message)+'</div></details>':'')+'</td></tr>').join('')+
     '</tbody></table>';
 }
 function prettyEv(e){return Object.entries(e).map(kv=>kv[0].replace(/_/g,' ')+': '+(Array.isArray(kv[1])?kv[1].join(', '):kv[1])).join('  ·  ');}
