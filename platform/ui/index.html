@@ -782,6 +782,8 @@ async function boot(){
   setCount('c-protect',byMand('MUST_PROTECT'),true);
   setCount('c-expand',byMand('MUST_EXPAND'));
   setCount('c-use',byMand('MUST_USE'));
+  // The Expand badge should reflect real expansion opportunities, not only queued tasks.
+  (async()=>{try{const e=await (await api('/api/expansion')).json();const n=(e.count||0)+byMand('MUST_EXPAND');setCount('c-expand',n);}catch(_){}})();
   go(initialView());
 }
 function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.textContent=n;if(red&&n>0)e.classList.add('red');}
