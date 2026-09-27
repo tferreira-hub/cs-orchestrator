@@ -7,7 +7,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>CS Platform</title>
+<script>
+/* Reload safety net: guarantees the page can never get stuck in a reload loop.
+   If the document reloads more than 3 times within 12 seconds, stop and show a
+   recovery notice instead of continuing to bounce. Also removes any stale service
+   worker that could serve an old cached shell (a known cause of edge-cache reloads). */
+(function(){
+  try{
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});}).catch(function(){});
+    }
+    var KEY='cs_reload_guard';
+    var now=Date.now();
+    var hist=[];
+    try{hist=JSON.parse(sessionStorage.getItem(KEY)||'[]');}catch(e){}
+    hist=hist.filter(function(t){return now-t<12000;});
+    hist.push(now);
+    sessionStorage.setItem(KEY,JSON.stringify(hist));
+    if(hist.length>3){
+      // Break the loop: stop further automatic navigation and tell the user.
+      sessionStorage.removeItem(KEY);
+      window.stop&&window.stop();
+      document.addEventListener('DOMContentLoaded',function(){
+        document.body.innerHTML='<div style="max-width:520px;margin:14vh auto;font:400 15px/1.6 Inter,system-ui,sans-serif;color:#0b1220;text-align:center">'+
+          '<div style="font-size:2em;font-weight:800;letter-spacing:-.02em;margin-bottom:8px">CS Platform</div>'+
+          '<p>The page was reloading repeatedly, so it was paused to keep it usable. This is almost always a cached copy of an old version.</p>'+
+          '<p><a href="/?fresh='+now+'" style="display:inline-block;margin-top:8px;background:#5b5bf0;color:#fff;text-decoration:none;padding:10px 18px;border-radius:9px;font-weight:600">Reload the latest version</a></p>'+
+          '<p style="color:#98a2b3;font-size:.85em;margin-top:14px">If it keeps happening, do a hard refresh (Cmd+Shift+R).</p></div>';
+      });
+      throw new Error('cs-reload-guard: loop broken');
+    }
+  }catch(e){ if((''+e).indexOf('loop broken')>=0) throw e; }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
