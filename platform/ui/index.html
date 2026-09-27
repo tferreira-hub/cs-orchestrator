@@ -200,6 +200,19 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 @media(max-width:640px){.agent-dock{width:100vw}.agent-launcher .al-text{display:none}.agent-launcher{padding:14px}}
 .ask-account-btn{margin-top:12px;background:var(--brandsoft);color:var(--brand);border:1px solid #dedcff;border-radius:9px;padding:9px 13px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer}
 .ask-account-btn:hover{background:var(--brand);color:#fff}
+.ad-ev{margin-top:9px;font-size:.82em}
+.ad-ev>summary{cursor:pointer;color:var(--brand);font-weight:600;list-style:none}
+.ad-ev>summary::-webkit-details-marker{display:none}
+.ad-ev>summary:before{content:"▸ ";font-size:.9em}
+.ad-ev[open]>summary:before{content:"▾ "}
+.ad-ev-row{padding:7px 0;border-bottom:1px solid var(--line)}
+.ad-ev-tag{font-size:.82em;color:var(--brand);background:var(--brandsoft);border-radius:6px;padding:1px 7px;margin-left:5px}
+.ad-ev-sub{color:var(--ink2);margin-top:3px;font-size:.92em}
+.ad-ev-src{margin-top:7px;color:var(--muted);font-size:.9em}
+.ad-fb{margin-top:10px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:.8em;color:var(--ink2);border-top:1px dashed var(--line);padding-top:9px}
+.ad-fb button{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:.95em;cursor:pointer;color:var(--ink2)}
+.ad-fb button:hover{border-color:var(--brand);color:var(--brand)}
+.ad-fb.done{color:var(--green);border-top:1px dashed var(--line);padding-top:9px;font-weight:500}
 </style>
 </head>
 <body>
@@ -721,14 +734,48 @@ function adSuggest(q){document.getElementById('adInput').value=q;sendDockMessage
 function newAgentThread(){adThread=[];adGreet();document.getElementById('adInput').value='';}
 function adRender(){
   const dom=document.getElementById('adThread');
-  dom.innerHTML=adThread.map(m=>{
+  dom.innerHTML=adThread.map((m,idx)=>{
     if(m.role==='user') return '<div class="ad-msg user">'+escapeHtml(m.content)+'</div>';
     if(m.role==='thinking') return '<div class="ad-msg thinking"><span class="ad-dot"></span> '+escapeHtml(m.content)+'</div>';
     if(m.role==='error') return '<div class="ad-msg err">'+escapeHtml(m.content)+'</div>';
     if(m.role==='scope') return '<div class="ad-scope-line">'+escapeHtml(m.content)+'</div>';
-    return '<div class="ad-msg assistant">'+renderAgentAnswer(m.content)+'</div>';
+    // Assistant: answer + reviewable evidence + feedback that feeds the learning loop.
+    return '<div class="ad-msg assistant">'+renderAgentAnswer(m.content)+adEvidence(m)+adFeedback(m,idx)+'</div>';
   }).join('');
   dom.scrollTop=dom.scrollHeight;
+}
+function adEvidence(m){
+  const d=m.data||{}; const acts=d.actions||[];
+  const live=(d.harness&&d.harness.live_sources)||[];
+  if(!acts.length && !live.length) return '';
+  let rows='';
+  if(acts.length){
+    rows=acts.slice(0,6).map(a=>'<div class="ad-ev-row"><b>'+escapeHtml(a.account||'')+'</b> '+
+      '<span class="ad-ev-tag">'+escapeHtml((a.mandate||'').replace('MUST_PROTECT','Protect').replace('MUST_EXPAND','Expand').replace('MUST_USE','Adopt'))+'</span>'+
+      '<div class="ad-ev-sub">'+escapeHtml(a.trigger||a.recommended_action||'')+
+      (a.evidence?' · '+escapeHtml(prettyEv(a.evidence)):'')+
+      (a.owner?' · owner: '+escapeHtml(a.owner):'')+(a.sla?' · '+escapeHtml(a.sla):'')+'</div></div>').join('');
+  }
+  const src=live.length?'<div class="ad-ev-src">Live sources checked: '+escapeHtml(live.join(', '))+'</div>':'';
+  return '<details class="ad-ev"><summary>Show the evidence I used ('+(acts.length||live.length)+')</summary>'+rows+src+'</details>';
+}
+function adFeedback(m,idx){
+  if(m.feedback==='helpful') return '<div class="ad-fb done">Thanks, noted. This helps me get better for you.</div>';
+  if(m.feedback==='needs_correction') return '<div class="ad-fb done">Thanks for flagging it. I have logged this so we can review and improve.</div>';
+  return '<div class="ad-fb"><span>Was this helpful? Your feedback trains the agent.</span>'+
+    '<button onclick="adRate('+idx+',\'helpful\')">Yes</button>'+
+    '<button onclick="adRate('+idx+',\'needs_correction\',\'wrong_or_incomplete\')">Needs work</button></div>';
+}
+async function adRate(idx,rating,reason){
+  const m=adThread[idx]; if(!m) return;
+  m.feedback=rating; adRender();
+  try{
+    const d=m.data||{};
+    await fetch('/api/agent/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rating,reason:reason||null,question:m.q||'',
+        action_count:(d.actions||[]).length,
+        judge_verdict:((d.harness||{}).queue_judge||{}).verdict||null})});
+  }catch(e){/* feedback is best-effort */}
 }
 async function sendDockMessage(){
   if(adBusy) return;
@@ -755,8 +802,8 @@ async function sendDockMessage(){
   }
   adThread.pop(); // remove thinking
   if(!d.ok){adThread.push({role:'error',content:d.error||'The agent could not answer.'});adRender();adBusy=false;return;}
-  // The server answer already leads with the identity/scope statement.
-  adThread.push({role:'assistant',content:d.answer||'No answer returned.'});
+  // Keep the evidence + question with the message so the user can review it and rate it.
+  adThread.push({role:'assistant',content:d.answer||'No answer returned.',data:d,q:q,fid:'m'+Date.now(),feedback:null});
   adRender();
   adBusy=false;
 }
