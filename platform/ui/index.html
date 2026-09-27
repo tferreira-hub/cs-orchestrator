@@ -190,10 +190,10 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .ad-suggest{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
 .ad-suggest button{background:var(--surface);border:1px solid var(--line);color:var(--ink2);border-radius:999px;padding:6px 12px;font-size:.8em;cursor:pointer}
 .ad-suggest button:hover{border-color:var(--brand);color:var(--brand)}
-.ad-compose{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--surface)}
-.ad-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:400 14px Inter,system-ui,sans-serif;max-height:120px;color:var(--ink)}
-.ad-compose textarea:focus{outline:none;border-color:var(--brand)}
-.ad-send{background:var(--brand);color:#fff;border:none;border-radius:10px;padding:0 16px;font-weight:600;cursor:pointer}
+.ad-compose{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--surface);align-items:flex-end}
+.ad-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font:400 14px/1.5 Inter,system-ui,sans-serif;min-height:46px;max-height:180px;overflow-y:auto;color:var(--ink);background:#fff}
+.ad-compose textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
+.ad-send{background:var(--brand);color:#fff;border:none;border-radius:12px;padding:0 18px;height:46px;font-weight:600;cursor:pointer;flex:0 0 auto}
 .ad-send:hover{background:var(--brand2)}
 .ad-foot{padding:8px 14px;font-size:.68em;color:var(--muted);text-align:center;border-top:1px solid var(--line);background:var(--surface)}
 .ad-dot{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:pulse 1.3s infinite}
@@ -223,7 +223,6 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
       <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
       <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
-      <button data-v="agent" onclick="go('agent')"><span class="ico">✦</span> Agent Automation</button>
     </div></div>
     <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
       <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Actions <span class="count" id="c-protect"></span></button>
@@ -300,7 +299,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
   <div id="adContext" class="ad-context" style="display:none"></div>
   <div id="adThread" class="ad-thread"></div>
   <div class="ad-compose">
-    <textarea id="adInput" rows="1" placeholder="Ask about your accounts, a risk, or the next action..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendDockMessage();}"></textarea>
+    <textarea id="adInput" rows="2" placeholder="Ask about your accounts, a risk, or the next best action..." oninput="adAutoGrow(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendDockMessage();}"></textarea>
     <button class="ad-send" onclick="sendDockMessage()" aria-label="Send">Send</button>
   </div>
   <div class="ad-foot">Evidence-grounded · judged against the signed playbook · human approves actions</div>
@@ -328,6 +327,8 @@ const meta={
 let DATA=null;
 
 function go(v){
+  // Agent Automation page is retired in favour of the docked Ask CS Agent.
+  if(v==='agent'){toggleAgentDock(true);return;}
   closeDrawer();
   window.scrollTo({top:0,behavior:'instant'});
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
@@ -343,8 +344,9 @@ function go(v){
 // Restore the last view on load and keep back/forward in sync, without a page reload.
 function initialView(){
   const h=(location.hash||'').replace('#','');
+  if(h==='agent') return 'dash';
   if(h&&meta[h]) return h;
-  try{const s=sessionStorage.getItem('cs_view'); if(s&&meta[s]) return s;}catch(e){}
+  try{const s=sessionStorage.getItem('cs_view'); if(s&&meta[s]&&s!=='agent') return s;}catch(e){}
   return 'dash';
 }
 window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h&&meta[h]&&DATA) go(h);});
@@ -502,6 +504,13 @@ async function boot(){
 function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.textContent=n;if(red&&n>0)e.classList.add('red');}
 
 function render(v){
+  // Defensive: never attempt to render account/task data before the portfolio has
+  // loaded. If a view is opened during boot, retry once DATA is ready.
+  const dataViews=['dash','queue','protect','expand','use','accounts'];
+  if(dataViews.includes(v) && (!DATA||!DATA.summary)){
+    setTimeout(()=>{if(DATA&&DATA.summary)render(v);},300);
+    return;
+  }
   if(v==='dash'){
     const s=DATA.summary;
     if(!DATA.accounts.length){
@@ -689,7 +698,7 @@ async function submitPlaybookProposal(){
 }
 
 function agentAsk(q){document.getElementById('agentQ').value=q;askAgent();}
-function askAgentAbout(q){go('agent');agentAsk(q);}
+function askAgentAbout(q){toggleAgentDock(true);document.getElementById('adInput').value=q;sendDockMessage();}
 
 // ── Docked CS Agent: persistent, context-aware assistant on every page ──────
 let adThread=[];        // [{role, content}] multi-turn memory for this session
@@ -731,6 +740,7 @@ function adGreet(){
     '</div>';
 }
 function adSuggest(q){document.getElementById('adInput').value=q;sendDockMessage();}
+function adAutoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,180)+'px';}
 function newAgentThread(){adThread=[];adGreet();document.getElementById('adInput').value='';}
 function adRender(){
   const dom=document.getElementById('adThread');
@@ -746,18 +756,15 @@ function adRender(){
 }
 function adEvidence(m){
   const d=m.data||{}; const acts=d.actions||[];
-  const live=(d.harness&&d.harness.live_sources)||[];
-  if(!acts.length && !live.length) return '';
-  let rows='';
-  if(acts.length){
-    rows=acts.slice(0,6).map(a=>'<div class="ad-ev-row"><b>'+escapeHtml(a.account||'')+'</b> '+
-      '<span class="ad-ev-tag">'+escapeHtml((a.mandate||'').replace('MUST_PROTECT','Protect').replace('MUST_EXPAND','Expand').replace('MUST_USE','Adopt'))+'</span>'+
-      '<div class="ad-ev-sub">'+escapeHtml(a.trigger||a.recommended_action||'')+
-      (a.evidence?' · '+escapeHtml(prettyEv(a.evidence)):'')+
-      (a.owner?' · owner: '+escapeHtml(a.owner):'')+(a.sla?' · '+escapeHtml(a.sla):'')+'</div></div>').join('');
-  }
-  const src=live.length?'<div class="ad-ev-src">Live sources checked: '+escapeHtml(live.join(', '))+'</div>':'';
-  return '<details class="ad-ev"><summary>Show the evidence I used ('+(acts.length||live.length)+')</summary>'+rows+src+'</details>';
+  // Only show evidence that is actually tied to THIS answer. If the answer referenced
+  // no queued account (e.g. a quiet book), we show nothing rather than the whole queue.
+  if(!acts.length) return '';
+  const rows=acts.slice(0,8).map(a=>'<div class="ad-ev-row"><b>'+escapeHtml(a.account||'')+'</b> '+
+    '<span class="ad-ev-tag">'+escapeHtml((a.mandate||'').replace('MUST_PROTECT','Protect').replace('MUST_EXPAND','Expand').replace('MUST_USE','Adopt'))+'</span>'+
+    '<div class="ad-ev-sub">'+escapeHtml(a.trigger||a.recommended_action||'')+
+    (a.evidence?' · '+escapeHtml(prettyEv(a.evidence)):'')+
+    (a.owner?' · owner: '+escapeHtml(a.owner):'')+(a.sla?' · '+escapeHtml(a.sla):'')+'</div></div>').join('');
+  return '<details class="ad-ev"><summary>Evidence for this answer ('+acts.length+')</summary>'+rows+'</details>';
 }
 function adFeedback(m,idx){
   if(m.feedback==='helpful') return '<div class="ad-fb done">Thanks, noted. This helps me get better for you.</div>';
@@ -782,6 +789,7 @@ async function sendDockMessage(){
   const input=document.getElementById('adInput');
   const q=input.value.trim(); if(!q) return;
   input.value='';
+  input.style.height='auto';
   adBusy=true;
   adThread.push({role:'user',content:q});
   adThread.push({role:'thinking',content:'Give me a moment while I look into that for you'});

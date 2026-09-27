@@ -246,6 +246,24 @@ def _structured_actions(queue: dict, accounts: dict) -> list[dict]:
     return actions
 
 
+def _actions_for_answer(all_actions: list[dict], answer: str, accounts: dict,
+                        account_id: str | None = None) -> list[dict]:
+    """Return only the evidence relevant to THIS answer, not the whole queue.
+
+    The panel shows this as 'the evidence I used', so it must match the investigation:
+    - if a specific account is in focus, show that account's actions;
+    - otherwise show actions for the accounts named in the answer text;
+    - if the answer names none (e.g. a quiet-book summary), show nothing rather than
+      dumping the global queue, which is what made every answer look identical.
+    """
+    if account_id:
+        focus_name = (accounts.get(account_id, {}).get("hubspot", {}) or {}).get("name")
+        scoped = [a for a in all_actions if a.get("account") == focus_name]
+        return scoped
+    named = [a for a in all_actions if a.get("account") and a["account"] in answer]
+    return named
+
+
 def _account_evidence_numbers(account: dict, tasks: list[dict]) -> set[str]:
     values = _answer_numbers(json.dumps({"account": account, "tasks": tasks}, default=str))
     for value in list(values):
@@ -638,7 +656,7 @@ def run(question: str, account_id: str | None = None,
         return {"ok": True, "answer": owner_answer, "scope": identity_line, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
                 "accounts_available": len(accounts),
-                "actions": _structured_actions(tools[3], accounts),
+                "actions": _actions_for_answer(_structured_actions(tools[3], accounts), owner_answer, accounts, account_id),
                 "harness": {"queue_judge": tools[3].get("judge", {}),
                             "route": "deterministic_owner_brief"}}
     roster_lines = []
@@ -718,7 +736,7 @@ def run(question: str, account_id: str | None = None,
         return {"ok": True, "answer": answer, "scope": identity_line, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
             "accounts_available": len(tools[0]),
-                "actions": _structured_actions(tools[3], tools[0]),
+                "actions": _actions_for_answer(_structured_actions(tools[3], tools[0]), answer, tools[0], account_id),
                 "harness": {"queue_judge": tools[3].get("judge", {}),
                     "live_sources": sorted({value.get("_source") for account in tools[0].values() for value in account.values() if isinstance(value, dict) and value.get("_source")})}}
     except Exception as e:  # noqa: BLE001
