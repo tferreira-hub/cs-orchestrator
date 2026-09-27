@@ -435,6 +435,53 @@ def _days_to_renewal(renewal_date) -> int | None:
     return (rd - today).days
 
 
+def executive_summary() -> dict:
+    """Leadership roll-up (Customer 360 §20): customer health cohorts, GRR vs target,
+    renewals within 90 days and their ARR, and the expansion pipeline. Scoped to the
+    caller (admin = all, CSM = own book) via the same scoped account provider. Assembles
+    the existing engines rather than recomputing, so numbers are consistent."""
+    rm = revenue_motion()
+    accounts = orchestrate.load_accounts()
+    hm = rm.get("health_mix", {})
+    # Critical = red; At risk = amber; Healthy = green. Unknown = accounts with no
+    # computable health.
+    scored = hm.get("green", 0) + hm.get("amber", 0) + hm.get("red", 0)
+    total = rm.get("total_accounts", len(accounts))
+    # Renewals within 90 days + their ARR.
+    renewals_90d, renewal_arr = 0, 0
+    for a in accounts.values():
+        la = _live_account(a)
+        hs = la.get("hubspot", {})
+        d = _days_to_renewal(hs.get("renewal_date"))
+        if d is not None and 0 <= d <= 90:
+            renewals_90d += 1
+            arr = hs.get("arr_usd")
+            if isinstance(arr, (int, float)):
+                renewal_arr += arr
+    ret = rm.get("retention", {}) or {}
+    rc = rm.get("revenue_change", {}) or {}
+    return {
+        "customers": total,
+        "paying_customers": rm.get("paying_customers"),
+        "churned_customers": rm.get("churned_customers"),
+        "healthy": hm.get("green", 0),
+        "at_risk": hm.get("amber", 0),
+        "critical": hm.get("red", 0),
+        "unknown": max(0, total - scored - rm.get("churned_customers", 0)),
+        "total_arr_usd": rm.get("total_arr_usd"),
+        "at_risk_arr_usd": rm.get("at_risk_arr_usd"),
+        "grr_pct": ret.get("grr_pct"),
+        "grr_target_pct": (ret.get("target") or {}).get("grr_pct"),
+        "churned_arr_usd": ret.get("churned_arr_usd"),
+        "renewals_90d": renewals_90d,
+        "renewal_arr_90d_usd": renewal_arr,
+        "expansion_pipeline_accounts": rc.get("expansion_pipeline_accounts"),
+        "booked_upsell_count": (rc.get("upsell_count") if rc.get("upsell_computable") else None),
+        "booked_upsell_arr_usd": (rc.get("upsell_arr_usd") if rc.get("upsell_computable") else None),
+        "by_segment": rm.get("by_segment", []),
+    }
+
+
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""

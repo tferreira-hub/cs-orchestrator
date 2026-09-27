@@ -597,6 +597,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.revenue_motion()); return
             if path == "/api/expansion":
                 self._json(200, engine.expansion_opportunities()); return
+            if path == "/api/executive":
+                self._json(200, engine.executive_summary()); return
             if path == "/api/audit":
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
