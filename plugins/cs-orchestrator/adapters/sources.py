@@ -601,6 +601,11 @@ class HubSpot:
         if not self.live():
             return {}
         from datetime import datetime, timezone, timedelta
+        import time as _t
+        # 10-minute cache: deals move slowly and this keeps the dashboard fast.
+        cache = getattr(HubSpot, "_rm_cache", None)
+        if cache and (_t.time() - cache[0] < 600):
+            return cache[1]
         # Anchor the window to the platform's business date (CS_TODAY) when set, so the
         # motion reflects the period the rest of the platform reasons about. Default to a
         # wide 36-month window so real booked deals surface rather than a false zero.
@@ -615,56 +620,59 @@ class HubSpot:
         churn_stage = config.env("HUBSPOT_CHURNED_STAGE_ID") or "166792613"
 
         def _search(filters):
-            deals, after, total = [], None, 0
-            for _ in range(10):  # cap pages
-                body = {"filterGroups": [{"filters": filters}],
-                        "properties": ["dealname", "amount", "closedate"],
-                        "limit": 100, "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}]}
-                if after:
-                    body["after"] = after
+            # Fetch a single page: HubSpot returns the exact `total`, and one page of
+            # 100 (sorted by amount desc via closedate) is plenty for the top-deals list
+            # and a representative ARR sum. Paginating every page made this a 45s call.
+            body = {"filterGroups": [{"filters": filters}],
+                    "properties": ["dealname", "amount", "closedate"],
+                    "limit": 100, "sorts": [{"propertyName": "amount", "direction": "DESCENDING"}]}
+            try:
+                res = config.http_post_readonly(
+                    "https://api.hubapi.com/crm/v3/objects/deals/search", self._headers(), body)
+            except Exception:  # noqa: BLE001
+                return None, 0, 0.0
+            total = res.get("total", 0)
+            deals, page_sum = [], 0.0
+            for r in res.get("results", []):
+                p = r.get("properties", {})
                 try:
-                    res = config.http_post_readonly(
-                        "https://api.hubapi.com/crm/v3/objects/deals/search", self._headers(), body)
-                except Exception:  # noqa: BLE001
-                    return None, 0
-                total = res.get("total", total)
-                for r in res.get("results", []):
-                    p = r.get("properties", {})
-                    try:
-                        amt = float(p.get("amount") or 0)
-                    except (TypeError, ValueError):
-                        amt = 0.0
-                    deals.append({"name": p.get("dealname"), "amount_usd": amt,
-                                  "closed": p.get("closedate")})
-                after = (res.get("paging", {}) or {}).get("next", {}).get("after")
-                if not after:
-                    break
-            return deals, total
+                    amt = float(p.get("amount") or 0)
+                except (TypeError, ValueError):
+                    amt = 0.0
+                page_sum += amt
+                deals.append({"name": p.get("dealname"), "amount_usd": amt,
+                              "closed": p.get("closedate")})
+            return deals, total, page_sum
 
-        upsell, up_total = _search([
+        upsell, up_total, up_sum = _search([
             {"propertyName": "pipeline", "operator": "EQ", "value": upsell_pipe},
             {"propertyName": "hs_is_closed_won", "operator": "EQ", "value": "true"},
             {"propertyName": "closedate", "operator": "GTE", "value": since}])
-        churn, ch_total = _search([
+        churn, ch_total, ch_sum = _search([
             {"propertyName": "dealstage", "operator": "EQ", "value": churn_stage},
             {"propertyName": "closedate", "operator": "GTE", "value": since}])
         if upsell is None and churn is None:
             return {}
         upsell = upsell or []
         churn = churn or []
-        return {
+        result = {
             "window_days": window_days,
             "upsell": {
-                "count": up_total if up_total else len(upsell),
-                "arr_usd": round(sum(d["amount_usd"] for d in upsell)),
-                "deals": sorted(upsell, key=lambda d: -d["amount_usd"])[:10],
+                "count": up_total,
+                "arr_usd": round(up_sum),
+                "arr_is_partial": up_total > len(upsell),
+                "deals": upsell[:10],
             },
             "churn": {
-                "count": ch_total if ch_total else len(churn),
-                "arr_usd": round(sum(d["amount_usd"] for d in churn)),
-                "deals": sorted(churn, key=lambda d: -d["amount_usd"])[:10],
+                "count": ch_total,
+                "arr_usd": round(ch_sum),
+                "arr_is_partial": ch_total > len(churn),
+                "deals": churn[:10],
             },
         }
+        import time as _t2
+        HubSpot._rm_cache = (_t2.time(), result)
+        return result
 
     def roster(self, limit: int | None = None) -> list[str]:
         """Live account roster: companies that carry an `account_id` (AUx-yyyyy).

@@ -549,11 +549,11 @@ function renderRevChange(rm){
     : card('Expansion pipeline','0','No account currently meets a live expansion trigger (license utilization or API surge on a healthy Strategic account).','');
   const win=rc.window_days?(' Last '+Math.round(rc.window_days/30)+' months.'):'';
   const upsell=rc.upsell_computable
-    ? card('Upsells (booked)',fmt(rc.upsell_arr_usd),(rc.upsell_count||0)+' closed-won expansion deal(s) from HubSpot.'+win,'ok')
+    ? card('Upsells (booked)',(rc.upsell_count||0)+' deals',(rc.upsell_partial?'Top deals total ':'Total ')+fmt(rc.upsell_arr_usd)+' expansion ARR from HubSpot closed-won.'+win,'ok')
     : card('Upsells (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
   const downgrade=rc.downgrade_computable
-    ? card('Churn / downgrade (booked)',fmt(rc.churn_deal_arr_usd),(rc.churn_count||0)+' closed churn deal(s) from HubSpot.'+win,'warn')
-    : card('Churn / downgrade (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
+    ? card('Churn (booked)',(rc.churn_count||0)+' deals',(rc.churn_partial?'Top deals total ':'Total ')+fmt(rc.churn_deal_arr_usd)+' churned ARR from HubSpot.'+win,'warn')
+    : card('Churn (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
   el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and downgrade. Live and evidence-grounded only.</span></div>'
     +'<div class="body pad"><div class="rc-grid">'+exp+upsell+downgrade+'</div>'
     +churnedTable(rm)+'</div></div>';
