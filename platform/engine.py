@@ -707,37 +707,68 @@ def integrations() -> dict:
     # Count accounts actually carrying live data for each source.
     def synced(src_key):
         return sum(1 for a in accounts.values() if a.get("sources", {}).get(src_key) == "live")
+
+    # Precise, honest status. Three distinct states instead of a vague "not connected":
+    #   connected (live)      — the source is authenticated and returning data
+    #   configuration required — we have access but a specific env value is missing
+    #   access pending        — JobAdder does not have API access to this vendor yet
+    import os as _os
+    def _missing(*names):
+        return [n for n in names if not (_os.environ.get(n) or "").strip()]
+
+    ACCESS_PENDING = {"Jiminny", "Rocket Lane"}
+    CONFIG_REQS = {
+        "Zendesk": ("ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_TOKEN"),
+        "Churn Model": ("REDSHIFT_DATABASE", "REDSHIFT_CHURN_TABLE"),
+        "Entitlements": ("ENTITLEMENTS_API_URL", "ENTITLEMENTS_KEY"),
+    }
+    def status_for(name):
+        if name in liveset:
+            return {"status": "connected (live)", "state": "live", "detail": None}
+        if name in ACCESS_PENDING:
+            return {"status": "access pending", "state": "pending",
+                    "detail": "JobAdder does not have API access to this vendor yet. "
+                              "The connector is built and will light up once access is granted."}
+        if name in CONFIG_REQS:
+            missing = _missing(*CONFIG_REQS[name])
+            if missing:
+                return {"status": "configuration required", "state": "config",
+                        "detail": "Set " + ", ".join(missing) + " to activate this live source."}
+            # Configured but not returning data: credentials present, call failing/empty.
+            return {"status": "configured, awaiting data", "state": "config",
+                    "detail": "Credentials are set but no live records returned yet."}
+        return {"status": "not connected", "state": "off", "detail": None}
     def st(name):
-        return "connected (live)" if name in liveset else "not connected"
+        return status_for(name)["status"]
     hs_live = "HubSpot" in liveset
     return {
         "connectors": [
             {"system": "HubSpot", "category": "CRM", "direction": "bi-directional",
-             "status": st("HubSpot"), "accounts_synced": synced("hubspot"),
+             **status_for("HubSpot"), "accounts_synced": synced("hubspot"),
              "pulls": ["contract value", "renewal date", "account hierarchy", "contacts"],
              "pushes": ["health score", "risk status", "active playbook"] if hs_live else []},
             {"system": "Stripe", "category": "Billing / Finance", "direction": "read-only",
-             "status": st("Stripe"), "accounts_synced": synced("stripe"),
+             **status_for("Stripe"), "accounts_synced": synced("stripe"),
              "pulls": ["invoice status", "days past due", "ARR"], "pushes": []},
             {"system": "Zendesk", "category": "Support", "direction": "read-only",
-             "status": st("Zendesk"), "accounts_synced": synced("zendesk"),
+             **status_for("Zendesk"), "accounts_synced": synced("zendesk"),
              "pulls": ["ticket volume", "CSAT", "Sev-1 flags"], "pushes": []},
             {"system": "Product Telemetry", "category": "Usage (Pendo)", "direction": "read-only",
-             "status": st("Pendo"), "accounts_synced": synced("usage"),
+             **status_for("Pendo"), "accounts_synced": synced("usage"),
              "pulls": ["risk advisor", "adoption", "days since last visit", "plan tier"], "pushes": []},
             {"system": "Jiminny", "category": "Conversational Intelligence", "direction": "read-only",
-             "status": st("Jiminny"), "accounts_synced": synced("jiminny"),
+             **status_for("Jiminny"), "accounts_synced": synced("jiminny"),
              "pulls": ["last call", "sentiment", "summary", "customer talk ratio"], "pushes": []},
             {"system": "Rocket Lane", "category": "Onboarding", "direction": "read-only",
-             "status": st("Rocket Lane"), "accounts_synced": synced("onboarding"),
+             **status_for("Rocket Lane"), "accounts_synced": synced("onboarding"),
              "pulls": ["onboarding status", "time to value", "onboarding health"], "pushes": []},
             {"system": "Churn Model (Redshift)", "category": "Data Platform · Redshift Data API",
              "direction": "read-only", "access": "read-only",
-             "status": st("Churn Model"), "accounts_synced": synced("churn"),
+             **status_for("Churn Model"), "accounts_synced": synced("churn"),
              "pulls": ["ML churn score", "model version", "top risk drivers"], "pushes": []},
             {"system": "Entitlements", "category": "Licensing / Billing",
              "direction": "read-only", "access": "read-only",
-             "status": st("Entitlements"), "accounts_synced": synced("entitlements"),
+             **status_for("Entitlements"), "accounts_synced": synced("entitlements"),
              "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
         ]
     }

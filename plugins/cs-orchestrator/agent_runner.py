@@ -8,14 +8,14 @@ This turns the `.agent.md` definitions from documentation into running agents:
         Bedrock answer at most twice when the harness finds unsupported claims,
   - returns a real transcript.
 
-Auth: Amazon Bedrock in the JobAdder-Playground account (221912726255) via the
-`Playground.JA-Admin` profile (SSO through Portal.JA-CE). Configure with env:
-  CS_BEDROCK_PROFILE   (default: Playground.JA-Admin)
-  CS_BEDROCK_REGION    (default: us-east-1 — where Claude models are enabled)
-  CS_BEDROCK_MODEL     (default: anthropic.claude-3-5-sonnet-20240620-v1:0)
+Auth: Amazon Bedrock in the account the platform runs in. In production this is the
+DevOps account (880082283556) via the ECS task role — no named profile. For local
+development you may set CS_BEDROCK_PROFILE to an SSO profile. Configure with env:
+  CS_BEDROCK_PROFILE   (default: empty → use the ambient/task-role credential chain)
+  CS_BEDROCK_REGION    (default: ap-southeast-2 — DevOps region with Claude enabled)
+  CS_BEDROCK_MODEL     (default: au.anthropic.claude-sonnet-4-5-20250929-v1:0 inference profile)
 
 If credentials are absent it reports 'Bedrock not authenticated' rather than crashing.
-Run `aws sso login --profile Portal.JA-CE` first.
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ sys.path.insert(0, str(PLUGIN.parents[1] / "platform"))  # dataaccess / engine
 
 AGENTS_DIR = PLUGIN / "agents"
 
-PROFILE = os.environ.get("CS_BEDROCK_PROFILE", "Playground.JA-Admin")
-REGION = os.environ.get("CS_BEDROCK_REGION", "us-east-1")
-MODEL = os.environ.get("CS_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+PROFILE = os.environ.get("CS_BEDROCK_PROFILE", "").strip()
+REGION = os.environ.get("CS_BEDROCK_REGION", "ap-southeast-2")
+MODEL = os.environ.get("CS_BEDROCK_MODEL", "au.anthropic.claude-sonnet-4-5-20250929-v1:0")
 MAX_TURNS = int(os.environ.get("CS_AGENT_MAX_TURNS", "12"))
 MAX_CORRECTIONS = 2
 POLICY_NUMBERS = {"0.4", "0.45", "0.6", "0.7", "0.85", "1.4", "24", "60", "85", "90", "120", "180"}
@@ -663,9 +663,12 @@ def run(question: str, account_id: str | None = None,
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         if any(k in msg for k in ("ExpiredToken", "InvalidGrant", "NoCredentials",
-                                  "UnrecognizedClient", "sso", "SSO", "token has expired")):
-            return {"ok": False, "error": "Bedrock not authenticated. Run: "
-                    f"aws sso login --profile Portal.JA-CE  (then this uses profile {PROFILE}, region {REGION}).",
+                                  "UnrecognizedClient", "sso", "SSO", "token has expired",
+                                  "could not be found", "AccessDenied")):
+            profile_hint = (f"local dev: run aws sso login and set CS_BEDROCK_PROFILE, "
+                            if PROFILE else "the ECS task role needs bedrock:InvokeModel, ")
+            return {"ok": False, "error": "Bedrock not available. " + profile_hint +
+                    f"region {REGION}, model {MODEL}.",
                     "transcript": transcript}
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "transcript": transcript}
 

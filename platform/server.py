@@ -293,6 +293,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
+            # The SPA shell and API responses are per-session and must never be cached
+            # by the browser or the Cloudflare edge; a cached shell can re-boot with a
+            # stale auth state and look like a reload. Static-free app, so no-store is safe.
+            if "text/html" in content_type or "application/json" in content_type:
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                self.send_header("Pragma", "no-cache")
             for k, v in (extra_headers or {}).items():
                 self.send_header(k, v)
             self.end_headers()

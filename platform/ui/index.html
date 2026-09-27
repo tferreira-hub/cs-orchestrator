@@ -155,6 +155,9 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 .cc-center .cc-num span{font-size:.66em;color:var(--muted)}
 @media(max-width:1100px){.chartrow{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.chartrow{grid-template-columns:1fr}}
+.intdetail{font-size:.76em;line-height:1.4;margin:8px 0 0;padding:8px 10px;border-radius:8px}
+.intdetail.cfg{background:var(--amberbg);color:#8a5a04;border:1px solid #f2dca6}
+.intdetail.pend{background:#f1f3f8;color:var(--ink2);border:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -270,13 +273,23 @@ function initialView(){
 }
 window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h&&meta[h]&&DATA) go(h);});
 
-// Centralised fetch: if the signed session expires mid-use the API returns 401.
-// Send the user cleanly to sign-in once (guarded) instead of leaving a broken page.
-let _authRedirecting=false;
+// Centralised fetch. On a 401 (expired signed session) we DO NOT auto-navigate:
+// a hard redirect here can create a reload loop if a valid session is intermittently
+// rejected. Instead we surface a single, calm re-authenticate prompt and let the user
+// click through. This guarantees the app can never put itself into a refresh cycle.
+let _authPrompted=false;
+function _promptReauth(){
+  if(_authPrompted) return; _authPrompted=true;
+  const bar=document.createElement('div');
+  bar.id='reauthBar';
+  bar.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0b1220;color:#fff;padding:12px 18px;display:flex;align-items:center;gap:14px;font:500 14px Inter,system-ui,sans-serif;box-shadow:0 -4px 18px rgba(0,0,0,.25)';
+  bar.innerHTML='<span>Your session has expired.</span><a href="/login" style="background:#5b5bf0;color:#fff;text-decoration:none;padding:7px 14px;border-radius:8px;font-weight:600">Sign in again</a>';
+  document.body.appendChild(bar);
+}
 async function api(path,opts){
   const r=await fetch(path,opts);
   if(r.status===401){
-    if(!_authRedirecting){_authRedirecting=true;location.assign('/login');}
+    _promptReauth();
     throw new Error('unauthenticated');
   }
   return r;
@@ -557,11 +570,12 @@ async function loadIntegrations(){
   try{ d=await (await fetch('/api/integrations')).json(); }
   catch(e){ document.getElementById('int-body').innerHTML='<div class="empty">Could not load integrations.</div>'; return; }
   document.getElementById('int-body').innerHTML=d.connectors.map(c=>{
-    const live=c.status.indexOf('connected')===0;
-    const cls=live?'g':'nc2';
+    const state=c.state||(c.status.indexOf('connected')===0?'live':'off');
+    const cls=state==='live'?'g':(state==='config'?'a':(state==='pending'?'nc2':'nc2'));
     const access=c.access||c.direction;
+    const detail=c.detail?'<div class="intdetail '+(state==='config'?'cfg':'pend')+'">'+escapeHtml(c.detail)+'</div>':'';
     return '<div class="intcard"><div class="top"><div><h3>'+escapeHtml(c.system)+'</h3><div class="cat">'+escapeHtml(c.category)+'</div></div><span class="pill '+cls+'">'+escapeHtml(c.status)+'</span></div>'+
-      '<div class="dirbadge">'+escapeHtml(access)+'</div>'+
+      '<div class="dirbadge">'+escapeHtml(access)+'</div>'+detail+
       '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
   }).join('');
 }
