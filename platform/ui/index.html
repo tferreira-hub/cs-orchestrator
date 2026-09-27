@@ -140,6 +140,23 @@ body.dock-open .drawer{right:420px}
 .scopebar .sc-tag{margin-left:auto;font-size:.72em;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;background:var(--brand);color:#fff}
 .scopebar .sc-tag.csm{background:var(--sky)}
 .chartrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
+.rev-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.rev-cell{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+.rev-l{font-size:.7em;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.rev-v{font-size:1.5em;font-weight:800;letter-spacing:-.02em;margin-top:5px}
+.rev-v.warn{color:var(--red)}
+.chartgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+@media(max-width:1100px){.rev-strip,.chartgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.rev-strip,.chartgrid{grid-template-columns:1fr}}
+.rc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.rc-card{border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:#fcfcfe}
+.rc-card.ok{border-left:3px solid var(--green)}
+.rc-card.await{border-left:3px solid var(--muted);background:#f8f9fc}
+.rc-title{font-size:.74em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)}
+.rc-value{font-size:1.5em;font-weight:800;margin:5px 0 6px;letter-spacing:-.02em}
+.rc-card.await .rc-value{color:var(--muted)}
+.rc-sub{font-size:.76em;color:var(--ink2);line-height:1.45}
+@media(max-width:800px){.rc-grid{grid-template-columns:1fr}}
 .chartcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 16px 12px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:172px}
 .chartcard h3{font-size:.74em;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin:0 0 2px;font-weight:700}
 .chartcard .cc-sub{font-size:.72em;color:var(--muted);margin-bottom:10px}
@@ -254,6 +271,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="scopebar" id="scopebar" style="display:none"></div>
         <div class="stats" id="stats"></div>
         <div class="chartrow" id="dash-charts"></div>
+        <div id="dash-revchange"></div>
         <div class="panel"><div class="head"><h2>Daily CS Brief</h2><span class="note">Deterministic queue, live evidence, CSM-owned actions</span></div><div class="body pad" id="daily-brief"><span class="muted">Loading today's brief...</span></div></div>
         <div class="cols">
           <div class="panel"><div class="head"><h2>Priority actions</h2><span class="note">Top of the queue</span></div><div class="body" id="dash-tasks"></div></div>
@@ -422,46 +440,75 @@ function renderScopeBar(sm){
     ? '<span class="sc-ico">CS</span><span class="sc-txt"><b>Your book · '+sm.accounts+' account'+(sm.accounts===1?'':'s')+'</b><span>Scoped to accounts you own ('+owner+'). Health, tasks and revenue below reflect your portfolio only.</span></span><span class="sc-tag csm">CSM view</span>'
     : '<span class="sc-ico">CS</span><span class="sc-txt"><b>All accounts · '+sm.accounts+' in portfolio</b><span>Full-portfolio view across every CSM book. You are seeing organisation-wide health, tasks and revenue.</span></span><span class="sc-tag">Admin view</span>';
 }
-function renderCharts(portfolio,kpis){
+function renderCharts(portfolio,kpis,rm){
   const wrap=document.getElementById('dash-charts'); if(!wrap)return;
+  rm=rm||{}; kpis=kpis||{};
   const band=a=>{const h=a.health;return (h&&typeof h==='object')?(h.band||h.rag):h;};
-  const counts={green:0,amber:0,red:0};
-  portfolio.accounts.forEach(a=>{const b=band(a);if(counts[b]!==undefined)counts[b]++;});
-  const total=portfolio.accounts.length||1;
-  // 1. Health RAG donut
-  const donut=svgDonut([{value:counts.green,color:RAG.green},{value:counts.amber,color:RAG.amber},{value:counts.red,color:RAG.red}],{size:112,thickness:15});
+  const counts=rm.health_mix||(function(){const c={green:0,amber:0,red:0};portfolio.accounts.forEach(a=>{const b=band(a);if(c[b]!==undefined)c[b]++;});return c;})();
+  const total=(counts.green+counts.amber+counts.red)||portfolio.accounts.length||1;
+  const arr=rm.total_arr_usd!=null?rm.total_arr_usd:(portfolio.summary.total_arr_usd||0);
+  const atRisk=rm.at_risk_arr_usd!=null?rm.at_risk_arr_usd:(portfolio.summary.at_risk_arr_usd||0);
+  const ret=rm.retention||kpis.retention||{};
+
+  // 1. Portfolio health RAG donut.
   const atRiskPct=Math.round(((counts.red+counts.amber)/total)*100);
   const c1='<div class="chartcard"><h3>Portfolio health</h3><div class="cc-sub">'+atRiskPct+'% need attention</div><div class="cc-body">'
-    +'<div class="cc-center">'+donut+'<div class="cc-num"><b>'+total+'</b><span>accounts</span></div></div>'
+    +'<div class="cc-center">'+svgDonut([{value:counts.green,color:RAG.green},{value:counts.amber,color:RAG.amber},{value:counts.red,color:RAG.red}],{size:112,thickness:15})+'<div class="cc-num"><b>'+total+'</b><span>accounts</span></div></div>'
     +'<div class="cc-legend"><div><i style="background:'+RAG.green+'"></i><b>'+counts.green+'</b> Healthy</div><div><i style="background:'+RAG.amber+'"></i><b>'+counts.amber+'</b> Watch</div><div><i style="background:'+RAG.red+'"></i><b>'+counts.red+'</b> At risk</div></div>'
     +'</div></div>';
-  // 2. Mandate load bars
-  const ml=(kpis&&kpis.mandate_load)||{};
-  const mrows=[['Protect',ml.MUST_PROTECT||0,RAG.red],['Expand',ml.MUST_EXPAND||0,'#2f6bf0'],['Adopt',ml.MUST_USE||0,'#0ca678']];
-  const mmax=Math.max(1,...mrows.map(r=>r[1]));
-  const c2='<div class="chartcard"><h3>Task load by mandate</h3><div class="cc-sub">Open actions in scope</div><div class="cc-body"><div class="cc-bars">'
-    +mrows.map(r=>'<div class="cc-bar-row"><span class="cc-lbl">'+r[0]+'</span><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.round((r[1]/mmax)*100)+'%;background:'+r[2]+'"></div></div><span class="cc-val">'+r[1]+'</span></div>').join('')
-    +'</div></div></div>';
-  // 3. GRR gauge vs target
-  const ret=(kpis&&kpis.retention)||{};
+
+  // 2. ARR by segment (Chartio 'ARR by...' distribution) — where the revenue sits.
+  const segs=(rm.by_segment||[]).slice(0,5);
+  const smax=Math.max(1,...segs.map(s=>s.arr_usd||0));
+  const segColors=['#5b5bf0','#2f6bf0','#0ca678','#d98b0b','#8b5cf6'];
+  const c2=segs.length?'<div class="chartcard"><h3>ARR by segment</h3><div class="cc-sub">Where revenue is concentrated</div><div class="cc-body"><div class="cc-bars">'
+    +segs.map((s,i)=>'<div class="cc-bar-row"><span class="cc-lbl" title="'+escapeHtml(s.segment)+'">'+escapeHtml((s.segment||'').replace(/Agency /,'Agy ').slice(0,10))+'</span><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.round(((s.arr_usd||0)/smax)*100)+'%;background:'+segColors[i%segColors.length]+'"></div></div><span class="cc-val">'+fmt(s.arr_usd)+'</span></div>').join('')
+    +'</div></div></div>'
+    :'<div class="chartcard"><h3>ARR by segment</h3><div class="cc-sub">Awaiting live segment data</div><div class="cc-body"><span class="muted" style="font-size:.8em">Connect HubSpot segments to break ARR down by tier.</span></div></div>';
+
+  // 3. Gross revenue retention gauge vs target.
   let c3;
   if(ret.computable&&typeof ret.grr_pct==='number'){
     const tgt=(ret.target&&ret.target.grr_pct)||92;
-    c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Target '+tgt+'%</div><div class="cc-body"><div class="cc-center">'
-      +svgGauge(ret.grr_pct,tgt,{w:150})+'<div class="cc-num" style="justify-content:flex-end;padding-bottom:6px"><b>'+ret.grr_pct+'%</b><span>'+(ret.grr_pct>=tgt?'above target':'below target')+'</span></div>'
-      +'</div></div></div>';
+    c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Target '+tgt+'% · churned '+fmt(ret.churned_arr_usd)+'</div><div class="cc-body"><div class="cc-center">'
+      +svgGauge(ret.grr_pct,tgt,{w:150})+'<div class="cc-num" style="justify-content:flex-end;padding-bottom:6px"><b>'+ret.grr_pct+'%</b><span>'+(ret.grr_pct>=tgt?'above target':'below target')+'</span></div></div></div></div>';
   }else{
-    c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned-ARR from Redshift or HubSpot.</span></div></div>';
+    c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned ARR from Redshift or HubSpot.</span></div></div>';
   }
-  // 4. Revenue at risk vs total ARR
-  const arr=portfolio.summary.total_arr_usd||0, atRisk=portfolio.summary.at_risk_arr_usd||0;
+
+  // 4. Revenue at risk vs total ARR.
   const riskPct=arr?Math.round((atRisk/arr)*100):0;
-  const c4='<div class="chartcard"><h3>Revenue at risk</h3><div class="cc-sub">In red accounts</div><div class="cc-body"><div class="cc-center">'
+  const c4='<div class="chartcard"><h3>Revenue at risk</h3><div class="cc-sub">In amber and red accounts</div><div class="cc-body"><div class="cc-center">'
     +svgDonut([{value:atRisk,color:RAG.red},{value:Math.max(0,arr-atRisk),color:'#e6f7f1'}],{size:112,thickness:15})
     +'<div class="cc-num"><b>'+fmt(atRisk)+'</b><span>of '+fmt(arr)+'</span></div></div>'
-    +'<div class="cc-legend"><div><i style="background:'+RAG.red+'"></i><b>'+riskPct+'%</b> at risk</div><div><i style="background:#0ca678"></i>Portfolio ARR</div></div>'
+    +'<div class="cc-legend"><div><i style="background:'+RAG.red+'"></i><b>'+riskPct+'%</b> at risk</div><div><i style="background:#0ca678"></i>Secured ARR</div></div>'
     +'</div></div>';
-  wrap.innerHTML=c1+c2+c3+c4;
+
+  // Revenue-motion headline strip (Chartio single-value metrics), only when we have it.
+  let strip='';
+  if(rm.paying_customers!=null){
+    strip='<div class="rev-strip">'
+      +'<div class="rev-cell"><div class="rev-l">Paying customers</div><div class="rev-v">'+rm.paying_customers+'</div></div>'
+      +'<div class="rev-cell"><div class="rev-l">Churned</div><div class="rev-v '+(rm.churned_customers>0?'warn':'')+'">'+rm.churned_customers+'</div></div>'
+      +'<div class="rev-cell"><div class="rev-l">Secured ARR</div><div class="rev-v">'+fmt(rm.paying_arr_usd)+'</div></div>'
+      +'<div class="rev-cell"><div class="rev-l">Churned ARR</div><div class="rev-v '+(rm.churned_arr_usd>0?'warn':'')+'">'+fmt(rm.churned_arr_usd)+'</div></div>'
+      +'</div>';
+  }
+  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+'</div>';
+  renderRevChange(rm);
+}
+function renderRevChange(rm){
+  const el=document.getElementById('dash-revchange'); if(!el)return;
+  const rc=(rm&&rm.revenue_change)||null;
+  if(!rc){el.innerHTML='';return;}
+  const card=(title,value,sub,state)=>'<div class="rc-card '+(state||'')+'"><div class="rc-title">'+title+'</div><div class="rc-value">'+value+'</div><div class="rc-sub">'+sub+'</div></div>';
+  const exp=rc.expansion_pipeline_accounts>0
+    ? card('Expansion pipeline',fmt(rc.expansion_pipeline_arr_usd),rc.expansion_pipeline_accounts+' account(s) hitting an expansion trigger. Opportunity, not booked.','ok')
+    : card('Expansion pipeline','0','No account currently meets a live expansion trigger (license utilization or API surge on a healthy Strategic account).','');
+  const upsell=card('Upsells (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. Not shown until real booked data exists, no figure is invented.','await');
+  const downgrade=card('Downgrades (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. Not shown until real booked data exists, no figure is invented.','await');
+  el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and downgrade. Live and evidence-grounded only.</span></div>'
+    +'<div class="body pad"><div class="rc-grid">'+exp+upsell+downgrade+'</div></div></div>';
 }
 
 async function boot(){
@@ -537,7 +584,7 @@ function render(v){
     document.getElementById('dash-accts').innerHTML=acctTable(DATA.accounts);
     document.getElementById('dash-supp').innerHTML=suppHtml(DATA.suppressed);
     renderScopeBar(s);
-    loadDashCharts();
+    loadRevenueMotion();
     loadDailyBrief();
   }
   if(v==='queue') document.getElementById('queue-body').innerHTML=taskTable(DATA.tasks,true);
@@ -557,16 +604,16 @@ function render(v){
   if(v==='playbook') loadPlaybook();
   if(v==='gaps') loadGaps();
 }
-let _kpiCache=null;
-async function loadDashCharts(){
+let _kpiCache=null, _rmCache=null;
+async function loadRevenueMotion(){
   const wrap=document.getElementById('dash-charts'); if(!wrap)return;
   try{
+    if(!_rmCache) _rmCache=await (await api('/api/revenue-motion')).json();
     if(!_kpiCache) _kpiCache=await (await api('/api/kpis')).json();
-    renderCharts(DATA,_kpiCache);
+    renderCharts(DATA,_kpiCache,_rmCache);
   }catch(e){
     if(e&&e.message==='unauthenticated') return;
-    // Charts are progressive enhancement: still render health/at-risk from portfolio alone.
-    try{renderCharts(DATA,{});}catch(_){}
+    try{renderCharts(DATA,_kpiCache||{},_rmCache||null);}catch(_){}
   }
 }
 async function loadDailyBrief(){

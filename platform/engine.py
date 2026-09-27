@@ -674,6 +674,69 @@ def _task_metrics(tasks: list[dict]) -> dict:
     }
 
 
+def revenue_motion() -> dict:
+    """Executive revenue-motion snapshot for the CS dashboard (Chartio CS-dashboard model:
+    paying customers, churn, at-risk, retention, ARR distribution). Live data only; every
+    figure traces to HubSpot ARR / lifecycle and Redshift churn status. Nothing invented."""
+    accounts = orchestrate.load_accounts()
+    scoped = [_live_account(a) for a in accounts.values()]
+    tasks_by_account: dict = {}
+    for t in orchestrate.orchestrate().get("tasks", []):
+        tasks_by_account.setdefault(t.get("account_id"), []).append(t)
+
+    def _is_churned(la):
+        stage = str(la.get("hubspot", {}).get("lifecycle_stage") or "").lower()
+        status = str(la.get("churn", {}).get("churn_status") or "").lower()
+        return stage in {"churned", "churned customer"} or status == "churned"
+
+    def _arr(la):
+        v = la.get("hubspot", {}).get("arr_usd")
+        return v if isinstance(v, (int, float)) else 0
+
+    paying = [la for la in scoped if not _is_churned(la) and la.get("hubspot")]
+    churned = [la for la in scoped if _is_churned(la)]
+    bands = {"green": 0, "amber": 0, "red": 0}
+    at_risk_arr = 0
+    for la in paying:
+        b = health_score(la).get("band")
+        if b in bands:
+            bands[b] += 1
+        if b in ("red", "amber"):
+            at_risk_arr += _arr(la)
+
+    by_segment: dict[str, dict] = {}
+    for la in scoped:
+        hs = la.get("hubspot", {})
+        seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+        row = by_segment.setdefault(seg, {"segment": seg, "accounts": 0, "arr_usd": 0})
+        row["accounts"] += 1
+        row["arr_usd"] += _arr(la)
+
+    return {
+        "paying_customers": len(paying),
+        "churned_customers": len(churned),
+        "total_accounts": len(scoped),
+        "total_arr_usd": sum(_arr(la) for la in scoped),
+        "paying_arr_usd": sum(_arr(la) for la in paying),
+        "churned_arr_usd": sum(_arr(la) for la in churned),
+        "at_risk_arr_usd": at_risk_arr,
+        "health_mix": bands,
+        "retention": _retention_metrics(accounts, tasks_by_account),
+        "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
+        # Expansion / upsell / downgrade motion. Only the expansion PIPELINE is currently
+        # computable (accounts hitting an expansion trigger, opportunity not booked). Booked
+        # upsell/downgrade requires ARR-change history (prior-period ARR or HubSpot deal /
+        # Stripe subscription-change events), which is not connected. We never invent these.
+        "revenue_change": {
+            "expansion_pipeline_accounts": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_accounts", 0),
+            "expansion_pipeline_arr_usd": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_arr_usd", 0),
+            "upsell_computable": False,
+            "downgrade_computable": False,
+            "needs": "booked ARR-change history (prior-period ARR, HubSpot deal stages, or Stripe subscription changes)",
+        },
+    }
+
+
 def lifecycle() -> dict:
     """Unified lifecycle view (req §3): onboarding velocity/health alongside adoption."""
     accounts = orchestrate.load_accounts()

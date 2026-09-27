@@ -480,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.portfolio()["tasks"]); return
             if path == "/api/suppressed":
                 self._json(200, engine.portfolio()["suppressed"]); return
+            if path == "/api/revenue-motion":
+                self._json(200, engine.revenue_motion()); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
             if path == "/api/task-events":
