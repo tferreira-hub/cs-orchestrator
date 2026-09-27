@@ -718,6 +718,18 @@ def revenue_motion() -> dict:
         row["accounts"] += 1
         row["arr_usd"] += _arr(la)
 
+    # Booked revenue motion from HubSpot deals (real upsell + churn events). Falls back
+    # to an honest empty state if deals are unreadable. Guarded so a deals failure never
+    # breaks the dashboard.
+    booked = {}
+    try:
+        from adapters.sources import HubSpot as _HS
+        hs_adapter = _HS()
+        if hs_adapter.live():
+            booked = hs_adapter.revenue_motion_deals() or {}
+    except Exception:  # noqa: BLE001
+        booked = {}
+
     return {
         "paying_customers": len(paying),
         "churned_customers": len(churned),
@@ -730,6 +742,7 @@ def revenue_motion() -> dict:
         "retention": _retention_metrics(accounts, tasks_by_account),
         "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
         "churned_detail": churned_detail,
+        "booked": booked,
         # Expansion / upsell / downgrade motion. Only the expansion PIPELINE is currently
         # computable (accounts hitting an expansion trigger, opportunity not booked). Booked
         # upsell/downgrade requires ARR-change history (prior-period ARR or HubSpot deal /
@@ -737,8 +750,13 @@ def revenue_motion() -> dict:
         "revenue_change": {
             "expansion_pipeline_accounts": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_accounts", 0),
             "expansion_pipeline_arr_usd": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_arr_usd", 0),
-            "upsell_computable": False,
-            "downgrade_computable": False,
+            "upsell_computable": bool(booked.get("upsell")),
+            "upsell_count": (booked.get("upsell") or {}).get("count"),
+            "upsell_arr_usd": (booked.get("upsell") or {}).get("arr_usd"),
+            "downgrade_computable": bool(booked.get("churn")),
+            "churn_count": (booked.get("churn") or {}).get("count"),
+            "churn_deal_arr_usd": (booked.get("churn") or {}).get("arr_usd"),
+            "window_days": booked.get("window_days"),
             "needs": "booked ARR-change history (prior-period ARR, HubSpot deal stages, or Stripe subscription changes)",
         },
     }

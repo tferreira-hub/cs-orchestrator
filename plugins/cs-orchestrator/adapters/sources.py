@@ -587,6 +587,85 @@ class HubSpot:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
 
+    def revenue_motion_deals(self, window_days: int | None = None) -> dict:
+        """Aggregate booked revenue motion from HubSpot deals over a rolling window.
+
+        Upsell/expansion = closed-won deals in the Price Rise pipeline.
+        Churn            = deals in the Renewals 'Churned' stage.
+        These are REAL booked events (deal amount = ARR change), not inferred. Pipeline
+        and stage ids are configurable so this is not hard-coded to one portal:
+          HUBSPOT_UPSELL_PIPELINE_ID   (default 10754643 - Project Price Rise V1)
+          HUBSPOT_RENEWALS_PIPELINE_ID (default 89993136 - Renewals)
+          HUBSPOT_CHURNED_STAGE_ID     (default 166792613 - Renewals/Churned)
+        Returns {} when deals are unreadable so the caller shows an honest empty state."""
+        if not self.live():
+            return {}
+        from datetime import datetime, timezone, timedelta
+        # Anchor the window to the platform's business date (CS_TODAY) when set, so the
+        # motion reflects the period the rest of the platform reasons about. Default to a
+        # wide 36-month window so real booked deals surface rather than a false zero.
+        window_days = int(config.env("CS_REVENUE_WINDOW_DAYS") or window_days or 1095)
+        today_env = config.env("CS_TODAY")
+        try:
+            anchor = datetime.fromisoformat(today_env).replace(tzinfo=timezone.utc) if today_env else datetime.now(timezone.utc)
+        except ValueError:
+            anchor = datetime.now(timezone.utc)
+        since = int((anchor - timedelta(days=window_days)).timestamp() * 1000)
+        upsell_pipe = config.env("HUBSPOT_UPSELL_PIPELINE_ID") or "10754643"
+        churn_stage = config.env("HUBSPOT_CHURNED_STAGE_ID") or "166792613"
+
+        def _search(filters):
+            deals, after, total = [], None, 0
+            for _ in range(10):  # cap pages
+                body = {"filterGroups": [{"filters": filters}],
+                        "properties": ["dealname", "amount", "closedate"],
+                        "limit": 100, "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}]}
+                if after:
+                    body["after"] = after
+                try:
+                    res = config.http_post_readonly(
+                        "https://api.hubapi.com/crm/v3/objects/deals/search", self._headers(), body)
+                except Exception:  # noqa: BLE001
+                    return None, 0
+                total = res.get("total", total)
+                for r in res.get("results", []):
+                    p = r.get("properties", {})
+                    try:
+                        amt = float(p.get("amount") or 0)
+                    except (TypeError, ValueError):
+                        amt = 0.0
+                    deals.append({"name": p.get("dealname"), "amount_usd": amt,
+                                  "closed": p.get("closedate")})
+                after = (res.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
+            return deals, total
+
+        upsell, up_total = _search([
+            {"propertyName": "pipeline", "operator": "EQ", "value": upsell_pipe},
+            {"propertyName": "hs_is_closed_won", "operator": "EQ", "value": "true"},
+            {"propertyName": "closedate", "operator": "GTE", "value": since}])
+        churn, ch_total = _search([
+            {"propertyName": "dealstage", "operator": "EQ", "value": churn_stage},
+            {"propertyName": "closedate", "operator": "GTE", "value": since}])
+        if upsell is None and churn is None:
+            return {}
+        upsell = upsell or []
+        churn = churn or []
+        return {
+            "window_days": window_days,
+            "upsell": {
+                "count": up_total if up_total else len(upsell),
+                "arr_usd": round(sum(d["amount_usd"] for d in upsell)),
+                "deals": sorted(upsell, key=lambda d: -d["amount_usd"])[:10],
+            },
+            "churn": {
+                "count": ch_total if ch_total else len(churn),
+                "arr_usd": round(sum(d["amount_usd"] for d in churn)),
+                "deals": sorted(churn, key=lambda d: -d["amount_usd"])[:10],
+            },
+        }
+
     def roster(self, limit: int | None = None) -> list[str]:
         """Live account roster: companies that carry an `account_id` (AUx-yyyyy).
 
