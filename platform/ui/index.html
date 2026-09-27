@@ -203,6 +203,15 @@ body.dock-open .drawer{right:420px}
 .seg-name{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
 .seg-val{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .seg-pct{color:var(--muted);font-weight:600;font-size:.9em;margin-left:3px}
+.exp-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.exp-card{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:12px;padding:13px 15px;background:var(--surface);cursor:pointer;transition:box-shadow .12s,transform .12s}
+.exp-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.exp-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.exp-name{font-weight:800;color:var(--ink);font-size:.95em}
+.exp-score{font-size:.72em;font-weight:800;border-radius:999px;padding:3px 10px}
+.exp-meta{color:var(--ink2);font-size:.78em;margin-top:4px}
+.exp-drivers{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.exp-chip{font-size:.72em;background:var(--greenbg);color:var(--green);border-radius:6px;padding:2px 8px}
 /* Detail drawer redesign */
 .dt-head{flex:0 0 auto;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
 .dt-head.pos{background:linear-gradient(135deg,#0ca678,#0e9f6e)}
@@ -813,9 +822,9 @@ function render(v){
   if(v==='protect'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
   if(v==='expand'){
     const tasks=DATA.tasks.filter(t=>t.mandate==='MUST_EXPAND');
-    document.getElementById('expand-body').innerHTML=tasks.length
-      ? taskTable(tasks,true)
-      : '<div class="callout"><b>No eligible expansion action today</b><div class="sub" style="margin-top:6px">The signed playbook checked the portfolio and found no healthy Strategic account with an active renewal milestone or expansion trigger. This is a governed empty state: no action was invented.</div><div class="chips" style="margin-top:12px"><span class="pill g">Queue checked</span><span class="pill pln">No action invented</span></div><div class="quality-list" style="margin-top:12px"><div><b>Renewals:</b> needs a live HubSpot renewal date inside T-120 to T-30.</div><div><b>Expansion:</b> needs mapped Pendo utilization, API velocity, or strong adoption on a healthy Strategic account.</div><div><b>Next check:</b> refresh after renewal metadata or telemetry mappings change. Risk and recovery remain under Protect.</div></div></div>';
+    document.getElementById('expand-body').innerHTML=(tasks.length?taskTable(tasks,true):'')+
+      '<div id="expand-oppos" class="body pad"><span class="muted">Loading expansion opportunities...</span></div>';
+    loadExpansionOpportunities();
   }
   if(v==='use'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
   if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
@@ -930,6 +939,24 @@ async function loadKpis(){
         '<div class="stat"><div class="l">Expansion pipeline</div><div class="v">'+fmt(ret.expansion_pipeline_arr_usd)+'</div><div class="d">'+ret.expansion_pipeline_accounts+' account(s) · opportunity, not booked</div></div>';
     }
   }
+}
+async function loadExpansionOpportunities(){
+  const el=document.getElementById('expand-oppos'); if(!el)return;
+  let d;
+  try{ d=await (await api('/api/expansion')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; el.innerHTML='<div class="empty">Could not load expansion opportunities.</div>'; return; }
+  const cands=d.candidates||[];
+  if(!cands.length){ el.innerHTML='<div class="callout"><b>No computed expansion candidates right now</b><div class="sub" style="margin-top:6px">No healthy, engaged account currently scores high enough on the expansion signals (health, product engagement, license utilization, API surge, renewal timing, ARR headroom). This is a governed empty state, nothing invented.</div></div>'; return; }
+  const bandCls=b=>b==='high'?'g':b==='medium'?'a':'nc2';
+  el.innerHTML='<div class="sect" style="font-weight:700;margin-bottom:4px">Expansion opportunities ('+cands.length+')</div>'
+    +'<div class="sub" style="margin-bottom:12px">Computed expansion readiness from live signals. Not an ML model, and never invented. Booked upsell is on the dashboard.</div>'
+    +'<div class="exp-cards">'+cands.map(c=>
+      '<div class="exp-card" onclick="openAccount(\''+escapeHtml(c.account_id||'')+'\')">'
+      +'<div class="exp-top"><span class="exp-name">'+escapeHtml(c.name)+'</span>'
+      +'<span class="exp-score '+bandCls(c.band)+'">'+c.score+' · '+escapeHtml(c.band)+'</span></div>'
+      +'<div class="exp-meta">'+escapeHtml(c.segment)+' · '+escapeHtml(c.owner)+(c.arr_usd?' · '+fmt(c.arr_usd)+' ARR':'')+'</div>'
+      +'<div class="exp-drivers">'+(c.drivers||[]).map(dr=>'<span class="exp-chip">'+escapeHtml(dr)+'</span>').join('')+'</div>'
+      +'</div>').join('')+'</div>';
 }
 async function loadLifecycle(){
   let l;

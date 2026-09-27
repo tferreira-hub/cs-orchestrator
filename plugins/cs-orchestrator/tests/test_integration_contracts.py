@@ -1367,3 +1367,22 @@ def test_single_account_answer_does_not_require_queue():
                                        question="tell me about Kain Colasanto", account_focus=True)
     assert not any("get_task_queue" in f for f in account_findings)
     assert not any("does not reference any account" in f for f in account_findings)
+
+
+def test_expansion_score_rewards_healthy_engaged_and_suppresses_churned():
+    import engine
+    healthy = {"hubspot": {"name": "Grow Co", "arr_usd": 5000, "renewal_date": "2026-11-15",
+                            "lifecycle_stage": "Customer"},
+               "usage": {"days_since_last_visit": 2, "logins_last_7d": 40, "logins_prev_7d": 30},
+               "entitlements": {"license_utilization_pct": 90}, "churn": {}, "zendesk": {"csat_30d": 95, "sev1_open": 0}}
+    import os
+    os.environ["CS_TODAY"] = "2026-09-23"
+    es = engine.expansion_score(healthy, segment_median_arr=10000)
+    assert es["computable"] and es["score"] >= 60 and es["band"] == "high"
+    assert any("utilization" in d for d in es["drivers"])
+    # A churned account is never an expansion candidate.
+    churned = {"hubspot": {"name": "Gone Co", "lifecycle_stage": "Churned Customer"},
+               "churn": {"churn_status": "Churned"}, "usage": {"days_since_last_visit": 1},
+               "zendesk": {"csat_30d": 90}}
+    ec = engine.expansion_score(churned)
+    assert ec["score"] == 0

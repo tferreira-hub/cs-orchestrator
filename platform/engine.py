@@ -259,6 +259,115 @@ def health_score(account: dict) -> dict:
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
 
+def expansion_score(account: dict, segment_median_arr: float | None = None) -> dict:
+    """Computed expansion-readiness score (0-100) + drivers. The upsell mirror of the
+    health/churn score: it rewards accounts that are HEALTHY and ENGAGED and show room to
+    grow, so CS can prioritise proactive upsell conversations.
+
+    Deterministic and explainable, NOT an ML model, and it never fabricates: it only
+    scores from signals that are actually present. Signals (each additive):
+      + strong health (a shaky account is not an expansion candidate)
+      + active product engagement (recent visits / login momentum / strong adoption)
+      + high license utilization (>= 85% is the signed expansion trigger; near-full = grow)
+      + API usage surge (>= 1.4x, the signed expansion trigger)
+      + renewal approaching within the T-120..T-30 cadence (natural commercial moment)
+      + ARR headroom vs the segment median (room to expand)
+      + positive call sentiment
+    Suppressed entirely when the account is churned or currently at risk (red health).
+    """
+    hs = account.get("hubspot", {})
+    usage = account.get("usage", {})
+    churn = account.get("churn", {})
+    ent = account.get("entitlements", {}) or {}
+    jiminny = account.get("jiminny", {})
+
+    health = health_score(account)
+    # Not an expansion candidate if churned or red-health, and not scorable without health.
+    if not health.get("computable"):
+        return {"score": 0, "band": "none", "drivers": [], "computable": False,
+                "method": "computed expansion readiness (needs live signals)"}
+    churned = str(churn.get("churn_status") or "").lower() == "churned" or \
+        str(hs.get("lifecycle_stage") or "").lower() in {"churned", "churned customer"}
+    if churned or health.get("band") == "red":
+        return {"score": 0, "band": "low", "drivers": [], "computable": True,
+                "method": "computed expansion readiness (not eligible: churned or at risk)"}
+
+    score = 0.0
+    drivers: list[str] = []
+
+    # Health foundation (0-30): expansion goes to healthy accounts.
+    hscore = health.get("score", 0)
+    if hscore >= 90:
+        score += 30; drivers.append(f"strong health ({hscore})")
+    elif hscore >= 75:
+        score += 22; drivers.append(f"healthy ({hscore})")
+    elif hscore >= 60:
+        score += 10; drivers.append(f"stable health ({hscore})")
+
+    # Engagement (0-25): recent product use / login momentum / adoption.
+    dsv = usage.get("days_since_last_visit")
+    if dsv is not None:
+        if dsv <= 7:
+            score += 18; drivers.append("actively using the product (visited this week)")
+        elif dsv <= 30:
+            score += 10; drivers.append(f"engaged (last visit {dsv} days ago)")
+    now, prev = usage.get("logins_last_7d") or 0, usage.get("logins_prev_7d") or 0
+    if prev > 0 and now > prev:
+        score += 7; drivers.append(f"login momentum up ({prev}->{now}/wk)")
+    adoption = usage.get("adoption_pct")
+    if isinstance(adoption, (int, float)) and adoption >= 70:
+        score += 5; drivers.append(f"high feature adoption ({int(adoption)}%)")
+
+    # License utilization (0-25): the signed expansion trigger.
+    util = ent.get("license_utilization_pct")
+    if isinstance(util, (int, float)):
+        if util >= 85:
+            score += 25; drivers.append(f"license utilization {int(util)}% (>=85% expansion trigger)")
+        elif util >= 70:
+            score += 12; drivers.append(f"license utilization {int(util)}%")
+
+    # API usage surge (0-15): the other signed expansion trigger.
+    api_ratio = usage.get("api_usage_ratio")
+    if isinstance(api_ratio, (int, float)) and api_ratio >= 1.4:
+        score += 15; drivers.append(f"API usage surge {api_ratio:.1f}x (>=1.4x expansion trigger)")
+
+    # Renewal proximity (0-12): T-120..T-30 is the natural commercial window.
+    days_to_renewal = _days_to_renewal(hs.get("renewal_date"))
+    if days_to_renewal is not None and 30 <= days_to_renewal <= 120:
+        score += 12; drivers.append(f"renewal in {days_to_renewal} days (commercial window)")
+
+    # ARR headroom (0-8): below-median ARR in the segment = room to grow.
+    arr = hs.get("arr_usd")
+    if isinstance(arr, (int, float)) and segment_median_arr and arr < segment_median_arr:
+        score += 8; drivers.append("ARR below segment median (headroom)")
+
+    # Positive relationship signal (0-5).
+    if str(jiminny.get("sentiment") or "").lower() == "positive":
+        score += 5; drivers.append("positive call sentiment")
+
+    score = max(0, min(100, round(score)))
+    band = "high" if score >= 60 else "medium" if score >= 35 else "low"
+    return {"score": score, "band": band, "drivers": drivers, "computable": True,
+            "method": "computed expansion readiness from live health, engagement, "
+                      "utilization, API surge, renewal timing and ARR headroom (not an ML model)"}
+
+
+def _days_to_renewal(renewal_date) -> int | None:
+    if not renewal_date:
+        return None
+    from datetime import date, datetime
+    try:
+        rd = datetime.fromisoformat(str(renewal_date)[:10]).date()
+    except ValueError:
+        return None
+    today_env = os.environ.get("CS_TODAY")
+    try:
+        today = datetime.fromisoformat(today_env).date() if today_env else date.today()
+    except ValueError:
+        today = date.today()
+    return (rd - today).days
+
+
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""
@@ -796,6 +905,49 @@ def revenue_motion() -> dict:
             "window_days": booked.get("window_days"),
             "needs": "booked ARR-change history (prior-period ARR, HubSpot deal stages, or Stripe subscription changes)",
         },
+    }
+
+
+def expansion_opportunities() -> dict:
+    """Ranked expansion candidates using the computed expansion-readiness score, scoped to
+    the caller (admins see all; CSMs see their own book via the scoped account provider).
+    Evidence-grounded: only accounts with a computable score and real drivers appear."""
+    accounts = orchestrate.load_accounts()
+    scoped = [_live_account(a) for a in accounts.values()]
+    # Segment median ARR for the headroom driver.
+    from statistics import median
+    seg_arr: dict[str, list] = {}
+    for la in scoped:
+        hs = la.get("hubspot", {})
+        seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+        v = hs.get("arr_usd")
+        if isinstance(v, (int, float)):
+            seg_arr.setdefault(seg, []).append(v)
+    seg_median = {s: median(v) for s, v in seg_arr.items() if v}
+
+    candidates = []
+    for la in scoped:
+        hs = la.get("hubspot", {})
+        seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+        es = expansion_score(la, segment_median_arr=seg_median.get(seg))
+        if es.get("computable") and es.get("score", 0) >= 35 and es.get("drivers"):
+            candidates.append({
+                "account_id": la.get("account_id") or hs.get("account_id"),
+                "name": hs.get("name") or "Unnamed",
+                "segment": seg,
+                "owner": hs.get("csm_owner") or "Unassigned",
+                "arr_usd": hs.get("arr_usd"),
+                "score": es["score"],
+                "band": es["band"],
+                "drivers": es["drivers"],
+            })
+    candidates.sort(key=lambda c: -c["score"])
+    return {
+        "candidates": candidates,
+        "count": len(candidates),
+        "method": "computed expansion readiness (health + engagement + utilization + API "
+                  "surge + renewal timing + ARR headroom). Not an ML model; only accounts with "
+                  "live signals and drivers are scored. Booked upsell comes from HubSpot deals.",
     }
 
 

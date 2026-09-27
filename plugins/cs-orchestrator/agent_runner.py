@@ -247,22 +247,22 @@ def _structured_actions(queue: dict, accounts: dict) -> list[dict]:
 
 
 def _actions_for_answer(all_actions: list[dict], answer: str, accounts: dict,
-                        account_id: str | None = None) -> list[dict]:
+                        account_id: str | None = None, action_intent: bool = False) -> list[dict]:
     """Return only the evidence relevant to THIS answer, not the whole queue.
 
-    The panel shows this as 'the evidence I used', so it must match the investigation:
-    - if a specific account is in focus, show that account's actions;
-    - otherwise show actions for the accounts named in the answer text;
-    - if the answer names none (e.g. a quiet-book summary), show nothing rather than
-      dumping the global queue, which is what made every answer look identical.
+    - For a specific account in focus: that account's actions.
+    - For an ACTION question (what to do / priorities / risk): the accounts named in the
+      answer that actually have queued actions.
+    - For everything else (list, roster, ARR, health summary, knowledge): NO task-queue
+      evidence, because those answers are not action recommendations and attaching the
+      queue made the evidence look identical and unrelated.
     """
     if account_id:
         focus_name = (accounts.get(account_id, {}).get("hubspot", {}) or {}).get("name")
-        scoped = [a for a in all_actions if a.get("account") == focus_name]
-        return scoped
+        return [a for a in all_actions if a.get("account") == focus_name]
+    if not action_intent:
+        return []
     low = answer.lower()
-    # If the answer is a 'nothing to show' result, do not attach unrelated tasks as
-    # evidence (e.g. 'no expansion signals' must not list protect tasks).
     negative = any(p in low for p in ("no expansion", "there are no", "no eligible",
                                       "nothing ", "no active", "no signals", "none of"))
     if negative:
@@ -889,12 +889,38 @@ def run(question: str, account_id: str | None = None,
         ret = _eng2._retention_metrics(accounts, {}) if hasattr(_eng2, "_retention_metrics") else {}
         seg_str = ", ".join(f"{k} ${int(v):,}" for k, v in sorted(seg.items(), key=lambda x: -x[1]) if v)
         state_str = ", ".join(f"{k} ${int(v):,}" for k, v in sorted(state.items(), key=lambda x: -x[1]) if v)
+        # Top computed expansion candidates (upsell readiness), so Jane can answer growth
+        # questions with real, scored candidates instead of 'none'.
+        exp_str = ""
+        try:
+            from statistics import median as _median
+            seg_arr = {}
+            for a in accounts.values():
+                hs2 = a.get("hubspot", {}); v = hs2.get("arr_usd")
+                s2 = hs2.get("segment_label") or hs2.get("segment") or "Unsegmented"
+                if isinstance(v, (int, float)):
+                    seg_arr.setdefault(s2, []).append(v)
+            seg_med = {s: _median(v) for s, v in seg_arr.items() if v}
+            cands = []
+            for a in accounts.values():
+                hs2 = a.get("hubspot", {})
+                s2 = hs2.get("segment_label") or hs2.get("segment") or "Unsegmented"
+                es = _eng2.expansion_score(a, segment_median_arr=seg_med.get(s2))
+                if es.get("computable") and es.get("score", 0) >= 35 and es.get("drivers"):
+                    cands.append((es["score"], hs2.get("name") or "Unnamed", es["drivers"]))
+            cands.sort(key=lambda c: -c[0])
+            if cands:
+                exp_str = "Top expansion candidates (computed readiness): " + "; ".join(
+                    f"{n} (score {sc}: {', '.join(dr[:2])})" for sc, n, dr in cands[:5]) + ".\n"
+        except Exception:  # noqa: BLE001
+            exp_str = ""
         knowledge = (
             "\n[Portfolio knowledge — use these aggregates directly, they are correct]\n"
             f"Total accounts in scope: {len(accounts)}. Total ARR: ${int(total_arr):,}. "
             f"Churned (lifecycle): {churned}. Health mix: {bands['green']} healthy, {bands['amber']} watch, {bands['red']} at risk.\n"
             f"ARR by segment: {seg_str or 'n/a'}.\n"
             f"ARR by state: {state_str or 'n/a'}.\n"
+            + exp_str
             + (f"Gross revenue retention: {ret.get('grr_pct')}% vs target {(ret.get('target') or {}).get('grr_pct')}%; "
                f"churned ARR ${int(ret.get('churned_arr_usd') or 0):,}.\n" if ret and ret.get("computable") else "")
         )
@@ -986,7 +1012,7 @@ def run(question: str, account_id: str | None = None,
         return {"ok": True, "answer": answer, "scope": identity_line, "transcript": transcript,
                 "model": MODEL, "region": REGION, "profile": PROFILE,
             "accounts_available": len(tools[0]),
-                "actions": _actions_for_answer(_structured_actions(tools[3], tools[0]), answer, tools[0], account_id),
+                "actions": _actions_for_answer(_structured_actions(tools[3], tools[0]), answer, tools[0], account_id, action_intent=action_intent),
                 "harness": {"queue_judge": tools[3].get("judge", {}),
                     "live_sources": sorted({value.get("_source") for account in tools[0].values() for value in account.values() if isinstance(value, dict) and value.get("_source")})}}
     except Exception as e:  # noqa: BLE001
