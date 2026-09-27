@@ -259,6 +259,73 @@ def health_score(account: dict) -> dict:
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
 
+def adoption_score(account: dict) -> dict:
+    """Multi-signal product-adoption picture (Customer 360 §3/§4). Measures whether the
+    customer is actually running their recruitment business in JobAdder, not just logging
+    in. Combines the live signals we have (user adoption %, feature adoption %, usage
+    recency, licence utilisation, login momentum) into a 0-100 adoption score with a
+    breakdown, and honestly flags the JobAdder-native workflow counters (jobs, candidates,
+    submissions, placements) that the connected telemetry endpoint does not yet expose."""
+    usage = account.get("usage", {}) or {}
+    ent = account.get("entitlements", {}) or {}
+    components: list[dict] = []
+    gaps: list[str] = []
+
+    def comp(label, value, weight):
+        components.append({"label": label, "value": value, "weight": weight})
+
+    # User adoption (active users %).
+    au = usage.get("active_users_pct")
+    if isinstance(au, (int, float)):
+        comp("Active users", au, 0.30)
+    else:
+        gaps.append("active user %")
+    # Feature adoption.
+    fa = usage.get("key_feature_adoption_pct")
+    if isinstance(fa, (int, float)):
+        comp("Feature adoption", fa, 0.25)
+    else:
+        gaps.append("feature adoption %")
+    # Licence utilisation (seats used vs purchased).
+    util = ent.get("license_utilization_pct")
+    if isinstance(util, (int, float)):
+        comp("Licence utilisation", util, 0.20)
+    else:
+        gaps.append("licence utilisation")
+    # Usage recency (recent = adopting). Convert days-since-visit to a 0-100 recency score.
+    dsv = usage.get("days_since_last_visit")
+    if isinstance(dsv, (int, float)):
+        recency = max(0, 100 - min(100, (dsv / 30.0) * 50))  # 0d=100, 30d=50, 60d+=0
+        comp("Usage recency", round(recency), 0.15)
+    else:
+        gaps.append("usage recency")
+    # Login momentum (this week vs last).
+    now, prev = usage.get("logins_last_7d"), usage.get("logins_prev_7d")
+    if isinstance(now, (int, float)) and isinstance(prev, (int, float)) and prev >= 0:
+        mo = 100 if now >= prev else max(0, round(100 * now / prev)) if prev else 50
+        comp("Login momentum", mo, 0.10)
+
+    # JobAdder-native core-workflow counters are the richest adoption story but are not in
+    # the connected telemetry endpoint yet, name them as a data gap rather than inventing.
+    workflow_gap = "core-workflow counters (jobs, candidates, submissions, placements)"
+
+    if not components:
+        return {"score": None, "computable": False, "components": [],
+                "gaps": gaps + [workflow_gap],
+                "method": "product adoption from live JobAdder telemetry (awaiting signals)"}
+    total_w = sum(c["weight"] for c in components) or 1
+    score = round(sum(c["value"] * c["weight"] for c in components) / total_w)
+    return {
+        "score": score,
+        "band": "high" if score >= 70 else "medium" if score >= 40 else "low",
+        "computable": True,
+        "components": components,
+        "gaps": gaps + [workflow_gap],
+        "method": "weighted live adoption signals (active users, feature adoption, licence "
+                  "utilisation, usage recency, login momentum). Core-workflow counters pending.",
+    }
+
+
 def expansion_score(account: dict, segment_median_arr: float | None = None) -> dict:
     """Computed expansion-readiness score (0-100) + drivers. The upsell mirror of the
     health/churn score: it rewards accounts that are HEALTHY and ENGAGED and show room to
@@ -587,6 +654,7 @@ def account_detail(account_id: str) -> dict:
         "health_history": _health_history_for(account_id),
         "timeline": _timeline_for(account_id, tasks),
         "expansion": expansion_score(live),
+        "adoption": adoption_score(live),
         "sources": a.get("sources", {}),
         "connected": _connected(a),
         "primary_instances": sorted(primary_instance_ids(live.get("hubspot", {}))),

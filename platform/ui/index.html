@@ -595,6 +595,18 @@ function svgGauge(pct,target,opts){
     +'<line x1="'+tx+'" y1="'+ty+'" x2="'+(cx+(r+8)*Math.cos(A+(target/100)*A))+'" y2="'+(cy+(r+8)*Math.sin(A+(target/100)*A))+'" stroke="#0b1220" stroke-width="2"></line>'
     +'</svg>';
 }
+function adoptionHtml(ad){
+  if(!ad) return '';
+  if(!ad.computable){
+    return '<div class="sect">Product adoption</div><div class="callout"><span class="nc">Awaiting live adoption signals'+(ad.gaps&&ad.gaps.length?': '+ad.gaps.map(escapeHtml).join(', '):'')+'</span></div>';
+  }
+  const bandCol=ad.band==='high'?'#0ca678':ad.band==='medium'?'#d98b0b':'#e5484d';
+  const bars=(ad.components||[]).map(c=>'<div class="cc-bar-row"><span class="cc-lbl" style="width:120px">'+escapeHtml(c.label)+'</span><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.max(0,Math.min(100,c.value))+'%;background:'+bandCol+'"></div></div><span class="cc-val">'+Math.round(c.value)+'</span></div>').join('');
+  const gap=(ad.gaps&&ad.gaps.length)?'<div class="sub" style="margin-top:8px">Not yet measured: '+ad.gaps.map(escapeHtml).join(', ')+'.</div>':'';
+  return '<div class="sect">Product adoption</div><div class="callout">'
+    +'<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px"><span style="font-size:1.6em;font-weight:800;color:'+bandCol+'">'+ad.score+'</span><span class="muted">/100 adoption ('+escapeHtml(ad.band)+')</span></div>'
+    +'<div class="cc-bars">'+bars+'</div>'+gap+'</div>';
+}
 function timelineHtml(events){
   if(!events||!events.length) return '';
   const dot=s=>s==='risk'?'#e5484d':s==='watch'?'#d98b0b':s==='positive'?'#0ca678':'#8792a8';
@@ -1497,6 +1509,7 @@ async function openAccount(id){
       kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
       (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
       ((d.trend_risks&&d.trend_risks.length)?('<div class="sect">Trend risks</div>'+d.trend_risks.map(r=>'<div class="callout" style="border-left:3px solid '+(r.severity==='high'?'var(--red)':'var(--amber)')+';margin-bottom:8px"><b>'+escapeHtml(r.title)+'</b><div class="sub" style="margin-top:4px">'+escapeHtml(r.evidence)+'</div></div>').join('')):'')+
+      adoptionHtml(d.adoption)+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
       timelineHtml(d.timeline)+
       (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
