@@ -521,6 +521,24 @@ def _health_history_for(account_id: str):
         return []
 
 
+def _timeline_for(account_id: str, tasks: list):
+    try:
+        import history
+        from datetime import datetime, timezone
+        today = os.environ.get("CS_TODAY") or datetime.now(timezone.utc).date().isoformat()
+        extra = []
+        for t in (tasks or []):
+            extra.append({
+                "date": t.get("due_on") or today,
+                "type": "task",
+                "title": (t.get("trigger") or t.get("recommended_action") or "CS task"),
+                "severity": "risk" if t.get("priority") == 1 else "watch" if t.get("priority", 9) <= 2 else "info",
+            })
+        return history.timeline_for(account_id, extra_events=extra)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def account_detail(account_id: str) -> dict:
     if not can_view_account(account_id):
         raise ForbiddenError(account_id)
@@ -545,6 +563,7 @@ def account_detail(account_id: str) -> dict:
         "health": h,
         "health_trend": _health_trend_for(account_id),
         "health_history": _health_history_for(account_id),
+        "timeline": _timeline_for(account_id, tasks),
         "expansion": expansion_score(live),
         "sources": a.get("sources", {}),
         "connected": _connected(a),

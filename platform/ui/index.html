@@ -216,6 +216,12 @@ body.dock-open .drawer{right:420px}
 .trend-badge.down{background:var(--redbg);color:var(--red)}
 .trend-badge.up{background:var(--greenbg);color:var(--green)}
 .trend-badge.flat{background:#eef1f6;color:var(--ink2)}
+.tl{display:flex;flex-direction:column;gap:2px}
+.tl-row{display:flex;gap:11px;align-items:flex-start;padding:7px 0;position:relative}
+.tl-row:not(:last-child):before{content:"";position:absolute;left:4px;top:16px;bottom:-7px;width:2px;background:var(--line)}
+.tl-dot{width:10px;height:10px;flex:0 0 10px;border-radius:50%;margin-top:4px;z-index:1}
+.tl-date{font-size:.7em;color:var(--muted);font-weight:600}
+.tl-title{font-size:.86em;color:var(--ink);margin-top:1px}
 /* Detail drawer redesign */
 .dt-head{flex:0 0 auto;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
 .dt-head.pos{background:linear-gradient(135deg,#0ca678,#0e9f6e)}
@@ -588,6 +594,15 @@ function svgGauge(pct,target,opts){
     +arc(0,100,'#eef1f6',th)+arc(0,val,col,th)
     +'<line x1="'+tx+'" y1="'+ty+'" x2="'+(cx+(r+8)*Math.cos(A+(target/100)*A))+'" y2="'+(cy+(r+8)*Math.sin(A+(target/100)*A))+'" stroke="#0b1220" stroke-width="2"></line>'
     +'</svg>';
+}
+function timelineHtml(events){
+  if(!events||!events.length) return '';
+  const dot=s=>s==='risk'?'#e5484d':s==='watch'?'#d98b0b':s==='positive'?'#0ca678':'#8792a8';
+  const rows=events.slice(0,12).map(e=>
+    '<div class="tl-row"><div class="tl-dot" style="background:'+dot(e.severity)+'"></div>'
+    +'<div class="tl-body"><div class="tl-date">'+escapeHtml(String(e.date||'').slice(0,10))+'</div>'
+    +'<div class="tl-title">'+escapeHtml(e.title||'')+'</div></div></div>').join('');
+  return '<div class="sect">Customer timeline</div><div class="callout"><div class="tl">'+rows+'</div></div>';
 }
 function sparkline(values){
   const v=(values||[]).filter(x=>typeof x==='number');
@@ -1475,6 +1490,7 @@ async function openAccount(id){
       kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
       (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
+      timelineHtml(d.timeline)+
       (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
         '<div class="writeback"><b>Prepared (dry-run):</b> '+(d.hubspot_writeback.cs_health_score==null?'<span class="muted">no health data available</span>':'health '+d.hubspot_writeback.cs_health_score+', status <b>'+String(d.hubspot_writeback.cs_risk_status||'').replace(/_/g,' ')+'</b>')+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.<br><span class="muted">'+escapeHtml(d.hubspot_writeback.note||'No HubSpot mutation is sent. The guarded write-back endpoint verifies/creates missing properties and applies only when both CS_ALLOW_WRITE=1 and apply=true are supplied.')+'</span></div>'):'')+
       '<div class="sect">Contacts</div><div class="callout">'+contacts+'</div>'+

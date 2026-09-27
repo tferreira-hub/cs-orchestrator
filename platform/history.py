@@ -138,3 +138,35 @@ def health_trend(account_id: str, window_days: int = 45) -> dict | None:
         "current": current["health"], "past": past["health"], "delta": delta,
         "days": days, "direction": "up" if delta > 0 else "down" if delta < 0 else "flat",
     }
+
+
+def timeline_for(account_id: str, extra_events: list | None = None) -> list[dict]:
+    """Build a chronological customer timeline (Customer 360 §11) for one account.
+
+    Derives events from the health-snapshot history (notable health moves) and merges any
+    caller-supplied events (task status changes, risks, agent actions). Returned newest
+    first so the UI can show a running story of what happened to the customer and when."""
+    events: list[dict] = []
+    rows = [r for r in history_for(account_id) if r.get("health") is not None]
+    prev = None
+    for r in rows:
+        if prev is not None:
+            delta = r["health"] - prev["health"]
+            if abs(delta) >= 5:  # only notable moves, not noise
+                events.append({
+                    "date": r.get("date"),
+                    "type": "health_change",
+                    "title": f"Health {'up' if delta > 0 else 'down'} {abs(round(delta))} points ({prev['health']} to {r['health']})",
+                    "severity": "positive" if delta > 0 else "watch" if delta > -12 else "risk",
+                })
+        prev = r
+    if rows:
+        first = rows[0]
+        events.append({"date": first.get("date"), "type": "tracking_started",
+                       "title": f"Health tracking began at {first.get('health')}",
+                       "severity": "info"})
+    for e in (extra_events or []):
+        if e:
+            events.append(e)
+    events.sort(key=lambda e: e.get("date", ""), reverse=True)
+    return events
