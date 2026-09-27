@@ -260,8 +260,21 @@ def _actions_for_answer(all_actions: list[dict], answer: str, accounts: dict,
         focus_name = (accounts.get(account_id, {}).get("hubspot", {}) or {}).get("name")
         scoped = [a for a in all_actions if a.get("account") == focus_name]
         return scoped
-    named = [a for a in all_actions if a.get("account") and a["account"] in answer]
-    return named
+    low = answer.lower()
+    # If the answer is a 'nothing to show' result, do not attach unrelated tasks as
+    # evidence (e.g. 'no expansion signals' must not list protect tasks).
+    negative = any(p in low for p in ("no expansion", "there are no", "no eligible",
+                                      "nothing ", "no active", "no signals", "none of"))
+    if negative:
+        return []
+    def _named(name):
+        if not name: return False
+        if name in answer: return True
+        stop={"group","limited","ltd","inc","llc","pty","the","co","company","solutions",
+              "recruitment","services","international","australia"}
+        toks=[t for t in re.findall(r"[A-Za-z0-9]+", name.lower()) if t not in stop and len(t)>2][:2]
+        return bool(toks) and all(t in low for t in toks)
+    return [a for a in all_actions if _named(a.get("account"))]
 
 
 def _account_evidence_numbers(account: dict, tasks: list[dict]) -> set[str]:
@@ -330,7 +343,19 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
         if judge.get("verdict") != "PASS":
             findings.append(f"queue judge verdict is {judge.get('verdict', 'UNKNOWN')}")
     by_name = {a.get("hubspot", {}).get("name"): a for a in accounts.values()}
-    mentioned = [name for name in by_name if name and name in answer]
+    answer_lower = answer.lower()
+    def _is_mentioned(name):
+        if name in answer:
+            return True
+        # Also match when the model uses a shortened form (e.g. "Salt Solutions" for
+        # "Salt Solutions Group Limited"). Use the distinctive leading tokens, ignoring
+        # common suffixes, so per-account numeric evidence is still credited.
+        stop = {"group", "limited", "ltd", "inc", "llc", "pty", "the", "co", "company",
+                "solutions", "recruitment", "services", "international", "australia"}
+        tokens = [t for t in re.findall(r"[A-Za-z0-9]+", name.lower()) if t not in stop and len(t) > 2]
+        head = tokens[:2]
+        return bool(head) and all(t in answer_lower for t in head)
+    mentioned = [name for name in by_name if name and _is_mentioned(name)]
     queue_tasks = queue.get("tasks", [])
     portfolio_evidence = _portfolio_evidence_numbers(queue, accounts)
     if mentioned:
@@ -681,7 +706,7 @@ def run(question: str, account_id: str | None = None,
     roster_lines = []
     for aid, a in accounts.items():
         hs = a.get("hubspot", {})
-        roster_lines.append(f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | ARR={hs.get('arr_usd')}")
+        roster_lines.append(f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | ARR={hs.get('arr_usd')} | owner={hs.get('csm_owner') or 'Unassigned'}")
     account_guidance = ""
     if account_id:
         selected = accounts.get(account_id) or accounts.get(account_id.upper()) or accounts.get(account_id.lower())
@@ -712,7 +737,7 @@ def run(question: str, account_id: str | None = None,
               "\n[Response style] Speak like a thoughtful senior CS partner, not a system log. For top-actions questions, lead with the requested actions and keep the answer concise (roughly 150-250 words). Use natural prose or a short numbered list, not a repeated full queue table. For each action, give the account, what to do, why it matters, and the exact SLA from its priority: P1 means within 24 hours, P2 means today, P3 means this week, P4 means before the renewal milestone, and P5 means this week. Distinguish active risk from churned-account recovery and contact hygiene. Do not say all Protect actions have a 24-hour SLA. Do not mention tool calls, harness checks, judge verdicts, correction attempts, raw source JSON, null values, or internal implementation terms. Mention data gaps only when they change the recommendation, in one short closing note. Do not repeat the structured action packet because the UI already displays it.\n"+
               "[Evidence rule] Do not generalize categorical facts such as Churned status across accounts. Say an account is Churned only when that account's own Redshift evidence says Churned. "
               "Do not claim that an external dunning, suspension, write-back, or outreach action has executed unless the tool result explicitly confirms execution; describe a handoff as a handoff.\n"
-              "[Voice] Write like a warm, sharp CS colleague talking to another person: natural sentences, plain English, no jargon dumps. NEVER use an em dash or en dash (— or –); use a comma or a full stop instead. Do not answer with a bare bullet list of facts when a sentence would read better. Always close with one short, specific follow-up question that offers a sensible next step (for example, offering to draft an outreach, open an account, or compare owners), so it feels like a real conversation.")
+              "[Voice] Write like a warm, sharp CS colleague talking to another person: natural sentences, plain English, no jargon dumps. NEVER use an em dash or en dash (— or –); use a comma or a full stop instead. Do not answer with a bare bullet list of facts when a sentence would read better. When you mention who owns an account, name the actual owner from the roster (the owner= field), never a vague phrase like 'the Strategic CSM book'. Always close with one short, specific follow-up question that offers a sensible next step (for example, offering to draft an outreach, open an account, or compare owners), so it feels like a real conversation.")
     try:
         # Single-account questions are grounded by that account's own tools and do not
         # require the portfolio queue. Detect focus from an explicit account_id or a
@@ -720,7 +745,11 @@ def run(question: str, account_id: str | None = None,
         q_lower = question.lower()
         named_account = any((a.get("hubspot", {}).get("name") or "").lower() in q_lower
                             for a in accounts.values() if a.get("hubspot", {}).get("name"))
-        account_focus = bool(account_id) or named_account
+        # Comparisons and named-account questions are account-focused: grounded by those
+        # accounts' own signals, not the portfolio queue.
+        is_comparison = any(t in q_lower for t in ("compare", " vs ", "versus", "which is worse",
+                                                   "which is better", "difference between"))
+        account_focus = bool(account_id) or named_account or is_comparison
         answer = ""
         findings = []
         for attempt in range(MAX_CORRECTIONS + 1):
