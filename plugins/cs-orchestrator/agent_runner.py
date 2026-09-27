@@ -445,7 +445,12 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
         unsupported = [v for v in unsupported if not _is_sum_of_arr(v)]
     if unsupported:
         findings.append("unsupported numeric claims: " + ", ".join(unsupported))
-    check_status = not any(term in question.lower() for term in ("expansion", "expand", "upsell"))
+    # Only guard against fabricating a churned status when the question is about
+    # accounts/risk, not aggregate ARR/revenue questions where 'churn' appears in general
+    # commentary. And require the word to sit tightly next to the account name.
+    check_status = not any(term in question.lower() for term in
+                           ("expansion", "expand", "upsell", "arr", "revenue", "total",
+                            "segment", "state", "region", "distribution", "how much"))
     for name in mentioned if check_status else []:
         account = by_name[name]
         account_status = str(account.get("churn", {}).get("churn_status") or "").lower()
@@ -453,8 +458,14 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
         is_churned = account_status == "churned" or lifecycle_stage in {"churned", "churned customer"}
         window = answer.lower()
         name_position = window.find(name.lower())
-        local_text = window[name_position:name_position + 260] if name_position >= 0 else ""
-        if "churned" in local_text and not is_churned:
+        # Tight window right after the name: catch '<Account> is (also) churned' style
+        # direct assertions, not any distant mention.
+        local_text = window[name_position:name_position + 90] if name_position >= 0 else ""
+        directly_called_churned = bool(re.search(r"\bis\b[^.]{0,20}\bchurned\b", local_text)
+                                       or "has churned" in local_text
+                                       or "churned customer" in local_text
+                                       or ", churned" in local_text)
+        if directly_called_churned and not is_churned:
             findings.append(f"unsupported churn status for account: {name}")
     if queue.get("tasks") and not mentioned and not account_focus:
         findings.append("answer does not reference any account from the deterministic queue")
