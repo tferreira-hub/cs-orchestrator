@@ -540,11 +540,18 @@ class Handler(BaseHTTPRequestHandler):
                 question = (body.get("question") or "").strip() or "What are my top CS actions today?"
                 account_id = (body.get("account_id") or "").strip() or None
                 csm_owner = (body.get("csm_owner") or "").strip() or None
+                # Multi-turn memory: the panel sends prior turns so follow-ups have context.
+                history = body.get("history") if isinstance(body.get("history"), list) else None
+                if history:
+                    # Trust only role/content, cap length to keep the prompt bounded.
+                    history = [{"role": t.get("role"), "content": t.get("content")}
+                               for t in history[-8:] if isinstance(t, dict)]
                 plugin = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"
                 sys.path.insert(0, str(plugin))
                 import agent_runner  # noqa: E402
                 self._json(200, agent_runner.run(question, account_id=account_id,
-                                                 csm_owner=csm_owner, principal=principal))
+                                                 csm_owner=csm_owner, principal=principal,
+                                                 history=history))
                 return
             if path == "/api/agent/feedback":
                 rating = body.get("rating")

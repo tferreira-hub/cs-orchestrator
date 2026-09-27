@@ -123,14 +123,23 @@ def _computed_risk(usage: dict, zendesk: dict, stripe: dict, jiminny: dict, sour
     elif prisk == "medium":
         score += 0.25; reasons.append("Pendo risk advisor: Medium")
 
-    # Usage recency (live): long absence = disengagement. Scales with severity —
-    # a multi-year absence is a far stronger churn signal than a 30-day one.
+    # Usage recency (live): long absence = disengagement. Scales continuously with
+    # severity so a multi-year dormancy is a materially stronger signal than a
+    # few-months gap, and two dormant accounts do not collapse to the same score.
     dsv = usage.get("days_since_last_visit")
     if dsv is not None:
         if dsv >= 365:
-            score += 0.55; reasons.append(f"no product visit in {dsv} days (>1 year)")
+            # Graduated 0.40 at ~1yr → up to 0.65 at ~6yr+, so accounts differentiate
+            # by how long they have actually been dormant rather than collapsing to one value.
+            years = dsv / 365.0
+            recency = min(0.65, 0.40 + 0.05 * (years - 1))
+            score += round(recency, 2)
+            reasons.append(f"no product visit in {dsv} days ({years:.1f} years)")
         elif dsv >= 90:
-            score += 0.35; reasons.append(f"no product visit in {dsv} days")
+            # 0.25 at 90d → ~0.40 near a year.
+            recency = min(0.40, 0.25 + 0.15 * ((dsv - 90) / 275.0))
+            score += round(recency, 2)
+            reasons.append(f"no product visit in {dsv} days")
         elif dsv >= 30:
             score += 0.15; reasons.append(f"no product visit in {dsv} days")
 

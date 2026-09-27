@@ -488,10 +488,19 @@ def _maybe_clarify(question: str, accounts: dict, account_id: str | None) -> str
     return None
 
 
-def _run_agent(client, agent, user_task, tools, tool_specs, transcript, depth=0):
-    """Run one agent to completion (resolving its tool calls). Returns final text."""
+def _run_agent(client, agent, user_task, tools, tool_specs, transcript, depth=0, history=None):
+    """Run one agent to completion (resolving its tool calls). Returns final text.
+
+    `history` is an optional list of prior {role, text} turns that seed the
+    conversation so follow-up questions ('and the second one?') have context."""
     accounts, tool_fns = tools[:2]
-    messages = [{"role": "user", "content": [{"text": user_task}]}]
+    messages = []
+    for turn in (history or []):
+        role = "assistant" if turn.get("role") == "assistant" else "user"
+        text = str(turn.get("content") or turn.get("text") or "").strip()
+        if text:
+            messages.append({"role": role, "content": [{"text": text}]})
+    messages.append({"role": "user", "content": [{"text": user_task}]})
     for _turn in range(MAX_TURNS):
         resp = _converse(client, agent["system"], messages, tool_specs)
         out = resp["output"]["message"]
@@ -530,7 +539,8 @@ def _run_agent(client, agent, user_task, tools, tool_specs, transcript, depth=0)
 
 
 def run(question: str, account_id: str | None = None,
-    csm_owner: str | None = None, principal: dict | None = None) -> dict:
+    csm_owner: str | None = None, principal: dict | None = None,
+    history: list | None = None) -> dict:
     """Execute the cs-orchestrator agent on a question. Returns {ok, answer, transcript}.
 
     The authenticated principal scopes what the agent can see: admins get the whole
@@ -642,7 +652,7 @@ def run(question: str, account_id: str | None = None,
                 task = primed + "\n\n" + correction
             else:
                 task = primed
-            answer = _run_agent(client, orchestrator, task, tools, tool_specs, transcript)
+            answer = _run_agent(client, orchestrator, task, tools, tool_specs, transcript, history=history)
             answer = _clean_agent_text(answer)
             queue_called = tools[2]["queue_called"]
             findings = validate_answer(answer, tools[3], accounts, queue_called, question)
