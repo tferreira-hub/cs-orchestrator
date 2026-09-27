@@ -1092,7 +1092,7 @@ function adGreet(){
   const scopeWord=(p&&p.role==='admin')?'across the portfolio':'in your book';
   let insight;
   if(p1>0){
-    insight="You have <b>"+p1+" priority action"+(p1>1?'s':'')+"</b> needing attention within 24 hours "+scopeWord+
+    insight="You have "+p1+" priority action"+(p1>1?'s':'')+" needing attention within 24 hours "+scopeWord+
       (atRisk?", with "+fmt(atRisk)+" of ARR at risk":'')+". I can walk you through "+(p1>1?'them':'it')+" whenever you're ready.";
   }else{
     insight="Nothing urgent "+scopeWord+" right now. I can help you look ahead, at renewals, expansion opportunities, or any account you'd like to dig into.";
@@ -1103,7 +1103,7 @@ function adGreet(){
   }else{
     // Login name isn't a real name (e.g. tferreira): greet, ask what to call them.
     window._JANE_ASKING_NAME=true;
-    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. "+insight+"<br><br>Before we start, what should I call you?"});
+    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. "+insight+" Before we dive in, what should I call you?"});
   }
   adRender();
 }
@@ -1173,7 +1173,7 @@ async function sendDockMessage(){
     const clean=name?name.charAt(0).toUpperCase()+name.slice(1):q;
     try{localStorage.setItem('cs_user_name',clean);}catch(e){}
     adThread.push({role:'user',content:q});
-    adThread.push({role:'assistant',content:"Lovely to meet you, "+escapeHtml(clean)+". I'll remember that. What would you like to look at first, your priorities today, a specific account, or where the growth is?"});
+    adThread.push({role:'assistant',content:"Lovely to meet you, "+clean+". I'll remember that. What would you like to look at first, your priorities today, a specific account, or where the growth is?"});
     adRender();
     return;
   }
