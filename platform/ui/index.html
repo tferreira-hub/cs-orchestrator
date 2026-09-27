@@ -554,9 +554,24 @@ function renderRevChange(rm){
   const downgrade=rc.downgrade_computable
     ? card('Churn (booked)',(rc.churn_count||0)+' deals',(rc.churn_partial?'Top deals total ':'Total ')+fmt(rc.churn_deal_arr_usd)+' churned ARR from HubSpot.'+win,'warn')
     : card('Churn (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
-  el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and downgrade. Live and evidence-grounded only.</span></div>'
+  el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and churn. Live HubSpot deals, evidence-grounded.</span></div>'
     +'<div class="body pad"><div class="rc-grid">'+exp+upsell+downgrade+'</div>'
+    +dealsTable('Upsell deals (booked expansion)',(rm.booked&&rm.booked.upsell&&rm.booked.upsell.deals)||[],'ok')
+    +dealsTable('Churn deals (booked)',(rm.booked&&rm.booked.churn&&rm.booked.churn.deals)||[],'warn')
     +churnedTable(rm)+'</div></div>';
+}
+function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
+function dealsTable(title,deals,tone){
+  if(!deals||!deals.length) return '';
+  return '<div style="margin-top:18px"><div class="sect" style="font-weight:700;margin-bottom:8px">'+escapeHtml(title)+' · top '+deals.length+' by value</div>'
+    +'<div style="overflow-x:auto"><table><thead><tr><th>Deal</th><th>Created</th><th>Start</th><th>Term</th><th>Signup type</th><th style="text-align:right">ARR</th><th style="text-align:right">MRR</th></tr></thead><tbody>'
+    +deals.map(d=>'<tr><td><strong>'+escapeHtml((d.name||'Unnamed').slice(0,42))+'</strong></td>'
+      +'<td class="muted">'+fmtDate(d.created)+'</td><td class="muted">'+fmtDate(d.start)+'</td>'
+      +'<td>'+(d.term_months?escapeHtml(d.term_months)+' mo':'<span class="muted">—</span>')+'</td>'
+      +'<td>'+(d.signup_type?escapeHtml(d.signup_type):'<span class="muted">—</span>')+'</td>'
+      +'<td style="text-align:right" class="mono">'+(d.arr_usd?fmt(d.arr_usd):'<span class="muted">—</span>')+'</td>'
+      +'<td style="text-align:right" class="mono">'+(d.mrr_usd?fmt(d.mrr_usd):'<span class="muted">—</span>')+'</td></tr>').join('')
+    +'</tbody></table></div></div>';
 }
 function churnedTable(rm){
   const rows=(rm&&rm.churned_detail)||[];

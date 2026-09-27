@@ -624,7 +624,10 @@ class HubSpot:
             # 100 (sorted by amount desc via closedate) is plenty for the top-deals list
             # and a representative ARR sum. Paginating every page made this a 45s call.
             body = {"filterGroups": [{"filters": filters}],
-                    "properties": ["dealname", "amount", "closedate"],
+                    "properties": ["dealname", "amount", "closedate", "createdate",
+                                    "deal_signed_date", "contract_length__months_",
+                                    "dealtype", "customer_type", "billing_type",
+                                    "hs_arr", "hs_mrr"],
                     "limit": 100, "sorts": [{"propertyName": "amount", "direction": "DESCENDING"}]}
             try:
                 res = config.http_post_readonly(
@@ -635,13 +638,25 @@ class HubSpot:
             deals, page_sum = [], 0.0
             for r in res.get("results", []):
                 p = r.get("properties", {})
-                try:
-                    amt = float(p.get("amount") or 0)
-                except (TypeError, ValueError):
-                    amt = 0.0
+                def _f(key):
+                    try:
+                        return float(p.get(key) or 0)
+                    except (TypeError, ValueError):
+                        return 0.0
+                amt = _f("amount")
                 page_sum += amt
-                deals.append({"name": p.get("dealname"), "amount_usd": amt,
-                              "closed": p.get("closedate")})
+                deals.append({
+                    "name": p.get("dealname"),
+                    "amount_usd": amt,
+                    "arr_usd": _f("hs_arr") or amt,
+                    "mrr_usd": _f("hs_mrr"),
+                    "closed": p.get("closedate"),
+                    "created": p.get("createdate"),
+                    "start": p.get("deal_signed_date"),
+                    "term_months": p.get("contract_length__months_"),
+                    "signup_type": p.get("dealtype") or p.get("customer_type"),
+                    "billing": p.get("billing_type"),
+                })
             return deals, total, page_sum
 
         upsell, up_total, up_sum = _search([
