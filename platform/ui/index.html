@@ -1076,10 +1076,25 @@ function adSyncScope(){
 }
 function adGreet(){
   const p=window.CS_PRINCIPAL;
-  const first=(p&&(p.name||p.email)||'there').split('@')[0].split(' ')[0];
-  const cap=first.charAt(0).toUpperCase()+first.slice(1);
-  const scope=p?(p.role==='admin'?"I've got the full portfolio in front of me":"I've got your accounts in front of me"):"I'm ready";
-  const line="Hi "+escapeHtml(cap)+" 👋 I'm Jane. "+scope+". What's on your mind?";
+  // Prefer the person's proper first name (from their full name), fall back gracefully.
+  let who='there';
+  if(p&&p.name&&/[a-zA-Z]/.test(p.name)&&p.name.indexOf('@')<0){who=p.name.split(' ')[0];}
+  else if(p&&(p.name||p.email)){who=(p.name||p.email).split('@')[0].replace(/[._-]+/g,' ').split(' ')[0];}
+  const cap=who.charAt(0).toUpperCase()+who.slice(1);
+  const hour=new Date().getHours();
+  const tod=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
+  // Lead with a real, live headline so Jane immediately shows value.
+  const s=(DATA&&DATA.summary)||{};
+  let insight='';
+  const p1=s.priority1||0, atRisk=s.at_risk_arr_usd||0;
+  const scopeWord=(p&&p.role==='admin')?'across the portfolio':'in your book';
+  if(p1>0){
+    insight="You have <b>"+p1+" priority action"+(p1>1?'s':'')+"</b> that need"+(p1>1?'':'s')+" attention within 24 hours "+scopeWord+
+      (atRisk?", with "+fmt(atRisk)+" of ARR at risk":'')+". I can walk you through "+(p1>1?'them':'it')+" whenever you're ready.";
+  }else{
+    insight="Nothing is on fire "+scopeWord+" right now, which is the good news. I can help you look ahead, at renewals, expansion opportunities, or any account you want to dig into.";
+  }
+  const line=tod+", "+escapeHtml(cap)+". I'm Jane, your CS analyst. "+insight;
   const dom=document.getElementById('adThread');
   dom.innerHTML='<div class="ad-msg assistant">'+line+'</div>';
 }
