@@ -80,9 +80,11 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .panel .body{padding:6px 8px}.panel .body.pad{padding:18px 22px}
 
 table{width:100%;border-collapse:collapse;font-size:.87em}
-th{text-align:left;padding:11px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+th{text-align:left;padding:11px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:#fafbfe;border-bottom:1px solid var(--line)}
 td{padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}
-tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#f8f9ff}
+tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#f6f7ff}
+tbody tr:nth-child(even) td{background:#fcfcfe}
+tbody tr:nth-child(even).click:hover td{background:#f6f7ff}
 .pill{display:inline-block;border-radius:999px;padding:3px 11px;font-size:.72em;font-weight:700;white-space:nowrap}
 .g{background:var(--greenbg);color:var(--green)}.a{background:var(--amberbg);color:var(--amber)}.r{background:var(--redbg);color:var(--red)}
 .protect{background:var(--redbg);color:var(--red)}.expand{background:var(--brandsoft);color:var(--brand)}.use{background:#f3ecff;color:#8b5cf6}
@@ -107,6 +109,9 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 
 .scrim{position:fixed;inset:0;background:rgba(11,18,32,.42);opacity:0;pointer-events:none;transition:opacity .2s}.scrim.on{opacity:1;pointer-events:auto}
 .drawer{position:fixed;top:0;right:0;width:480px;max-width:94vw;height:100%;background:#fff;box-shadow:var(--shadowlg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);overflow:auto;z-index:20}.drawer.on{transform:translateX(0)}
+/* When the docked agent is open, slide the account drawer to its left so both are visible. */
+body.dock-open .drawer{right:420px}
+@media(max-width:1200px){body.dock-open .drawer{right:0;z-index:62}}
 .drawer .dhead{padding:24px 26px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
 .drawer .dbody{padding:20px 26px}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
@@ -522,10 +527,10 @@ function render(v){
       return;
     }
     document.getElementById('stats').innerHTML=[
-      ['Accounts',s.accounts,'in your book',''],
-      ['Priority 1 risk',s.priority1,'action within 24h',s.priority1>0?'warn':''],
+      ['Accounts',s.accounts,(s.account_scope==='csm'?'in your book':'in the portfolio'),''],
+      ['Priority 1 risk',s.priority1,'need action within 24h',s.priority1>0?'warn':''],
       ['Portfolio ARR',fmt(s.total_arr_usd),'under management',''],
-      ['Revenue at risk',fmt(s.at_risk_arr_usd),'in red accounts',s.at_risk_arr_usd>0?'warn':''],
+      ['Open actions',DATA.tasks.length,'across all mandates',DATA.tasks.length>0?'':'good'],
       ['Noise suppressed',s.suppressed,'false positives avoided','good']
     ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
     document.getElementById('dash-tasks').innerHTML=taskTable(DATA.tasks.slice(0,6),true);

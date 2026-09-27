@@ -407,10 +407,27 @@ def _owner_account_answer(question: str, accounts: dict, queue: dict,
                           csm_owner: str | None = None) -> str | None:
     """Return a grounded owner directory or named-owner brief when explicitly requested."""
     question_lower = question.lower()
-    owner_terms = ("owner", "csm", "my accounts", "account book", "portfolio book")
-    scoped_terms = ("next", "task", "account", "portfolio", "book", "own")
-    if not any(term in question_lower for term in owner_terms) \
-            and not (csm_owner and any(term in question_lower for term in scoped_terms)):
+    # Only handle EXPLICIT directory / ownership-lookup questions here. Anything
+    # analytical (most critical, why, compare, risk, next action) must go to the real
+    # agent, which reasons over evidence. A brittle keyword match must never hijack a
+    # smart question just because it contains the word "owner".
+    directory_intent = any(t in question_lower for t in (
+        "who are the owners", "who are all", "list owners", "list the owners",
+        "portfolio owners", "all owners", "all the owners", "who owns what",
+        "owners and accounts", "show owners", "who are our owners"))
+    my_book_intent = bool(csm_owner) and any(t in question_lower for t in (
+        "my accounts", "my book", "my portfolio", "what should i work",
+        "my next", "my tasks", "accounts do i", "do i own"))
+    named_owner_intent = any(
+        (str(a.get("hubspot", {}).get("csm_owner") or "").strip().casefold() in question_lower)
+        for a in accounts.values() if a.get("hubspot", {}).get("csm_owner"))
+    # Analytical questions (most/critical/why/risk/compare/priority) are NOT owner lookups.
+    analytical = any(t in question_lower for t in (
+        "critical", "most", "why", "risk", "compare", "priorit", "urgent", "worst",
+        "fastest", "faster", "act ", "action", "churn", "health", "expansion", "renew"))
+    if analytical and not directory_intent:
+        return None
+    if not (directory_intent or my_book_intent or named_owner_intent):
         return None
 
     grouped: dict[str, list[dict]] = {}
@@ -420,7 +437,8 @@ def _owner_account_answer(question: str, accounts: dict, queue: dict,
         grouped.setdefault(owner, []).append(account)
 
     all_owner_terms = ("who are the owners", "portfolio owners", "all owners",
-                       "list owners", "who are all portfolio owners")
+                       "list owners", "who are all portfolio owners", "all the owners",
+                       "who owns what", "owners and accounts", "show owners")
     if any(term in question_lower for term in all_owner_terms):
         assigned = {o: v for o, v in grouped.items() if o != "Unassigned"}
         unassigned = grouped.get("Unassigned", [])
@@ -458,8 +476,9 @@ def _owner_account_answer(question: str, accounts: dict, queue: dict,
                 return f"Yes. **{account_name}** is owned by **{selected_owner}**."
             return f"No. **{account_name}** is owned by **{actual_owner}**, not **{selected_owner}**."
     if selected_owner is None:
-        owners = sorted(owner for owner in grouped if owner != "Unassigned")
-        return "I do not have a CSM identity for this session yet. Available owners: " + ", ".join(owners) + "."
+        # No specific owner matched: let the real agent answer rather than emitting a
+        # confusing 'no CSM identity' message.
+        return None
 
     tasks_by_account: dict[str, list[dict]] = {}
     for task in queue.get("tasks", []):
