@@ -332,16 +332,24 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .ad-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:7px;padding:5px 10px;font-size:.78em;cursor:pointer}
 .ad-btn:hover{background:rgba(255,255,255,.2)}
 .ad-context{padding:8px 14px;background:var(--brandsoft);color:var(--brand);font-size:.78em;font-weight:600;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:7px}
-.ad-thread{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--bg)}
-.ad-msg{max-width:92%;padding:10px 13px;border-radius:12px;line-height:1.5;font-size:.88em;white-space:normal;overflow-wrap:anywhere}
-.ad-msg.user{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-right-radius:4px}
-.ad-msg.assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-bottom-left-radius:4px}
-.ad-msg.assistant h3,.ad-msg.assistant h4{margin:8px 0 4px;font-size:1em}
-.ad-msg.assistant strong{color:var(--ink)}
+.ad-thread{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:18px;background:var(--surface)}
+.ad-row{display:flex;gap:10px;align-items:flex-start}
+.ad-row.jane{flex-direction:row}
+.ad-row.user{flex-direction:row;justify-content:flex-end}
+.ad-av{width:28px;height:28px;flex:0 0 28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.78em;font-weight:800;margin-top:2px}
+.ad-av.jane{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.ad-av.you{background:var(--brandsoft);color:var(--brand)}
+.ad-msg{line-height:1.6;font-size:.9em;white-space:normal;overflow-wrap:anywhere;padding:0}
+.ad-msg.user{max-width:82%;color:var(--ink);background:var(--brandsoft);border-radius:14px 14px 4px 14px;padding:9px 13px}
+.ad-msg.assistant{flex:1;color:var(--ink)}
+.ad-who{font-size:.72em;font-weight:800;color:var(--brand);letter-spacing:.02em;margin-bottom:3px}
+.ad-msg.assistant h3,.ad-msg.assistant h4{margin:10px 0 4px;font-size:1em}
+.ad-msg.assistant strong{color:var(--ink);font-weight:700}
 .ad-msg.assistant ul{margin:6px 0;padding-left:18px}
-.ad-msg.thinking{align-self:flex-start;color:var(--ink2);font-size:.85em;display:flex;align-items:center;gap:8px}
-.ad-msg.err{align-self:flex-start;background:var(--redbg);border:1px solid #f3c2c4;color:#a3282c}
-.ad-scope-line{align-self:center;font-size:.72em;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.ad-msg.assistant p{margin:6px 0}
+.ad-msg.thinking{color:var(--ink2);font-size:.86em;display:flex;align-items:center;gap:8px}
+.ad-msg.err{background:var(--redbg);border:1px solid #f3c2c4;color:#a3282c;border-radius:10px;padding:9px 12px}
+.ad-scope-line{align-self:center;font-size:.72em;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
 .jane-suggest{display:grid;gap:9px;margin-top:6px}
 .jane-sg{display:flex;align-items:flex-start;gap:11px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 13px;cursor:pointer;transition:border-color .12s,box-shadow .12s,transform .12s;width:100%}
 .jane-sg:hover{border-color:var(--brand);box-shadow:var(--shadow);transform:translateY(-1px)}
@@ -1076,40 +1084,49 @@ function adSyncScope(){
 }
 function adGreet(){
   const p=window.CS_PRINCIPAL;
-  // Prefer the person's proper first name (from their full name), fall back gracefully.
-  let who='there';
-  if(p&&p.name&&/[a-zA-Z]/.test(p.name)&&p.name.indexOf('@')<0){who=p.name.split(' ')[0];}
-  else if(p&&(p.name||p.email)){who=(p.name||p.email).split('@')[0].replace(/[._-]+/g,' ').split(' ')[0];}
-  const cap=who.charAt(0).toUpperCase()+who.slice(1);
+  const known=adUserName();
   const hour=new Date().getHours();
   const tod=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
-  // Lead with a real, live headline so Jane immediately shows value.
   const s=(DATA&&DATA.summary)||{};
-  let insight='';
   const p1=s.priority1||0, atRisk=s.at_risk_arr_usd||0;
   const scopeWord=(p&&p.role==='admin')?'across the portfolio':'in your book';
+  let insight;
   if(p1>0){
-    insight="You have <b>"+p1+" priority action"+(p1>1?'s':'')+"</b> that need"+(p1>1?'':'s')+" attention within 24 hours "+scopeWord+
+    insight="You have <b>"+p1+" priority action"+(p1>1?'s':'')+"</b> needing attention within 24 hours "+scopeWord+
       (atRisk?", with "+fmt(atRisk)+" of ARR at risk":'')+". I can walk you through "+(p1>1?'them':'it')+" whenever you're ready.";
   }else{
-    insight="Nothing is on fire "+scopeWord+" right now, which is the good news. I can help you look ahead, at renewals, expansion opportunities, or any account you want to dig into.";
+    insight="Nothing urgent "+scopeWord+" right now. I can help you look ahead, at renewals, expansion opportunities, or any account you'd like to dig into.";
   }
-  const line=tod+", "+escapeHtml(cap)+". I'm Jane, your CS analyst. "+insight;
-  const dom=document.getElementById('adThread');
-  dom.innerHTML='<div class="ad-msg assistant">'+line+'</div>';
+  adThread=[];
+  if(known){
+    adThread.push({role:'assistant',content:tod+", "+known+". I'm Jane, your CS analyst. "+insight});
+  }else{
+    // Login name isn't a real name (e.g. tferreira): greet, ask what to call them.
+    window._JANE_ASKING_NAME=true;
+    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. "+insight+"<br><br>Before we start, what should I call you?"});
+  }
+  adRender();
 }
 function adSuggest(q){document.getElementById('adInput').value=q;sendDockMessage();}
 function adAutoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,180)+'px';}
 function newAgentThread(){adThread=[];adGreet();document.getElementById('adInput').value='';}
+function adUserName(){
+  try{const n=localStorage.getItem('cs_user_name'); if(n) return n;}catch(e){}
+  const p=window.CS_PRINCIPAL;
+  if(p&&p.name&&/[a-zA-Z]/.test(p.name)&&p.name.indexOf('@')<0) return p.name.split(' ')[0];
+  return null; // unknown -> Jane will ask
+}
 function adRender(){
   const dom=document.getElementById('adThread');
+  const uname=adUserName()||'You';
+  const uinitial=(uname[0]||'Y').toUpperCase();
   dom.innerHTML=adThread.map((m,idx)=>{
-    if(m.role==='user') return '<div class="ad-msg user">'+escapeHtml(m.content)+'</div>';
-    if(m.role==='thinking') return '<div class="ad-msg thinking"><span class="ad-dot"></span> '+escapeHtml(m.content)+'</div>';
-    if(m.role==='error') return '<div class="ad-msg err">'+escapeHtml(m.content)+'</div>';
+    if(m.role==='user') return '<div class="ad-row user"><div class="ad-msg user">'+escapeHtml(m.content)+'</div><div class="ad-av you">'+escapeHtml(uinitial)+'</div></div>';
+    if(m.role==='thinking') return '<div class="ad-row jane"><div class="ad-av jane">✦</div><div class="ad-msg thinking"><span class="ad-dot"></span> '+escapeHtml(m.content)+'</div></div>';
+    if(m.role==='error') return '<div class="ad-row jane"><div class="ad-av jane">✦</div><div class="ad-msg err">'+escapeHtml(m.content)+'</div></div>';
     if(m.role==='scope') return '<div class="ad-scope-line">'+escapeHtml(m.content)+'</div>';
-    // Assistant: answer + reviewable evidence + feedback that feeds the learning loop.
-    return '<div class="ad-msg assistant">'+renderAgentAnswer(m.content)+adEvidence(m)+adFeedback(m,idx)+'</div>';
+    // Assistant (Jane): avatar + name label + answer + evidence + feedback.
+    return '<div class="ad-row jane"><div class="ad-av jane">✦</div><div class="ad-msg assistant"><div class="ad-who">Jane</div>'+renderAgentAnswer(m.content)+adEvidence(m)+adFeedback(m,idx)+'</div></div>';
   }).join('');
   dom.scrollTop=dom.scrollHeight;
 }
@@ -1149,6 +1166,17 @@ async function sendDockMessage(){
   const q=input.value.trim(); if(!q) return;
   input.value='';
   input.style.height='auto';
+  // If Jane asked for the user's name, capture this reply as their name.
+  if(window._JANE_ASKING_NAME){
+    window._JANE_ASKING_NAME=false;
+    const name=q.replace(/^(i'?m|i am|my name is|it'?s|call me|this is)\s+/i,'').replace(/[.!]+$/,'').trim().split(/\s+/)[0];
+    const clean=name?name.charAt(0).toUpperCase()+name.slice(1):q;
+    try{localStorage.setItem('cs_user_name',clean);}catch(e){}
+    adThread.push({role:'user',content:q});
+    adThread.push({role:'assistant',content:"Lovely to meet you, "+escapeHtml(clean)+". I'll remember that. What would you like to look at first, your priorities today, a specific account, or where the growth is?"});
+    adRender();
+    return;
+  }
   adBusy=true;
   adThread.push({role:'user',content:q});
   adThread.push({role:'thinking',content:'Give me a moment while I look into that for you'});
