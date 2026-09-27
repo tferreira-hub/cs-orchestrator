@@ -367,6 +367,15 @@ def _portfolio_evidence_numbers(queue: dict, accounts: dict) -> set[str]:
     # Counts 0..len(accounts) are always safe to cite.
     for i in range(0, len(accounts) + 1):
         values.add(str(i))
+    # Retention figures (GRR, target, churned ARR) are legitimate portfolio facts.
+    try:
+        import engine as _eng
+        ret = _eng._retention_metrics(accounts, {}) if hasattr(_eng, "_retention_metrics") else {}
+        for k in ("grr_pct", "base_arr_usd", "churned_arr_usd", "expansion_pipeline_arr_usd"):
+            _norm(ret.get(k))
+        _norm((ret.get("target") or {}).get("grr_pct"))
+    except Exception:  # noqa: BLE001
+        pass
     return values
 
 
@@ -788,9 +797,32 @@ def run(question: str, account_id: str | None = None,
                 "harness": {"queue_judge": tools[3].get("judge", {}),
                             "route": "deterministic_owner_brief"}}
     roster_lines = []
+    try:
+        import engine as _engine
+    except Exception:  # noqa: BLE001
+        _engine = None
     for aid, a in accounts.items():
         hs = a.get("hubspot", {})
-        roster_lines.append(f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | ARR={hs.get('arr_usd')} | state={hs.get('state') or 'unknown'} | owner={hs.get('csm_owner') or 'Unassigned'}")
+        health = ""
+        if _engine is not None:
+            try:
+                h = _engine.health_score(a)
+                if h.get("computable"):
+                    health = f" | health={h.get('score')}({h.get('band')})"
+            except Exception:  # noqa: BLE001
+                pass
+        churn = a.get("churn", {}) or {}
+        cstat = churn.get("churn_status")
+        lifecycle = hs.get("lifecycle_stage")
+        flags = ""
+        if cstat:
+            flags += f" | churn_status={cstat}"
+        if lifecycle:
+            flags += f" | lifecycle={lifecycle}"
+        roster_lines.append(
+            f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | "
+            f"ARR={hs.get('arr_usd')} | state={hs.get('state') or 'unknown'} | "
+            f"owner={hs.get('csm_owner') or 'Unassigned'}{health}{flags}")
     account_guidance = ""
     if account_id:
         selected = accounts.get(account_id) or accounts.get(account_id.upper()) or accounts.get(account_id.lower())
@@ -814,10 +846,67 @@ def run(question: str, account_id: str | None = None,
     else:
         scope_guidance = ("\n[Scope] You are answering for an Admin with full-portfolio visibility across "
                           f"every CSM book ({len(accounts)} accounts). You may compare across owners.\n")
-    primed = (question.strip() + account_guidance + intent_guidance + scope_guidance +
+    # A compact portfolio-knowledge block so Jane can answer aggregate questions (totals,
+    # health mix, retention, ARR distribution) directly and accurately, scoped to what she
+    # can see. Built from the same live data; nothing invented.
+    knowledge = ""
+    try:
+        import engine as _eng2
+        total_arr = sum((a.get("hubspot", {}).get("arr_usd") or 0) for a in accounts.values()
+                        if isinstance(a.get("hubspot", {}).get("arr_usd"), (int, float)))
+        bands = {"green": 0, "amber": 0, "red": 0}
+        seg: dict = {}
+        state: dict = {}
+        churned = 0
+        for a in accounts.values():
+            try:
+                b = _eng2.health_score(a).get("band")
+                if b in bands:
+                    bands[b] += 1
+            except Exception:  # noqa: BLE001
+                pass
+            hs = a.get("hubspot", {})
+            arr = hs.get("arr_usd") or 0
+            s = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+            seg[s] = seg.get(s, 0) + (arr if isinstance(arr, (int, float)) else 0)
+            st = _eng2._normalise_state(hs.get("state"))
+            state[st] = state.get(st, 0) + (arr if isinstance(arr, (int, float)) else 0)
+            lc = str(hs.get("lifecycle_stage") or "").lower()
+            if lc in {"churned", "churned customer"}:
+                churned += 1
+        ret = _eng2._retention_metrics(accounts, {}) if hasattr(_eng2, "_retention_metrics") else {}
+        seg_str = ", ".join(f"{k} ${int(v):,}" for k, v in sorted(seg.items(), key=lambda x: -x[1]) if v)
+        state_str = ", ".join(f"{k} ${int(v):,}" for k, v in sorted(state.items(), key=lambda x: -x[1]) if v)
+        knowledge = (
+            "\n[Portfolio knowledge — use these aggregates directly, they are correct]\n"
+            f"Total accounts in scope: {len(accounts)}. Total ARR: ${int(total_arr):,}. "
+            f"Churned (lifecycle): {churned}. Health mix: {bands['green']} healthy, {bands['amber']} watch, {bands['red']} at risk.\n"
+            f"ARR by segment: {seg_str or 'n/a'}.\n"
+            f"ARR by state: {state_str or 'n/a'}.\n"
+            + (f"Gross revenue retention: {ret.get('grr_pct')}% vs target {(ret.get('target') or {}).get('grr_pct')}%; "
+               f"churned ARR ${int(ret.get('churned_arr_usd') or 0):,}.\n" if ret and ret.get("computable") else "")
+        )
+    except Exception:  # noqa: BLE001
+        knowledge = ""
+    # Is this an ACTION question (what to do) or a KNOWLEDGE question (facts/analysis)?
+    q_low = question.lower()
+    action_intent = any(t in q_low for t in
+                        ("action", "do today", "should i", "priorit", "next", "focus on",
+                         "protect", "who needs", "what needs", "recommend", "handle", "work on"))
+    if action_intent:
+        queue_guidance = ("\n\n[Answer guidance] This is an action question. Lead with the specific "
+                          "recommended actions from the deterministic queue (call get_task_queue), each "
+                          "with the account, what to do, why, and its SLA.\n")
+    else:
+        queue_guidance = ("\n\n[Answer guidance] This is an analysis/knowledge question, NOT a to-do "
+                          "request. Answer it directly and specifically using the Portfolio knowledge and "
+                          "roster above (and per-account tools if needed). Do NOT default to listing the "
+                          "task queue or the same protect actions, answer exactly what was asked with the "
+                          "figures and accounts relevant to THIS question.\n")
+    primed = (question.strip() + account_guidance + intent_guidance + scope_guidance + knowledge + queue_guidance +
               "\n\n[Portfolio in scope — already fetched, use tools only for deeper per-account signals]\n" +
               "\n".join(roster_lines) +
-              "\n\n[Harness requirement] Call get_task_queue before making portfolio recommendations. Treat its evidence and judge verdict as authoritative; do not invent figures.\n" +
+              "\n\n[Harness] The deterministic queue and its judge are authoritative for recommendations; do not invent figures.\n" +
               "\n[Response style] Speak like a thoughtful senior CS partner, not a system log. For top-actions questions, lead with the requested actions and keep the answer concise (roughly 150-250 words). Use natural prose or a short numbered list, not a repeated full queue table. For each action, give the account, what to do, why it matters, and the exact SLA from its priority: P1 means within 24 hours, P2 means today, P3 means this week, P4 means before the renewal milestone, and P5 means this week. Distinguish active risk from churned-account recovery and contact hygiene. Do not say all Protect actions have a 24-hour SLA. Do not mention tool calls, harness checks, judge verdicts, correction attempts, raw source JSON, null values, or internal implementation terms. Mention data gaps only when they change the recommendation, in one short closing note. Do not repeat the structured action packet because the UI already displays it.\n"+
               "[Evidence rule] Do not generalize categorical facts such as Churned status across accounts. Say an account is Churned only when that account's own Redshift evidence says Churned. "
               "Do not claim that an external dunning, suspension, write-back, or outreach action has executed unless the tool result explicitly confirms execution; describe a handoff as a handoff.\n"
@@ -833,7 +922,14 @@ def run(question: str, account_id: str | None = None,
         # accounts' own signals, not the portfolio queue.
         is_comparison = any(t in q_lower for t in ("compare", " vs ", "versus", "which is worse",
                                                    "which is better", "difference between"))
-        account_focus = bool(account_id) or named_account or is_comparison
+        # Knowledge/analysis questions (retention, health summary, ARR, distribution) are
+        # answered from portfolio knowledge, not the task queue, so they are exempt from the
+        # queue requirement just like account-focused questions.
+        knowledge_intent = (not action_intent) and any(t in q_low for t in
+            ("retention", "grr", "ndr", "health", "arr", "revenue", "segment", "state",
+             "region", "distribution", "overall", "summary", "how many", "total",
+             "who owns", "owner", "expansion", "churn"))
+        account_focus = bool(account_id) or named_account or is_comparison or knowledge_intent
         answer = ""
         findings = []
         for attempt in range(MAX_CORRECTIONS + 1):

@@ -213,6 +213,17 @@ body.dock-open .drawer{right:420px}
 .dt-big{font-size:2em;font-weight:800;letter-spacing:-.02em;margin-top:6px}
 .dt-sub{font-size:.85em;opacity:.9;margin-top:3px}
 .dt-body{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:18px 20px 40px}
+.dt-body table{width:100%;table-layout:fixed}
+.dt-body td,.dt-body th{overflow-wrap:anywhere}
+.deal-cards{display:grid;gap:10px}
+.deal-card{border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:11px;padding:12px 14px;background:var(--surface)}
+.deal-card .dc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.deal-card .dc-name{font-weight:700;color:var(--ink);font-size:.9em;overflow-wrap:anywhere}
+.deal-card .dc-arr{font-weight:800;color:var(--ink);white-space:nowrap;font-variant-numeric:tabular-nums}
+.deal-card .dc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:11px}
+.deal-card .dc-grid>div{display:flex;flex-direction:column}
+.deal-card .dc-grid span{font-size:.66em;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.deal-card .dc-grid b{font-size:.82em;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}
 .dt-note{background:var(--amberbg);color:#8a5a04;border:1px solid #f2dca6;border-radius:9px;padding:10px 13px;font-size:.8em;line-height:1.45;margin-bottom:14px}
 .churn-cards{display:grid;gap:11px}
 .cc2{border:1px solid var(--line);border-left:3px solid var(--red);border-radius:11px;padding:13px 15px;background:var(--surface);cursor:pointer;transition:box-shadow .12s,transform .12s}
@@ -287,7 +298,10 @@ body.dock-open .drawer{right:420px}
 .intdetail.cfg{background:var(--amberbg);color:#8a5a04;border:1px solid #f2dca6}
 .intdetail.pend{background:#f1f3f8;color:var(--ink2);border:1px solid var(--line)}
 /* Docked CS Agent panel + launcher */
-.agent-launcher{position:fixed;right:22px;bottom:22px;z-index:60;display:flex;align-items:center;gap:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border:none;border-radius:999px;padding:13px 20px;font:700 14px Inter,system-ui,sans-serif;box-shadow:0 10px 28px rgba(91,91,240,.45);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.agent-launcher{position:fixed;right:22px;bottom:22px;z-index:60;display:none;align-items:center;gap:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border:none;border-radius:999px;padding:13px 20px;font:700 14px Inter,system-ui,sans-serif;box-shadow:0 10px 28px rgba(91,91,240,.45);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.nav-jane{background:linear-gradient(135deg,var(--brand),var(--brand2))!important;color:#fff!important;font-weight:700!important;margin-top:4px}
+.nav-jane .ico{color:#fff!important}
+.nav-jane:hover{filter:brightness(1.08)}
 .agent-launcher:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(91,91,240,.55)}
 .agent-launcher .al-ico{font-size:1.05em}
 .agent-launcher.hidden{display:none}
@@ -358,6 +372,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
       <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
       <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
+      <button class="nav-jane" onclick="toggleAgentDock(true)"><span class="ico">✦</span> Ask Jane</button>
     </div></div>
     <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
       <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Actions <span class="count" id="c-protect"></span></button>
@@ -681,14 +696,17 @@ function openRevDetail(kind){
 function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
 function dealsTable(deals){
   if(!deals||!deals.length) return '<div class="empty">No deals in this window.</div>';
-  return '<div style="overflow-x:auto"><table><thead><tr><th>Deal</th><th>Created</th><th>Start</th><th>Term</th><th>Signup</th><th style="text-align:right">ARR</th><th style="text-align:right">MRR</th></tr></thead><tbody>'
-    +deals.map(d=>'<tr><td><strong>'+escapeHtml(d.name||'Unnamed')+'</strong></td>'
-      +'<td class="muted">'+fmtDate(d.created)+'</td><td class="muted">'+fmtDate(d.start)+'</td>'
-      +'<td>'+(d.term_months?escapeHtml(d.term_months)+' mo':'<span class="muted">—</span>')+'</td>'
-      +'<td>'+(d.signup_type?escapeHtml(d.signup_type):'<span class="muted">—</span>')+'</td>'
-      +'<td style="text-align:right" class="mono">'+(d.arr_usd?fmt(d.arr_usd):'<span class="muted">—</span>')+'</td>'
-      +'<td style="text-align:right" class="mono">'+(d.mrr_usd?fmt(d.mrr_usd):'<span class="muted">—</span>')+'</td></tr>').join('')
-    +'</tbody></table></div>';
+  return '<div class="deal-cards">'+deals.map(d=>
+    '<div class="deal-card">'
+    +'<div class="dc-top"><span class="dc-name">'+escapeHtml(d.name||'Unnamed')+'</span>'
+    +'<span class="dc-arr">'+(d.arr_usd?fmt(d.arr_usd):'—')+'</span></div>'
+    +'<div class="dc-grid">'
+    +'<div><span>MRR</span><b>'+(d.mrr_usd?fmt(d.mrr_usd):'—')+'</b></div>'
+    +'<div><span>Term</span><b>'+(d.term_months?escapeHtml(d.term_months)+' mo':'—')+'</b></div>'
+    +'<div><span>Type</span><b>'+(d.signup_type?escapeHtml(d.signup_type):'—')+'</b></div>'
+    +'<div><span>Created</span><b>'+fmtDate(d.created)+'</b></div>'
+    +'<div><span>Start</span><b>'+fmtDate(d.start)+'</b></div>'
+    +'</div></div>').join('')+'</div>';
 }
 function churnedListHtml(rm){
   const rows=(rm&&rm.churned_detail)||[];
@@ -950,7 +968,7 @@ async function loadAudit(){
   const intact=d.chain_intact;
   const banner='<div class="audit-banner '+(intact?'ok':'bad')+'"><b>'+(intact?'✓ Chain verified':'⚠ Chain broken')+'</b>'
     +'<span>'+(intact?'All '+d.count+' entries are intact and tamper-evident (SHA-256 hash chain).':'The audit chain failed verification, an entry may have been altered.')+'</span></div>';
-  if(!entries.length){ el.innerHTML=banner+'<div class="empty">No audited actions yet. Ask the CS Agent or approve a task to create the first entry.</div>'; return; }
+  if(!entries.length){ el.innerHTML=banner+'<div class="empty">No audited actions yet. Ask Jane a question or approve a task to create the first entry.</div>'; return; }
   const evLabel={agent_answer:'AI answer',task_status_change:'Task approval',hubspot_writeback:'HubSpot write-back'};
   el.innerHTML=banner+'<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Detail</th><th>Sources read</th></tr></thead><tbody>'
     +entries.map(e=>{
@@ -1034,15 +1052,8 @@ function adGreet(){
       :'I have your book of accounts loaded, with live signals from HubSpot, Zendesk, Stripe, Pendo and the churn model.')
     :'I work across your live portfolio with signals from HubSpot, Zendesk, Stripe, Pendo and the churn model.';
   const line="Hi "+escapeHtml(cap)+", I'm Jane, your CS analyst. "+scopeLine+" Every answer I give is grounded in that live evidence and checked against your signed Ways of Working. Where would you like to start?";
-  const chip=(q,ico,label,desc)=>'<button class="jane-sg" onclick="adSuggest(\''+q.replace(/'/g,"\\'")+'\')"><span class="jsg-ico">'+ico+'</span><span class="jsg-txt"><b>'+label+'</b><span>'+desc+'</span></span></button>';
   const dom=document.getElementById('adThread');
-  dom.innerHTML='<div class="ad-msg assistant">'+line+'</div>'+
-    '<div class="jane-suggest">'+
-      chip("What are my top priorities today and why?","◆","What needs me today","Ranked actions with the reason behind each")+
-      chip("Which account is most at risk right now, and who owns it?","▲","Biggest risk right now","The account most likely to churn, and the owner")+
-      chip("Where are the strongest expansion opportunities?","➚","Where can we grow","Accounts showing real expansion signals")+
-      chip("Give me a health summary of the whole portfolio.","▚","Portfolio pulse","A quick read on overall health and revenue")+
-    '</div>';
+  dom.innerHTML='<div class="ad-msg assistant">'+line+'</div>';
 }
 function adSuggest(q){document.getElementById('adInput').value=q;sendDockMessage();}
 function adAutoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,180)+'px';}
