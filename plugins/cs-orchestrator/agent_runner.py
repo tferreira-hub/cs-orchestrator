@@ -441,14 +441,22 @@ def _portfolio_evidence_numbers(queue: dict, accounts: dict) -> set[str]:
 
 
 def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool,
-                    question: str = "", account_focus: bool = False) -> list[str]:
+                    question: str = "", account_focus: bool = False,
+                    social: bool = False) -> list[str]:
     """Return blocking harness findings for a model answer.
 
     `account_focus` is True when the question is about a single named account (or one
     is in view). Such questions are answered from that account's own tool evidence and
     do not require the portfolio task queue, so we do not demand get_task_queue for them.
+
+    `social` is True for greetings/acknowledgements. A social reply is conversational and
+    is not expected to carry portfolio evidence, so it is exempt from the queue and numeric
+    checks entirely: a friendly 'good morning' must never be blocked by the harness.
     """
     findings = []
+    # A greeting/social reply carries no evidentiary claims; nothing to validate.
+    if social:
+        return findings
     judge = queue.get("judge", {})
     # The deterministic queue is required only for portfolio-level / recommendation
     # answers. A single-account explainer is grounded by that account's own tools.
@@ -1069,6 +1077,16 @@ def run(question: str, account_id: str | None = None,
                    "good evening", "help", "ok", "cool", "great", "nice"))) or not accounts
         if social:
             account_focus = True
+            # A greeting is not a request for the whole book. Tell Jane to answer like a
+            # human: warm, short, and OFFER to dig in, without listing accounts, priorities
+            # or figures. Citing portfolio numbers on a bare 'hi' is what previously got the
+            # answer blocked by the numeric validator, and it reads like a robot, not Jane.
+            primed += ("\n[Greeting / social message] The user is just saying hello or making a short "
+                       "social remark. Reply like a warm colleague: one or two friendly sentences, greet "
+                       "them by name if you know it, and invite them to tell you what they'd like to look "
+                       "at (their priorities today, a specific account, or where the growth is). Do NOT list "
+                       "accounts, priorities, health states, retention or any numbers. Do NOT launch into a "
+                       "portfolio briefing unless they ask for one.\n")
         answer = ""
         findings = []
         for attempt in range(MAX_CORRECTIONS + 1):
@@ -1091,7 +1109,7 @@ def run(question: str, account_id: str | None = None,
             answer = _clean_agent_text(answer)
             queue_called = tools[2]["queue_called"]
             findings = validate_answer(answer, tools[3], accounts, queue_called, question,
-                                       account_focus=account_focus)
+                                       account_focus=account_focus, social=social)
             transcript.append({"harness": "answer_validation", "attempt": attempt + 1,
                                "findings": findings})
             if not findings:

@@ -699,6 +699,20 @@ def test_agent_validator_requires_queue_and_passing_judge():
         "Northwind Traders needs review.", failing_queue, accounts, True))
 
 
+def test_agent_social_reply_is_exempt_from_harness_validation():
+    sys.path.insert(0, str(PLUGIN))
+    from agent_runner import validate_answer
+
+    accounts = {"au1-1": {"hubspot": {"name": "Northwind Traders", "arr_usd": 12345}}}
+    queue = {"tasks": [], "judge": {"verdict": "UNKNOWN"}}
+    greeting = "Good morning, Tiago. What would you like to look at, your priorities today or a specific account?"
+    # Without the social flag a numberless greeting is fine, but a greeting that happened to
+    # contain figures (or an unknown judge on a non-account-focused turn) would be blocked.
+    numeric_greeting = "Good morning! Across 25 accounts, retention is 98% and 350 things need attention."
+    assert validate_answer(numeric_greeting, queue, accounts, False, "hi jane", social=True) == []
+    assert validate_answer(greeting, queue, accounts, False, "hi jane", social=True) == []
+
+
 def test_agent_meeting_intent_detection():
     sys.path.insert(0, str(PLUGIN))
     import agent_runner
