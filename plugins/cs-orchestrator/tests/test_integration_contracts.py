@@ -1386,3 +1386,20 @@ def test_expansion_score_rewards_healthy_engaged_and_suppresses_churned():
                "zendesk": {"csat_30d": 90}}
     ec = engine.expansion_score(churned)
     assert ec["score"] == 0
+
+
+def test_success_plans_record_and_read(tmp_path, monkeypatch):
+    import importlib, os
+    os.environ["CS_SUCCESS_PLANS_FILE"] = str(tmp_path / "sp.jsonl")
+    import server
+    importlib.reload(server)
+    p = server._record_success_plan({"account_id": "auX", "goal": "Grow placements",
+                                     "baseline": 4.0, "target": 5.0, "deadline": "2026-12-31"},
+                                    {"email": "csm@x"})
+    assert p["plan_id"] and p["goal"] == "Grow placements"
+    plans = server._success_plans_for("auX")
+    assert len(plans) == 1 and plans[0]["target"] == 5.0
+    # account_id + goal are required
+    import pytest
+    with pytest.raises(ValueError):
+        server._record_success_plan({"account_id": "auX"}, None)

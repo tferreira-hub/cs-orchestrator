@@ -21,6 +21,7 @@ import json
 import hashlib
 import os
 import sys
+import uuid
 import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,7 +118,55 @@ TASK_EVENTS = Path(os.environ.get("CS_TASK_EVENTS_FILE", str(Path(__file__).reso
 # and CSM approval is appended with the hash of the previous entry, so any tampering with
 # an earlier record breaks the chain and is detectable.
 AUDIT_LOG = Path(os.environ.get("CS_AUDIT_FILE", str(Path(__file__).resolve().parents[1] / ".cs-audit-trail.jsonl")))
+# Success Plans / Goals (Customer 360 §8): explicit customer goals with target, baseline,
+# deadline and milestones. Append-only JSONL; the latest record per (account, goal) wins.
+SUCCESS_PLANS = Path(os.environ.get("CS_SUCCESS_PLANS_FILE", str(Path(__file__).resolve().parents[1] / ".cs-success-plans.jsonl")))
 import hashlib as _hashlib
+
+
+def _record_success_plan(body: dict, principal: dict | None) -> dict:
+    account_id = str(body.get("account_id") or "").strip()
+    goal = str(body.get("goal") or "").strip()
+    if not account_id or not goal:
+        raise ValueError("account_id and goal are required")
+    plan = {
+        "plan_id": body.get("plan_id") or uuid.uuid4().hex[:12],
+        "account_id": account_id,
+        "goal": goal,
+        "metric": str(body.get("metric") or "").strip() or None,
+        "baseline": body.get("baseline"),
+        "target": body.get("target"),
+        "deadline": str(body.get("deadline") or "").strip() or None,
+        "status": body.get("status") or "on_track",
+        "milestones": body.get("milestones") if isinstance(body.get("milestones"), list) else [],
+        "created_by": (principal or {}).get("email") or (principal or {}).get("name"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    SUCCESS_PLANS.parent.mkdir(parents=True, exist_ok=True)
+    with SUCCESS_PLANS.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(plan, default=str) + "\n")
+    try:
+        record_audit("success_plan_created", principal, {"account_id": account_id, "goal": goal})
+    except Exception:  # noqa: BLE001
+        pass
+    return plan
+
+
+def _success_plans_for(account_id: str) -> list[dict]:
+    if not SUCCESS_PLANS.exists():
+        return []
+    latest: dict[str, dict] = {}
+    for line in SUCCESS_PLANS.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if row.get("account_id") == account_id:
+            latest[row.get("plan_id")] = row  # later lines overwrite earlier (edits)
+    return sorted(latest.values(), key=lambda r: r.get("created_at", ""))
+
 
 
 def _audit_last_hash() -> str:
@@ -576,7 +625,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/accounts/"):
                 acct = path.rsplit("/", 1)[-1]
                 try:
-                    self._json(200, engine.account_detail(acct))
+                    detail = engine.account_detail(acct)
+                    detail["success_plans"] = _success_plans_for(acct)
+                    self._json(200, detail)
                 except engine.ForbiddenError:
                     self._json(403, {"error": "not your account", "account_id": acct})
                 except KeyError:
@@ -651,6 +702,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/playbook/proposals":
                 try:
                     self._json(201, _record_playbook_proposal(body))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path == "/api/success-plans":
+                try:
+                    self._json(201, _record_success_plan(body, principal))
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return

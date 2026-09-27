@@ -217,6 +217,12 @@ body.dock-open .drawer{right:420px}
 .trend-badge.up{background:var(--greenbg);color:var(--green)}
 .trend-badge.flat{background:#eef1f6;color:var(--ink2)}
 .lc-badge{font-size:.5em;font-weight:800;vertical-align:middle;border-radius:999px;padding:3px 10px;background:var(--brandsoft);color:var(--brand);letter-spacing:.02em}
+.sp-card{border-left:3px solid var(--brand);padding:8px 12px;margin-bottom:10px;background:#fcfcfe;border-radius:8px}
+.sp-goal{font-weight:700;color:var(--ink);font-size:.92em}
+.sp-meta{font-size:.78em;color:var(--ink2);margin-top:3px}
+.sp-form{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.sp-form input{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:.85em}
+.sp-form button{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
 .tl{display:flex;flex-direction:column;gap:2px}
 .tl-row{display:flex;gap:11px;align-items:flex-start;padding:7px 0;position:relative}
 .tl-row:not(:last-child):before{content:"";position:absolute;left:4px;top:16px;bottom:-7px;width:2px;background:var(--line)}
@@ -595,6 +601,37 @@ function svgGauge(pct,target,opts){
     +arc(0,100,'#eef1f6',th)+arc(0,val,col,th)
     +'<line x1="'+tx+'" y1="'+ty+'" x2="'+(cx+(r+8)*Math.cos(A+(target/100)*A))+'" y2="'+(cy+(r+8)*Math.sin(A+(target/100)*A))+'" stroke="#0b1220" stroke-width="2"></line>'
     +'</svg>';
+}
+function successPlansHtml(plans, accountId){
+  const rows=(plans||[]).map(p=>{
+    const pct=(typeof p.baseline==='number'&&typeof p.target==='number'&&p.target!==p.baseline)?
+      Math.max(0,Math.min(100,Math.round(((p.current!=null?p.current:p.baseline)-p.baseline)/(p.target-p.baseline)*100))):null;
+    return '<div class="sp-card"><div class="sp-goal">'+escapeHtml(p.goal)+'</div>'
+      +'<div class="sp-meta">'+(p.metric?escapeHtml(p.metric)+' · ':'')
+      +(p.baseline!=null?'baseline '+escapeHtml(String(p.baseline)):'')
+      +(p.target!=null?' → target '+escapeHtml(String(p.target)):'')
+      +(p.deadline?' · by '+escapeHtml(p.deadline):'')+'</div>'
+      +(pct!=null?'<div class="cc-bar-track" style="margin-top:8px"><div class="cc-bar-fill" style="width:'+pct+'%;background:var(--brand)"></div></div>':'')
+      +'</div>';
+  }).join('');
+  return '<div class="sect">Success plan &amp; goals</div><div class="callout">'
+    +(rows||'<span class="muted">No goals set yet. Add one to connect product usage to a commercial outcome.</span>')
+    +'<div class="sp-form"><input id="spGoal_'+escapeHtml(accountId)+'" placeholder="Goal (e.g. Increase placements per consultant)">'
+    +'<input id="spMetric_'+escapeHtml(accountId)+'" placeholder="Metric">'
+    +'<input id="spBase_'+escapeHtml(accountId)+'" placeholder="Baseline" style="max-width:90px">'
+    +'<input id="spTarget_'+escapeHtml(accountId)+'" placeholder="Target" style="max-width:90px">'
+    +'<input id="spDue_'+escapeHtml(accountId)+'" placeholder="Deadline (YYYY-MM-DD)" style="max-width:150px">'
+    +'<button onclick="addSuccessPlan(\''+escapeHtml(accountId)+'\')">Add goal</button></div></div>';
+}
+async function addSuccessPlan(accountId){
+  const g=id=>{const e=document.getElementById(id+'_'+accountId);return e?e.value.trim():'';};
+  const goal=g('spGoal'); if(!goal){return;}
+  const num=v=>{const n=parseFloat(v);return isNaN(n)?undefined:n;};
+  try{
+    const r=await fetch('/api/success-plans',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({account_id:accountId,goal:goal,metric:g('spMetric'),baseline:num(g('spBase')),target:num(g('spTarget')),deadline:g('spDue')})});
+    if(r.ok){openAccount(accountId);} // reload drawer to show the new goal
+  }catch(e){}
 }
 function adoptionHtml(ad){
   if(!ad) return '';
@@ -1513,6 +1550,7 @@ async function openAccount(id){
       (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
       ((d.trend_risks&&d.trend_risks.length)?('<div class="sect">Trend risks</div>'+d.trend_risks.map(r=>'<div class="callout" style="border-left:3px solid '+(r.severity==='high'?'var(--red)':'var(--amber)')+';margin-bottom:8px"><b>'+escapeHtml(r.title)+'</b><div class="sub" style="margin-top:4px">'+escapeHtml(r.evidence)+'</div></div>').join('')):'')+
       adoptionHtml(d.adoption)+
+      successPlansHtml(d.success_plans,id)+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
       timelineHtml(d.timeline)+
       (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
