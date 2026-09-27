@@ -203,6 +203,29 @@ body.dock-open .drawer{right:420px}
 .seg-name{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
 .seg-val{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .seg-pct{color:var(--muted);font-weight:600;font-size:.9em;margin-left:3px}
+/* Detail drawer redesign */
+.dt-head{position:sticky;top:0;z-index:2;padding:22px 24px 18px;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}
+.dt-head.pos{background:linear-gradient(135deg,#0ca678,#0e9f6e)}
+.dt-head.neg{background:linear-gradient(135deg,#e5484d,#c93b40)}
+.dt-close{position:absolute;top:16px;right:18px;background:rgba(255,255,255,.18);border:none;color:#fff;width:30px;height:30px;border-radius:8px;font-size:1em;cursor:pointer}
+.dt-close:hover{background:rgba(255,255,255,.3)}
+.dt-title{font-size:.8em;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.9}
+.dt-big{font-size:2em;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+.dt-sub{font-size:.85em;opacity:.9;margin-top:3px}
+.dt-body{padding:18px 20px 40px}
+.dt-note{background:var(--amberbg);color:#8a5a04;border:1px solid #f2dca6;border-radius:9px;padding:10px 13px;font-size:.8em;line-height:1.45;margin-bottom:14px}
+.churn-cards{display:grid;gap:11px}
+.cc2{border:1px solid var(--line);border-left:3px solid var(--red);border-radius:11px;padding:13px 15px;background:var(--surface);cursor:pointer;transition:box-shadow .12s,transform .12s}
+.cc2:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.cc2-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cc2-name{font-weight:800;color:var(--ink);font-size:.95em}
+.cc2-meta{color:var(--ink2);font-size:.78em;margin-top:3px}
+.cc2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:11px}
+.cc2-grid>div{display:flex;flex-direction:column}
+.cc2-grid span{font-size:.68em;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.cc2-grid b{font-size:.85em;color:var(--ink);margin-top:2px}
+.cc2-open{margin-top:10px;font-size:.78em;color:var(--brand);font-weight:600}
+@media(max-width:560px){.cc2-grid{grid-template-columns:1fr 1fr}}
 .churn-list{display:flex;flex-direction:column;gap:2px}
 .churn-row{border:1px solid var(--line);border-radius:9px;background:#fcfcfe;overflow:hidden}
 .churn-row>summary{display:grid;grid-template-columns:2fr 1.3fr 1.3fr 90px;gap:10px;align-items:center;padding:10px 13px;cursor:pointer;list-style:none;font-size:.86em}
@@ -606,12 +629,30 @@ function renderRevChange(rm){
 }
 // Right-side detail drawer for a revenue-motion metric (keeps the dashboard compact).
 function openRevDetail(kind){
-  const rm=window._RM||{}; let title='', html='';
-  if(kind==='upsell'){title='Upsell deals (booked expansion)';html=dealsTable(((rm.booked||{}).upsell||{}).deals||[]);}
-  else if(kind==='churn'){title='Churn deals (booked)';html=dealsTable(((rm.booked||{}).churn||{}).deals||[]);}
-  else if(kind==='churned'){title='Churned accounts';html=churnedListHtml(rm);}
+  const rm=window._RM||{}; const rc=rm.revenue_change||{};
+  let title='', sub='', bignum='', tone='', html='';
+  if(kind==='upsell'){
+    title='Upsell deals';tone='pos';
+    bignum=fmt(rc.upsell_arr_usd); sub=(rc.upsell_count||0)+' booked expansion deals · '+(rc.window_days?Math.round(rc.window_days/30)+' months':'')+' · '+(rc.upsell_partial?'showing top deals':'complete');
+    html=dealsTable(((rm.booked||{}).upsell||{}).deals||[]);
+  } else if(kind==='churn'){
+    title='Churn deals';tone='neg';
+    bignum=fmt(rc.churn_deal_arr_usd); sub=(rc.churn_count||0)+' booked churn deals · '+(rc.window_days?Math.round(rc.window_days/30)+' months':'')+' · '+(rc.churn_partial?'showing top deals':'complete');
+    html=dealsTable(((rm.booked||{}).churn||{}).deals||[]);
+  } else if(kind==='churned'){
+    title='Churned accounts';tone='neg';
+    const rows=rm.churned_detail||[];
+    bignum=rows.length+' accounts'; sub=fmt(rows.reduce((s,r)=>s+(r.arr_usd||0),0))+' last-known ARR';
+    html=churnedListHtml(rm);
+  }
   const d=document.getElementById('drawer');
-  d.innerHTML='<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span><div style="font-size:1.2em;font-weight:800">'+escapeHtml(title)+'</div></div><div class="dbody"><div class="body pad">'+html+'</div></div>';
+  d.innerHTML='<div class="dt-head '+tone+'">'
+    +'<button class="dt-close" onclick="closeDrawer()" aria-label="Close">✕</button>'
+    +'<div class="dt-title">'+escapeHtml(title)+'</div>'
+    +'<div class="dt-big">'+bignum+'</div>'
+    +'<div class="dt-sub">'+escapeHtml(sub)+'</div></div>'
+    +'<div class="dt-body">'+html+'</div>';
+  d.scrollTop=0;
   d.classList.add('on');document.getElementById('scrim').classList.add('on');
 }
 function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
@@ -629,25 +670,23 @@ function dealsTable(deals){
 function churnedListHtml(rm){
   const rows=(rm&&rm.churned_detail)||[];
   if(!rows.length) return '<div class="empty">No churned accounts.</div>';
-  const withArr=rows.filter(r=>r.arr_usd>0);
-  const totalLost=withArr.reduce((s,r)=>s+(r.arr_usd||0),0);
-  const note=rows.length>withArr.length?(' · '+(rows.length-withArr.length)+' show no current ARR (zeroed on churn in HubSpot)'):'';
-  return '<div class="sub" style="margin-bottom:10px">'+fmt(totalLost)+' last-known ARR'+note+'</div>'
-    +'<div class="churn-list">'+rows.map(r=>{
-      const arr=r.arr_usd>0?fmt(r.arr_usd):'<span class="muted">no current ARR</span>';
-      const aid=r.account_id?" onclick=\"openAccount('"+escapeHtml(r.account_id)+"')\" style=\"cursor:pointer\"":"";
-      return '<details class="churn-row"><summary><span class="cr-name">'+escapeHtml(r.name)+'</span>'
-        +'<span class="cr-seg">'+escapeHtml(r.segment)+'</span>'
-        +'<span class="cr-owner">'+escapeHtml(r.owner)+'</span>'
-        +'<span class="cr-arr">'+arr+'</span></summary>'
-        +'<div class="cr-detail">'
-        +'<div><b>Lifecycle</b><span>'+escapeHtml(r.lifecycle_stage||'unknown')+'</span></div>'
-        +'<div><b>Health</b><span>'+(r.health!=null?r.health:'—')+'</span></div>'
-        +'<div><b>Renewal</b><span>'+(r.renewal_date?escapeHtml(r.renewal_date):'—')+'</span></div>'
-        +'<div><b>Last product visit</b><span>'+(r.days_since_visit!=null?r.days_since_visit+' days ago':'—')+'</span></div>'
-        +(r.account_id?'<div class="cr-open"><a href="javascript:void(0)"'+aid+'>Open full account</a></div>':'')
-        +'</div></details>';
-    }).join('')+'</div>';
+  const missing=rows.filter(r=>!(r.arr_usd>0)).length;
+  const note=missing?('<div class="dt-note">'+missing+' account'+(missing>1?'s':'')+' show no current ARR because HubSpot zeroes ARR on churn. The last booked value lives in the churn deal, not the account record.</div>'):'';
+  return note+'<div class="churn-cards">'+rows.map(r=>{
+    const bandCls=r.health>=67?'g':(r.health>=34?'a':'r');
+    const arr=r.arr_usd>0?fmt(r.arr_usd):'<span class="muted">not on account</span>';
+    const open=r.account_id?" onclick=\"openAccount('"+escapeHtml(r.account_id)+"')\"":"";
+    return '<div class="cc2"'+open+'>'
+      +'<div class="cc2-top"><span class="cc2-name">'+escapeHtml(r.name)+'</span>'
+      +(r.health!=null?'<span class="pill '+bandCls+'">health '+r.health+'</span>':'')+'</div>'
+      +'<div class="cc2-meta">'+escapeHtml(r.segment)+' · '+escapeHtml(r.owner)+'</div>'
+      +'<div class="cc2-grid">'
+      +'<div><span>ARR</span><b>'+arr+'</b></div>'
+      +'<div><span>Lifecycle</span><b>'+escapeHtml(r.lifecycle_stage||'unknown')+'</b></div>'
+      +'<div><span>Last visit</span><b>'+(r.days_since_visit!=null?r.days_since_visit+'d ago':'—')+'</b></div>'
+      +'<div><span>Renewal</span><b>'+(r.renewal_date?escapeHtml(r.renewal_date):'—')+'</b></div>'
+      +'</div>'+(r.account_id?'<div class="cc2-open">Open full account ›</div>':'')+'</div>';
+  }).join('')+'</div>';
 }
 
 async function boot(){

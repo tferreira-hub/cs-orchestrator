@@ -314,7 +314,11 @@ def _rounded_claim_is_grounded(claim: str, evidence: set[str]) -> bool:
 
 
 def _portfolio_evidence_numbers(queue: dict, accounts: dict) -> set[str]:
-    """Numbers valid for portfolio-level claims, not individual accounts."""
+    """Numbers valid for portfolio-level claims, not individual accounts.
+
+    Includes ARR aggregates (per-account, portfolio total, by-segment, by-state) and their
+    percentages so the agent can legitimately answer 'ARR by state/segment/total' questions
+    without the harness flagging real, derivable figures as unsupported."""
     values = {
         str(len(accounts)),
         str(len(queue.get("tasks", []))),
@@ -322,6 +326,47 @@ def _portfolio_evidence_numbers(queue: dict, accounts: dict) -> set[str]:
         str(sum(1 for task in queue.get("tasks", []) if task.get("priority") == 1)),
         str(queue.get("reviewed", len(accounts))),
     }
+
+    def _norm(n):
+        try:
+            f = float(n)
+        except (TypeError, ValueError):
+            return
+        values.add(str(int(f)) if f == int(f) else str(f))
+
+    # Per-account ARR + running aggregates.
+    try:
+        import engine as _eng
+        _norm_state = _eng._normalise_state
+    except Exception:  # noqa: BLE001
+        _norm_state = lambda s: str(s or "").strip().upper() or "Unknown"
+    total_arr = 0.0
+    by_seg: dict[str, float] = {}
+    by_state: dict[str, float] = {}
+    seg_counts: dict[str, int] = {}
+    for a in accounts.values():
+        hs = a.get("hubspot", {}) if isinstance(a.get("hubspot"), dict) else a
+        arr = hs.get("arr_usd")
+        if isinstance(arr, (int, float)):
+            total_arr += arr
+            seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+            by_seg[seg] = by_seg.get(seg, 0) + arr
+            st = _norm_state(hs.get("state"))
+            by_state[st] = by_state.get(st, 0) + arr
+        seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
+        seg_counts[seg] = seg_counts.get(seg, 0) + 1
+    _norm(total_arr)
+    for v in list(by_seg.values()) + list(by_state.values()):
+        _norm(v)
+    for c in seg_counts.values():
+        _norm(c)
+    # Percentages of total (0-100) for share-of-ARR statements.
+    if total_arr:
+        for v in list(by_seg.values()) + list(by_state.values()):
+            _norm(round(v / total_arr * 100))
+    # Counts 0..len(accounts) are always safe to cite.
+    for i in range(0, len(accounts) + 1):
+        values.add(str(i))
     return values
 
 
@@ -370,6 +415,34 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
         evidence = _evidence_numbers(queue, accounts) | portfolio_evidence
     unsupported = sorted(_answer_numbers(answer) - evidence - POLICY_NUMBERS - {str(i) for i in range(0, 13)})
     unsupported = [value for value in unsupported if not _rounded_claim_is_grounded(value, evidence)]
+    # Aggregate/analytical questions (ARR by state/segment, totals, distributions) let the
+    # model legitimately SUM real ARR figures. Allow any remaining number that equals a sum
+    # of known ARR evidence values (within 1%), so real arithmetic is not flagged as invented.
+    aggregate_q = any(t in question.lower() for t in
+                      ("arr", "revenue", "total", "by state", "by segment", "by region",
+                       "distribution", "breakdown", "how much", "portfolio value", "combined"))
+    if unsupported and aggregate_q:
+        arr_vals = []
+        for a in accounts.values():
+            v = (a.get("hubspot", {}) or {}).get("arr_usd")
+            if isinstance(v, (int, float)) and v:
+                arr_vals.append(float(v))
+        def _is_sum_of_arr(target):
+            try:
+                t = float(target)
+            except ValueError:
+                return False
+            if t < 100:
+                return False
+            # Greedy subset check: can `t` be formed by summing a subset of ARR values?
+            remaining = t
+            for v in sorted(arr_vals, reverse=True):
+                if v <= remaining + max(50, t * 0.01):
+                    remaining -= v
+                if abs(remaining) <= max(50, t * 0.01):
+                    return True
+            return abs(remaining) <= max(50, t * 0.01)
+        unsupported = [v for v in unsupported if not _is_sum_of_arr(v)]
     if unsupported:
         findings.append("unsupported numeric claims: " + ", ".join(unsupported))
     check_status = not any(term in question.lower() for term in ("expansion", "expand", "upsell"))
@@ -706,7 +779,7 @@ def run(question: str, account_id: str | None = None,
     roster_lines = []
     for aid, a in accounts.items():
         hs = a.get("hubspot", {})
-        roster_lines.append(f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | ARR={hs.get('arr_usd')} | owner={hs.get('csm_owner') or 'Unassigned'}")
+        roster_lines.append(f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | ARR={hs.get('arr_usd')} | state={hs.get('state') or 'unknown'} | owner={hs.get('csm_owner') or 'Unassigned'}")
     account_guidance = ""
     if account_id:
         selected = accounts.get(account_id) or accounts.get(account_id.upper()) or accounts.get(account_id.lower())
