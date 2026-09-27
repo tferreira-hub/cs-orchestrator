@@ -234,6 +234,20 @@ def authorize_url(redirect_uri: str, state: str, code_challenge: str) -> str:
     return f"{ep['authorize']}?{urllib.parse.urlencode(params)}"
 
 
+def logout_url(return_to: str) -> str | None:
+    """Cognito federated logout: end the hosted-UI/SSO session, then return to `return_to`.
+    Without this, clearing only the local cookie lets Cognito silently re-authenticate the
+    user, so 'Sign out' appears not to work. Returns None when Cognito is not configured."""
+    if not cognito_configured():
+        return None
+    ep = _cognito_endpoints()
+    params = {
+        "client_id": os.environ.get("AUTH_COGNITO_ID", ""),
+        "logout_uri": return_to,
+    }
+    return f"{ep['logout']}?{urllib.parse.urlencode(params)}"
+
+
 def exchange_code(code: str, redirect_uri: str, code_verifier: str) -> dict[str, Any]:
     ep = _cognito_endpoints()
     data = urllib.parse.urlencode({

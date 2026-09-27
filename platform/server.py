@@ -530,7 +530,14 @@ class Handler(BaseHTTPRequestHandler):
         self._finish_login({"email": email, "name": email, "role": role, "groups": ""})
 
     def _handle_logout(self) -> None:
-        self._redirect("/login?logged_out=1", {"Set-Cookie": auth.clear_cookie_header()})
+        # Clear the local session cookie AND end the Cognito SSO session, otherwise the
+        # user is silently signed straight back in. Fall back to the local login page when
+        # Cognito isn't configured (dev).
+        base = os.environ.get("CS_PUBLIC_URL", "").rstrip("/")
+        return_to = (base + "/login?logged_out=1") if base else "/login?logged_out=1"
+        federated = auth.logout_url(return_to) if hasattr(auth, "logout_url") else None
+        self._redirect(federated or "/login?logged_out=1",
+                       {"Set-Cookie": auth.clear_cookie_header()})
 
     def log_message(self, *args):  # quiet console
         pass
