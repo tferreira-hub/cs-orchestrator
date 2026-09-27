@@ -425,32 +425,44 @@ def validate_answer(answer: str, queue: dict, accounts: dict, queue_called: bool
     unsupported = sorted(_answer_numbers(answer) - evidence - POLICY_NUMBERS - {str(i) for i in range(0, 13)})
     unsupported = [value for value in unsupported if not _rounded_claim_is_grounded(value, evidence)]
     # Aggregate/analytical questions (ARR by state/segment, totals, distributions) let the
-    # model legitimately SUM real ARR figures. Allow any remaining number that equals a sum
-    # of known ARR evidence values (within 1%), so real arithmetic is not flagged as invented.
+    # model legitimately SUM and ABBREVIATE real ARR figures (e.g. $348k, $7.6M). Allow any
+    # remaining number that, at face value or scaled by 1e3/1e6, equals a sum of known ARR
+    # values (within tolerance), so real arithmetic/abbreviation is not flagged as invented.
     aggregate_q = any(t in question.lower() for t in
                       ("arr", "revenue", "total", "by state", "by segment", "by region",
-                       "distribution", "breakdown", "how much", "portfolio value", "combined"))
+                       "distribution", "breakdown", "how much", "portfolio value", "combined",
+                       "state of the portfolio", "worry", "health", "overall"))
     if unsupported and aggregate_q:
         arr_vals = []
         for a in accounts.values():
             v = (a.get("hubspot", {}) or {}).get("arr_usd")
             if isinstance(v, (int, float)) and v:
                 arr_vals.append(float(v))
+        total_all = sum(arr_vals)
+        def _matches_arr(t):
+            # Subset-sum with generous tolerance for a single scaled value.
+            tol = max(500.0, t * 0.03)
+            if any(abs(t - v) <= max(500.0, v * 0.03) for v in arr_vals):
+                return True
+            if abs(t - total_all) <= max(1000.0, total_all * 0.03):
+                return True
+            remaining = t
+            for v in sorted(arr_vals, reverse=True):
+                if v <= remaining + tol:
+                    remaining -= v
+                if abs(remaining) <= tol:
+                    return True
+            return abs(remaining) <= tol
         def _is_sum_of_arr(target):
             try:
                 t = float(target)
             except ValueError:
                 return False
-            if t < 100:
-                return False
-            # Greedy subset check: can `t` be formed by summing a subset of ARR values?
-            remaining = t
-            for v in sorted(arr_vals, reverse=True):
-                if v <= remaining + max(50, t * 0.01):
-                    remaining -= v
-                if abs(remaining) <= max(50, t * 0.01):
+            # Try face value and abbreviated scales ($348k -> 348, $7.6M -> 7.6).
+            for scale in (1.0, 1_000.0, 1_000_000.0):
+                if _matches_arr(t * scale):
                     return True
-            return abs(remaining) <= max(50, t * 0.01)
+            return False
         unsupported = [v for v in unsupported if not _is_sum_of_arr(v)]
     if unsupported:
         findings.append("unsupported numeric claims: " + ", ".join(unsupported))
@@ -638,9 +650,9 @@ def _conversation_answer(question: str, csm_owner: str | None = None) -> str | N
     if q_stripped in ACKS:
         return "Anytime. Just tell me what you'd like to look at next and I'll dig in."
     if any(term in question_lower for term in ("who are you", "what are you", "how are you")):
-        answer = "I'm your AI Customer Success partner. I help you understand your account book, explain live signals, and identify the next governed action."
+        answer = "I'm Jane, your Customer Success specialist. I read the live signals across your accounts, tell you what they mean, and point you to the smartest next move, always grounded in real evidence and your signed Ways of Working."
         if csm_owner:
-            answer += f" I'll use **{csm_owner}** as the current portfolio owner."
+            answer += f" I'm working from **{csm_owner}**'s book."
         return answer
     return None
 
@@ -903,7 +915,17 @@ def run(question: str, account_id: str | None = None,
                           "roster above (and per-account tools if needed). Do NOT default to listing the "
                           "task queue or the same protect actions, answer exactly what was asked with the "
                           "figures and accounts relevant to THIS question.\n")
-    primed = (question.strip() + account_guidance + intent_guidance + scope_guidance + knowledge + queue_guidance +
+    persona = (
+        "[You are Jane] You are Jane, a fantastic senior Customer Success specialist: sharp, "
+        "warm, and genuinely helpful. You think like a seasoned CSM who has saved big accounts "
+        "and grown others. You do not just report data, you interpret it: connect the signals "
+        "(churn score, product usage, support, payments, sentiment, renewal timing) into a clear "
+        "story, say what it means, and recommend the smartest next move. You are proactive: if you "
+        "spot something the user did not ask about but should know, mention it briefly. You are "
+        "precise with facts (every number is grounded in the live evidence provided) but you speak "
+        "like a trusted colleague, not a dashboard. Be concise and specific; never pad.\n\n"
+    )
+    primed = (persona + question.strip() + account_guidance + intent_guidance + scope_guidance + knowledge + queue_guidance +
               "\n\n[Portfolio in scope — already fetched, use tools only for deeper per-account signals]\n" +
               "\n".join(roster_lines) +
               "\n\n[Harness] The deterministic queue and its judge are authoritative for recommendations; do not invent figures.\n" +

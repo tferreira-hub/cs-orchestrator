@@ -1049,12 +1049,8 @@ function adGreet(){
   const p=window.CS_PRINCIPAL;
   const first=(p&&(p.name||p.email)||'there').split('@')[0].split(' ')[0];
   const cap=first.charAt(0).toUpperCase()+first.slice(1);
-  // A smarter intro: state who Jane is, what she can see, and offer a concrete starting point.
-  const scopeLine=p?(p.role==='admin'
-      ?'I can see the whole portfolio, every account and every CSM book, with live signals from HubSpot, Zendesk, Stripe, Pendo and the churn model.'
-      :'I have your book of accounts loaded, with live signals from HubSpot, Zendesk, Stripe, Pendo and the churn model.')
-    :'I work across your live portfolio with signals from HubSpot, Zendesk, Stripe, Pendo and the churn model.';
-  const line="Hi "+escapeHtml(cap)+", I'm Jane, your CS analyst. "+scopeLine+" Every answer I give is grounded in that live evidence and checked against your signed Ways of Working. Where would you like to start?";
+  const scope=p?(p.role==='admin'?"I've got the full portfolio in front of me":"I've got your accounts in front of me"):"I'm ready";
+  const line="Hi "+escapeHtml(cap)+" 👋 I'm Jane. "+scope+". What's on your mind?";
   const dom=document.getElementById('adThread');
   dom.innerHTML='<div class="ad-msg assistant">'+line+'</div>';
 }

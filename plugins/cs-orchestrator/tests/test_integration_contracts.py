@@ -922,7 +922,8 @@ def test_identity_conversation_does_not_load_actions():
 
     answer = _conversation_answer("Who are you?", csm_owner="Chris Coombs")
 
-    assert "AI Customer Success partner" in answer
+    assert "Jane" in answer
+    assert "Customer Success specialist" in answer
     assert "Chris Coombs" in answer
     assert "Priority" not in answer
 
