@@ -343,6 +343,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .ad-msg.user{max-width:82%;color:var(--ink);background:var(--brandsoft);border-radius:14px 14px 4px 14px;padding:9px 13px}
 .ad-msg.assistant{flex:1;color:var(--ink)}
 .ad-who{font-size:.72em;font-weight:800;color:var(--brand);letter-spacing:.02em;margin-bottom:3px}
+.ad-who.you{color:var(--ink2);text-align:right}
 .ad-msg.assistant h3,.ad-msg.assistant h4{margin:10px 0 4px;font-size:1em}
 .ad-msg.assistant strong{color:var(--ink);font-weight:700}
 .ad-msg.assistant ul{margin:6px 0;padding-left:18px}
@@ -1087,23 +1088,14 @@ function adGreet(){
   const known=adUserName();
   const hour=new Date().getHours();
   const tod=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
-  const s=(DATA&&DATA.summary)||{};
-  const p1=s.priority1||0, atRisk=s.at_risk_arr_usd||0;
-  const scopeWord=(p&&p.role==='admin')?'across the portfolio':'in your book';
-  let insight;
-  if(p1>0){
-    insight="You have "+p1+" priority action"+(p1>1?'s':'')+" needing attention within 24 hours "+scopeWord+
-      (atRisk?", with "+fmt(atRisk)+" of ARR at risk":'')+". I can walk you through "+(p1>1?'them':'it')+" whenever you're ready.";
-  }else{
-    insight="Nothing urgent "+scopeWord+" right now. I can help you look ahead, at renewals, expansion opportunities, or any account you'd like to dig into.";
-  }
   adThread=[];
   if(known){
-    adThread.push({role:'assistant',content:tod+", "+known+". I'm Jane, your CS analyst. "+insight});
+    // Warm, human greeting, then a soft open (no problem-dump).
+    adThread.push({role:'assistant',content:tod+", "+known+". Lovely to see you. I'm Jane, your CS analyst, here whenever you want a read on your accounts. What would you like to look at today?"});
   }else{
-    // Login name isn't a real name (e.g. tferreira): greet, ask what to call them.
+    // We only have a login, not a real name: greet warmly and ask, nothing else yet.
     window._JANE_ASKING_NAME=true;
-    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. "+insight+" Before we dive in, what should I call you?"});
+    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. It's lovely to meet you. May I ask your name?"});
   }
   adRender();
 }
@@ -1121,7 +1113,7 @@ function adRender(){
   const uname=adUserName()||'You';
   const uinitial=(uname[0]||'Y').toUpperCase();
   dom.innerHTML=adThread.map((m,idx)=>{
-    if(m.role==='user') return '<div class="ad-row user"><div class="ad-msg user">'+escapeHtml(m.content)+'</div><div class="ad-av you">'+escapeHtml(uinitial)+'</div></div>';
+    if(m.role==='user') return '<div class="ad-row user"><div class="ad-msg user"><div class="ad-who you">'+escapeHtml(uname)+'</div>'+escapeHtml(m.content)+'</div><div class="ad-av you">'+escapeHtml(uinitial)+'</div></div>';
     if(m.role==='thinking') return '<div class="ad-row jane"><div class="ad-av jane">✦</div><div class="ad-msg thinking"><span class="ad-dot"></span> '+escapeHtml(m.content)+'</div></div>';
     if(m.role==='error') return '<div class="ad-row jane"><div class="ad-av jane">✦</div><div class="ad-msg err">'+escapeHtml(m.content)+'</div></div>';
     if(m.role==='scope') return '<div class="ad-scope-line">'+escapeHtml(m.content)+'</div>';
