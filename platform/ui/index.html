@@ -1139,12 +1139,19 @@ function adAutoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrol
 function newAgentThread(){adThread=[];adGreet();document.getElementById('adInput').value='';}
 function adUserName(){
   var BAD=['hi','hie','hey','hello','yo','ok','okay','thanks','thank','help','hola',
-           'good','morning','afternoon','evening','jane','you','user','test','sup','na'];
+           'good','morning','afternoon','evening','jane','you','user','test','sup','na',''];
   try{
     var n=localStorage.getItem('cs_user_name');
     if(n){
-      if(BAD.indexOf(n.trim().toLowerCase())>=0){localStorage.removeItem('cs_user_name');}
-      else return n;
+      var clean=n.replace(/[^a-zA-Z'-]/g,'').trim();           // strip punctuation/spaces
+      if(!clean || BAD.indexOf(clean.toLowerCase())>=0){
+        localStorage.removeItem('cs_user_name');
+      }else{
+        // Return the sanitised, properly-capitalised name (fixes stored 'Jane,' etc.).
+        var fixed=clean.charAt(0).toUpperCase()+clean.slice(1);
+        if(fixed!==n){try{localStorage.setItem('cs_user_name',fixed);}catch(e){}}
+        return fixed;
+      }
     }
   }catch(e){}
   const p=window.CS_PRINCIPAL;
@@ -1489,6 +1496,7 @@ async function openAccount(id){
       kv('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
       kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
       (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
+      ((d.trend_risks&&d.trend_risks.length)?('<div class="sect">Trend risks</div>'+d.trend_risks.map(r=>'<div class="callout" style="border-left:3px solid '+(r.severity==='high'?'var(--red)':'var(--amber)')+';margin-bottom:8px"><b>'+escapeHtml(r.title)+'</b><div class="sub" style="margin-top:4px">'+escapeHtml(r.evidence)+'</div></div>').join('')):'')+
       '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
       timelineHtml(d.timeline)+
       (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+

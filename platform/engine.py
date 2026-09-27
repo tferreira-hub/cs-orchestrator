@@ -521,6 +521,27 @@ def _health_history_for(account_id: str):
         return []
 
 
+def trend_risks(account_id: str) -> list[dict]:
+    """Trend-based risks (Customer 360 §5): declines that only history reveals, e.g.
+    'health declined >15 points in 45 days'. Returns evidence-backed risk dicts, or []
+    when there isn't enough history. Complements the point-in-time playbook risks."""
+    risks = []
+    try:
+        import history
+        tr = history.health_trend(account_id, window_days=45)
+        if tr and tr["direction"] == "down" and abs(tr["delta"]) >= 15:
+            sev = "high" if abs(tr["delta"]) >= 25 else "medium"
+            risks.append({
+                "type": "health_decline",
+                "severity": sev,
+                "title": f"Health declining: {tr['delta']} points over {tr['days']} days",
+                "evidence": f"Health moved from {tr['past']} to {tr['current']} in {tr['days']} days.",
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    return risks
+
+
 def _timeline_for(account_id: str, tasks: list):
     try:
         import history
@@ -562,6 +583,7 @@ def account_detail(account_id: str) -> dict:
         "onboarding": live.get("onboarding", {}),
         "health": h,
         "health_trend": _health_trend_for(account_id),
+        "trend_risks": trend_risks(account_id),
         "health_history": _health_history_for(account_id),
         "timeline": _timeline_for(account_id, tasks),
         "expansion": expansion_score(live),

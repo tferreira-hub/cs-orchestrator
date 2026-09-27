@@ -811,6 +811,14 @@ def run(question: str, account_id: str | None = None,
             flags += f" | churn_status={cstat}"
         if lifecycle:
             flags += f" | lifecycle={lifecycle}"
+        # Health trajectory so Jane can explain 'why did health change' and flag declines.
+        if _engine is not None:
+            try:
+                tr = _engine.trend_risks(aid)
+                if tr:
+                    flags += " | trend=" + tr[0]["title"]
+            except Exception:  # noqa: BLE001
+                pass
         roster_lines.append(
             f"- {aid}: {hs.get('name')} | segment={hs.get('segment_label') or hs.get('segment')} | "
             f"ARR={hs.get('arr_usd')} | state={hs.get('state') or 'unknown'} | "
