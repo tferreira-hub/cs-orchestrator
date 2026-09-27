@@ -738,7 +738,8 @@ class HubSpot:
             "properties": ["name", "cs_segment", "icp_sales_segment", "arr", "arr__v2_", "annualrevenue",
                             "hs_active_contracts_arr", "renewal_date", "hs_next_renewal_date",
                             "contract_renewal_date", "subscription_type", "account_id",
-                            "lifecyclestage", "instance", "type", "hubspot_owner_id", "industry"],
+                            "lifecyclestage", "instance", "type", "hubspot_owner_id", "industry",
+                            "state", "hs_state_code", "country"],
             "limit": 1,
         }
         res = config.http_post("https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
@@ -779,6 +780,8 @@ class HubSpot:
             "segment": self._map_segment(raw_segment),  # engine model: Strategic / Scaled
             "segment_label": raw_segment,               # original HubSpot label for display
             "arr_usd": arr,
+            "state": _first("hs_state_code", "state"),
+            "country": p.get("country"),
             "renewal_date": _first("hs_next_renewal_date", "renewal_date", "contract_renewal_date"),
             "subscription_type": p.get("subscription_type"),
             "csm_owner": self._owner_name(p.get("hubspot_owner_id")),

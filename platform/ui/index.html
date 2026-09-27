@@ -180,7 +180,10 @@ body.dock-open .drawer{right:420px}
 .rev-l{font-size:.7em;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .rev-v{font-size:1.5em;font-weight:800;letter-spacing:-.02em;margin-top:5px}
 .rev-v.warn{color:var(--red)}
-.chartgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:8px}
+.chartgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-bottom:8px}
+.rc-click{cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
+.rc-click:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--brand)}
+.rc-more{font-size:.8em;color:var(--brand);font-weight:600;margin-left:6px}
 @media(max-width:1100px){.rev-strip,.chartgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.rev-strip,.chartgrid{grid-template-columns:1fr}}
 .rc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
@@ -560,50 +563,71 @@ function renderCharts(portfolio,kpis,rm){
       +'<div class="rev-cell"><div class="rev-l">Churned ARR</div><div class="rev-v '+(rm.churned_arr_usd>0?'warn':'')+'">'+fmt(rm.churned_arr_usd)+'</div></div>'
       +'</div>';
   }
-  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+'</div>';
+  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+c5(rm)+'</div>';
   renderRevChange(rm);
+}
+function c5(rm){
+  const states=(rm&&rm.by_state)||[];
+  if(!states.length) return '';
+  const total=states.reduce((a,s)=>a+(s.arr_usd||0),0)||1;
+  const smax=Math.max(1,...states.map(s=>s.arr_usd||0));
+  const colors=['#5b5bf0','#2f6bf0','#0ca678','#d98b0b','#8b5cf6','#e5484d','#0891b2'];
+  return '<div class="chartcard"><h3>ARR by state</h3><div class="cc-sub">Geographic concentration (AU)</div><div class="cc-body"><div class="cc-bars seg-bars">'
+    +states.slice(0,6).map((s,i)=>'<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(s.state)+'</span><span class="seg-val">'+fmt(s.arr_usd)+' <span class="seg-pct">'+Math.round((s.arr_usd/total)*100)+'%</span></span></div><div class="cc-bar-track"><div class="cc-bar-fill" style="width:'+Math.round(((s.arr_usd||0)/smax)*100)+'%;background:'+colors[i%colors.length]+'"></div></div></div>').join('')
+    +'</div></div></div>';
 }
 function renderRevChange(rm){
   const el=document.getElementById('dash-revchange'); if(!el)return;
   const rc=(rm&&rm.revenue_change)||null;
   if(!rc){el.innerHTML='';return;}
-  const card=(title,value,sub,state)=>'<div class="rc-card '+(state||'')+'"><div class="rc-title">'+title+'</div><div class="rc-value">'+value+'</div><div class="rc-sub">'+sub+'</div></div>';
+  window._RM=rm; // stash for the detail drawer
+  const card=(title,value,sub,state,onclick)=>'<div class="rc-card '+(state||'')+(onclick?' rc-click':'')+'"'+(onclick?' onclick="'+onclick+'"':'')+'><div class="rc-title">'+title+(onclick?' <span class="rc-more">View details ›</span>':'')+'</div><div class="rc-value">'+value+'</div><div class="rc-sub">'+sub+'</div></div>';
   const exp=rc.expansion_pipeline_accounts>0
     ? card('Expansion pipeline',fmt(rc.expansion_pipeline_arr_usd),rc.expansion_pipeline_accounts+' account(s) hitting an expansion trigger. Opportunity, not booked.','ok')
     : card('Expansion pipeline','0','No account currently meets a live expansion trigger (license utilization or API surge on a healthy Strategic account).','');
   const win=rc.window_days?(' Last '+Math.round(rc.window_days/30)+' months.'):'';
   const upsell=rc.upsell_computable
-    ? card('Upsells (booked)',(rc.upsell_count||0)+' deals',(rc.upsell_partial?'Top deals total ':'Total ')+fmt(rc.upsell_arr_usd)+' expansion ARR from HubSpot closed-won.'+win,'ok')
+    ? card('Upsells (booked)',(rc.upsell_count||0)+' deals',(rc.upsell_partial?'Top deals total ':'Total ')+fmt(rc.upsell_arr_usd)+' expansion ARR.'+win,'ok','openRevDetail(\'upsell\')')
     : card('Upsells (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
   const downgrade=rc.downgrade_computable
-    ? card('Churn (booked)',(rc.churn_count||0)+' deals',(rc.churn_partial?'Top deals total ':'Total ')+fmt(rc.churn_deal_arr_usd)+' churned ARR from HubSpot.'+win,'warn')
+    ? card('Churn (booked)',(rc.churn_count||0)+' deals',(rc.churn_partial?'Top deals total ':'Total ')+fmt(rc.churn_deal_arr_usd)+' churned ARR.'+win,'warn','openRevDetail(\'churn\')')
     : card('Churn (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
-  el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and churn. Live HubSpot deals, evidence-grounded.</span></div>'
-    +'<div class="body pad"><div class="rc-grid">'+exp+upsell+downgrade+'</div>'
-    +dealsTable('Upsell deals (booked expansion)',(rm.booked&&rm.booked.upsell&&rm.booked.upsell.deals)||[],'ok')
-    +dealsTable('Churn deals (booked)',(rm.booked&&rm.booked.churn&&rm.booked.churn.deals)||[],'warn')
-    +churnedTable(rm)+'</div></div>';
+  const churnedCount=(rm.churned_detail||[]).length;
+  const churnedCard=churnedCount
+    ? card('Churned accounts',churnedCount+' accounts',fmt((rm.churned_detail||[]).reduce((s,r)=>s+(r.arr_usd||0),0))+' last-known ARR. Click to review each.','warn','openRevDetail(\'churned\')')
+    : '';
+  el.innerHTML='<div class="panel"><div class="head"><h2>Revenue motion</h2><span class="note">Expansion, upsell and churn. Live HubSpot deals, evidence-grounded. Click a card for details.</span></div>'
+    +'<div class="body pad"><div class="rc-grid">'+exp+upsell+downgrade+churnedCard+'</div></div></div>';
+}
+// Right-side detail drawer for a revenue-motion metric (keeps the dashboard compact).
+function openRevDetail(kind){
+  const rm=window._RM||{}; let title='', html='';
+  if(kind==='upsell'){title='Upsell deals (booked expansion)';html=dealsTable(((rm.booked||{}).upsell||{}).deals||[]);}
+  else if(kind==='churn'){title='Churn deals (booked)';html=dealsTable(((rm.booked||{}).churn||{}).deals||[]);}
+  else if(kind==='churned'){title='Churned accounts';html=churnedListHtml(rm);}
+  const d=document.getElementById('drawer');
+  d.innerHTML='<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span><div style="font-size:1.2em;font-weight:800">'+escapeHtml(title)+'</div></div><div class="dbody">'+html+'</div>';
+  d.classList.add('on');document.getElementById('scrim').classList.add('on');
 }
 function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
-function dealsTable(title,deals,tone){
-  if(!deals||!deals.length) return '';
-  return '<div style="margin-top:18px"><div class="sect" style="font-weight:700;margin-bottom:8px">'+escapeHtml(title)+' · top '+deals.length+' by value</div>'
-    +'<div style="overflow-x:auto"><table><thead><tr><th>Deal</th><th>Created</th><th>Start</th><th>Term</th><th>Signup type</th><th style="text-align:right">ARR</th><th style="text-align:right">MRR</th></tr></thead><tbody>'
-    +deals.map(d=>'<tr><td><strong>'+escapeHtml((d.name||'Unnamed').slice(0,42))+'</strong></td>'
+function dealsTable(deals){
+  if(!deals||!deals.length) return '<div class="empty">No deals in this window.</div>';
+  return '<div style="overflow-x:auto"><table><thead><tr><th>Deal</th><th>Created</th><th>Start</th><th>Term</th><th>Signup</th><th style="text-align:right">ARR</th><th style="text-align:right">MRR</th></tr></thead><tbody>'
+    +deals.map(d=>'<tr><td><strong>'+escapeHtml(d.name||'Unnamed')+'</strong></td>'
       +'<td class="muted">'+fmtDate(d.created)+'</td><td class="muted">'+fmtDate(d.start)+'</td>'
       +'<td>'+(d.term_months?escapeHtml(d.term_months)+' mo':'<span class="muted">—</span>')+'</td>'
       +'<td>'+(d.signup_type?escapeHtml(d.signup_type):'<span class="muted">—</span>')+'</td>'
       +'<td style="text-align:right" class="mono">'+(d.arr_usd?fmt(d.arr_usd):'<span class="muted">—</span>')+'</td>'
       +'<td style="text-align:right" class="mono">'+(d.mrr_usd?fmt(d.mrr_usd):'<span class="muted">—</span>')+'</td></tr>').join('')
-    +'</tbody></table></div></div>';
+    +'</tbody></table></div>';
 }
-function churnedTable(rm){
+function churnedListHtml(rm){
   const rows=(rm&&rm.churned_detail)||[];
-  if(!rows.length) return '';
+  if(!rows.length) return '<div class="empty">No churned accounts.</div>';
   const withArr=rows.filter(r=>r.arr_usd>0);
   const totalLost=withArr.reduce((s,r)=>s+(r.arr_usd||0),0);
   const note=rows.length>withArr.length?(' · '+(rows.length-withArr.length)+' show no current ARR (zeroed on churn in HubSpot)'):'';
-  return '<div style="margin-top:18px"><div class="sect" style="font-weight:700;margin-bottom:8px">Churned accounts ('+rows.length+') · '+fmt(totalLost)+' last-known ARR'+note+'</div>'
+  return '<div class="sub" style="margin-bottom:10px">'+fmt(totalLost)+' last-known ARR'+note+'</div>'
     +'<div class="churn-list">'+rows.map(r=>{
       const arr=r.arr_usd>0?fmt(r.arr_usd):'<span class="muted">no current ARR</span>';
       const aid=r.account_id?" onclick=\"openAccount('"+escapeHtml(r.account_id)+"')\" style=\"cursor:pointer\"":"";
@@ -618,7 +642,7 @@ function churnedTable(rm){
         +'<div><b>Last product visit</b><span>'+(r.days_since_visit!=null?r.days_since_visit+' days ago':'—')+'</span></div>'
         +(r.account_id?'<div class="cr-open"><a href="javascript:void(0)"'+aid+'>Open full account</a></div>':'')
         +'</div></details>';
-    }).join('')+'</div></div>';
+    }).join('')+'</div>';
 }
 
 async function boot(){

@@ -674,6 +674,29 @@ def _task_metrics(tasks: list[dict]) -> dict:
     }
 
 
+_AU_STATES = {
+    "NSW": "NSW", "NEW SOUTH WALES": "NSW",
+    "VIC": "VIC", "VICTORIA": "VIC",
+    "QLD": "QLD", "QUEENSLAND": "QLD",
+    "WA": "WA", "WESTERN AUSTRALIA": "WA",
+    "SA": "SA", "SOUTH AUSTRALIA": "SA",
+    "TAS": "TAS", "TASMANIA": "TAS",
+    "ACT": "ACT", "AUSTRALIAN CAPITAL TERRITORY": "ACT",
+    "NT": "NT", "NORTHERN TERRITORY": "NT",
+}
+
+
+def _normalise_state(raw):
+    """Map a HubSpot state value to a canonical AU state code. Non-AU (or blank) values
+    are grouped as 'International' / 'Unknown' so the ARR-by-state view stays clean."""
+    if not raw or not str(raw).strip():
+        return "Unknown"
+    key = str(raw).strip().upper()
+    if key in _AU_STATES:
+        return _AU_STATES[key]
+    return "International"
+
+
 def revenue_motion() -> dict:
     """Executive revenue-motion snapshot for the CS dashboard (Chartio CS-dashboard model:
     paying customers, churn, at-risk, retention, ARR distribution). Live data only; every
@@ -717,12 +740,17 @@ def revenue_motion() -> dict:
             at_risk_arr += _arr(la)
 
     by_segment: dict[str, dict] = {}
+    by_state: dict[str, dict] = {}
     for la in scoped:
         hs = la.get("hubspot", {})
         seg = hs.get("segment_label") or hs.get("segment") or "Unsegmented"
         row = by_segment.setdefault(seg, {"segment": seg, "accounts": 0, "arr_usd": 0})
         row["accounts"] += 1
         row["arr_usd"] += _arr(la)
+        state = _normalise_state(hs.get("state"))
+        srow = by_state.setdefault(state, {"state": state, "accounts": 0, "arr_usd": 0})
+        srow["accounts"] += 1
+        srow["arr_usd"] += _arr(la)
 
     # Booked revenue motion from HubSpot deals (real upsell + churn events). Falls back
     # to an honest empty state if deals are unreadable. Guarded so a deals failure never
@@ -747,6 +775,7 @@ def revenue_motion() -> dict:
         "health_mix": bands,
         "retention": _retention_metrics(accounts, tasks_by_account),
         "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
+        "by_state": sorted([s for s in by_state.values() if s["arr_usd"] > 0], key=lambda r: -r["arr_usd"]),
         "churned_detail": churned_detail,
         "booked": booked,
         # Expansion / upsell / downgrade motion. Only the expansion PIPELINE is currently
