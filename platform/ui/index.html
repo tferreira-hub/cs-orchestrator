@@ -1102,7 +1102,15 @@ function adSuggest(q){document.getElementById('adInput').value=q;sendDockMessage
 function adAutoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,180)+'px';}
 function newAgentThread(){adThread=[];adGreet();document.getElementById('adInput').value='';}
 function adUserName(){
-  try{const n=localStorage.getItem('cs_user_name'); if(n) return n;}catch(e){}
+  var BAD=['hi','hie','hey','hello','yo','ok','okay','thanks','thank','help','hola',
+           'good','morning','afternoon','evening','jane','you','user','test','sup','na'];
+  try{
+    var n=localStorage.getItem('cs_user_name');
+    if(n){
+      if(BAD.indexOf(n.trim().toLowerCase())>=0){localStorage.removeItem('cs_user_name');}
+      else return n;
+    }
+  }catch(e){}
   const p=window.CS_PRINCIPAL;
   if(p&&p.name&&/[a-zA-Z]/.test(p.name)&&p.name.indexOf('@')<0) return p.name.split(' ')[0];
   return null; // unknown -> Jane will ask
@@ -1134,6 +1142,8 @@ function adEvidence(m){
   return '<details class="ad-ev"><summary>Evidence for this answer ('+acts.length+')</summary>'+rows+'</details>';
 }
 function adFeedback(m,idx){
+  // Feedback only belongs on a real, evidence-backed answer, not greetings/social replies.
+  if(!m.data) return '';
   if(m.feedback==='helpful') return '<div class="ad-fb done">Thanks, noted. This helps me get better for you.</div>';
   if(m.feedback==='needs_correction') return '<div class="ad-fb done">Thanks for flagging it. I have logged this so we can review and improve.</div>';
   return '<div class="ad-fb"><span>Was this helpful? Your feedback trains the agent.</span>'+
@@ -1159,9 +1169,17 @@ async function sendDockMessage(){
   input.style.height='auto';
   // If Jane asked for the user's name, capture this reply as their name.
   if(window._JANE_ASKING_NAME){
+    const name=q.replace(/^(i'?m|i am|my name is|it'?s|call me|this is|hi|hello|hey)[,!.\s]+/i,'').replace(/[.!,?]+$/,'').trim().split(/\s+/)[0];
+    const BAD=['hi','hie','hey','hello','yo','ok','okay','thanks','thank','help','hola','good','morning','afternoon','evening','jane','you','user','test','sup','na',''];
+    if(!name || BAD.indexOf(name.toLowerCase())>=0){
+      // Not a real name, keep asking gently, do not store it.
+      adThread.push({role:'user',content:q});
+      adThread.push({role:'assistant',content:"I'd love to get your name right, what should I call you?"});
+      adRender();
+      return;
+    }
     window._JANE_ASKING_NAME=false;
-    const name=q.replace(/^(i'?m|i am|my name is|it'?s|call me|this is)\s+/i,'').replace(/[.!]+$/,'').trim().split(/\s+/)[0];
-    const clean=name?name.charAt(0).toUpperCase()+name.slice(1):q;
+    const clean=name.charAt(0).toUpperCase()+name.slice(1);
     try{localStorage.setItem('cs_user_name',clean);}catch(e){}
     adThread.push({role:'user',content:q});
     adThread.push({role:'assistant',content:"Lovely to meet you, "+clean+". I'll remember that. What would you like to look at first, your priorities today, a specific account, or where the growth is?"});

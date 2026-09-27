@@ -9,3 +9,5 @@ secrets.*
 .cs-agent-feedback.jsonl
 .cs-playbook-proposals.jsonl
 .cs-task-events.jsonl
+.cs-audit-trail.jsonl
+.cs-*.jsonl
