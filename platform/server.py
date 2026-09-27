@@ -113,6 +113,70 @@ FEEDBACK_LOG = Path(__file__).resolve().parents[1] / ".cs-agent-feedback.jsonl"
 PLAYBOOK_PROPOSALS = Path(__file__).resolve().parents[1] / ".cs-playbook-proposals.jsonl"
 PLAYBOOK_RULES = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator" / "skills" / "cs-playbook" / "SKILL.md"
 TASK_EVENTS = Path(os.environ.get("CS_TASK_EVENTS_FILE", str(Path(__file__).resolve().parents[1] / ".cs-task-events.jsonl")))
+# Immutable, hash-chained audit trail (enterprise compliance): every AI-suggested action
+# and CSM approval is appended with the hash of the previous entry, so any tampering with
+# an earlier record breaks the chain and is detectable.
+AUDIT_LOG = Path(os.environ.get("CS_AUDIT_FILE", str(Path(__file__).resolve().parents[1] / ".cs-audit-trail.jsonl")))
+import hashlib as _hashlib
+
+
+def _audit_last_hash() -> str:
+    if not AUDIT_LOG.exists():
+        return "genesis"
+    last = ""
+    for line in AUDIT_LOG.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            last = line
+    if not last:
+        return "genesis"
+    try:
+        return json.loads(last).get("entry_hash", "genesis")
+    except Exception:  # noqa: BLE001
+        return "genesis"
+
+
+def record_audit(event_type: str, principal: dict | None, detail: dict) -> dict:
+    """Append an immutable, hash-chained audit entry. Records WHO (principal), WHAT
+    (event_type + detail: rule/prompt, data sources read), and WHEN. Never stores customer
+    prose; detail should be metadata (account ids, rule ids, source names)."""
+    prev = _audit_last_hash()
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event_type,
+        "actor": {"email": (principal or {}).get("email"),
+                  "name": (principal or {}).get("name"),
+                  "role": (principal or {}).get("role")} if principal else {"role": "system"},
+        "detail": detail,
+        "prev_hash": prev,
+    }
+    entry["entry_hash"] = _hashlib.sha256(
+        (prev + json.dumps(entry, sort_keys=True, default=str)).encode("utf-8")).hexdigest()
+    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with AUDIT_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+    return entry
+
+
+def _audit_read(limit: int = 200) -> dict:
+    """Return recent audit entries plus a chain-integrity verdict."""
+    entries = []
+    if AUDIT_LOG.exists():
+        for line in AUDIT_LOG.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except Exception:  # noqa: BLE001
+                    pass
+    # Verify the hash chain end to end.
+    intact, prev = True, "genesis"
+    for e in entries:
+        recomputed = _hashlib.sha256(
+            (prev + json.dumps({k: e[k] for k in ("ts", "event", "actor", "detail", "prev_hash") if k in e},
+                               sort_keys=True, default=str)).encode("utf-8")).hexdigest()
+        if e.get("prev_hash") != prev or e.get("entry_hash") != recomputed:
+            intact = False
+        prev = e.get("entry_hash", prev)
+    return {"entries": entries[-limit:], "count": len(entries), "chain_intact": intact}
 
 
 def _record_task_event(body: dict) -> dict:
@@ -482,6 +546,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.portfolio()["suppressed"]); return
             if path == "/api/revenue-motion":
                 self._json(200, engine.revenue_motion()); return
+            if path == "/api/audit":
+                self._json(200, _audit_read()); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
             if path == "/api/task-events":
@@ -551,9 +617,24 @@ class Handler(BaseHTTPRequestHandler):
                 plugin = Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"
                 sys.path.insert(0, str(plugin))
                 import agent_runner  # noqa: E402
-                self._json(200, agent_runner.run(question, account_id=account_id,
-                                                 csm_owner=csm_owner, principal=principal,
-                                                 history=history))
+                result = agent_runner.run(question, account_id=account_id,
+                                          csm_owner=csm_owner, principal=principal,
+                                          history=history)
+                # Immutable audit: who asked, what generated the answer, sources read, when.
+                try:
+                    harness = result.get("harness", {}) if isinstance(result, dict) else {}
+                    record_audit("agent_answer", principal, {
+                        "question": question[:300],
+                        "account_id": account_id,
+                        "route": harness.get("route", "bedrock_agent"),
+                        "data_sources_read": harness.get("live_sources", []),
+                        "judge_verdict": (harness.get("queue_judge", {}) or {}).get("verdict"),
+                        "ok": bool(result.get("ok")),
+                        "action_count": len(result.get("actions", []) or []),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(200, result)
                 return
             if path == "/api/agent/feedback":
                 rating = body.get("rating")
@@ -580,13 +661,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/tasks/status":
                 try:
-                    self._json(200, _record_task_event(body))
+                    event = _record_task_event(body)
+                    try:
+                        record_audit("task_status_change", principal, {
+                            "task_id": event.get("task_id"), "status": event.get("status")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(200, event)
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
             if path.startswith("/api/accounts/") and path.endswith("/writeback"):
                 account_id = path[len("/api/accounts/"):-len("/writeback")].strip("/")
-                self._json(200, engine.writeback(account_id, apply=bool(body.get("apply", False))))
+                apply_write = bool(body.get("apply", False))
+                try:
+                    record_audit("hubspot_writeback", principal,
+                                 {"account_id": account_id, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(200, engine.writeback(account_id, apply=apply_write))
                 return
             self._json(404, {"error": "not found", "path": path})
         except Exception as exc:  # noqa: BLE001

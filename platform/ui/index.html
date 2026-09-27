@@ -250,6 +250,19 @@ body.dock-open .drawer{right:420px}
 .sec-title{display:flex;align-items:baseline;gap:12px;margin:26px 2px 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 .sec-title h2{font-size:1.05em;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
 .sec-title span{font-size:.8em;color:var(--muted)}
+.pagestrip{padding:14px 22px;border-bottom:1px solid var(--line);background:#fafbfe}
+.pagestrip .ps-cap{font-size:.8em;color:var(--muted);margin-bottom:10px}
+.pagestrip .ps-cells{display:flex;gap:28px;flex-wrap:wrap}
+.ps-cell{display:flex;flex-direction:column}
+.ps-v{font-size:1.4em;font-weight:800;letter-spacing:-.02em;color:var(--ink)}
+.ps-v.warn{color:var(--red)}.ps-v.good{color:var(--green)}
+.ps-l{font-size:.72em;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.audit-banner{display:flex;align-items:center;gap:12px;padding:13px 22px;border-bottom:1px solid var(--line)}
+.audit-banner.ok{background:var(--greenbg)}
+.audit-banner.bad{background:var(--redbg)}
+.audit-banner b{font-size:.9em}
+.audit-banner.ok b{color:var(--green)}.audit-banner.bad b{color:var(--red)}
+.audit-banner span{font-size:.8em;color:var(--ink2)}
 .chartcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 16px 12px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:172px}
 .chartcard h3{font-size:.74em;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin:0 0 2px;font-weight:700}
 .chartcard .cc-sub{font-size:.72em;color:var(--muted);margin-bottom:10px}
@@ -350,6 +363,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button data-v="gaps" onclick="go('gaps')"><span class="ico">◇</span> Data Gaps <span class="count" id="c-gaps"></span></button>
       <button data-v="integrations" onclick="go('integrations')"><span class="ico">⬡</span> Integrations</button>
       <button data-v="playbook" onclick="go('playbook')"><span class="ico">⚙</span> Playbook Controls</button>
+      <button data-v="audit" onclick="go('audit')"><span class="ico">🛡</span> Audit Trail</button>
     </div></div>
     <div class="foot">One standardised way of working. Live signals are synthesised into one prioritised queue.</div>
   </aside>
@@ -392,6 +406,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       </section>
       <section class="view" id="v-integrations"><div class="panel"><div class="head"><h2>Integrations</h2><span class="note">Single pane of glass across the CS stack</span></div><div class="intgrid" id="int-body"></div></div></section>
       <section class="view" id="v-playbook"><div class="panel"><div class="head"><h2>Playbook Controls</h2><span class="note">Propose improvements to the signed CS Ways of Working</span></div><div class="body pad" id="playbook-body"></div></div></section>
+      <section class="view" id="v-audit"><div class="panel"><div class="head"><h2>Audit trail</h2><span class="note">Immutable, hash-chained log of every AI action and CSM approval</span></div><div class="body" id="audit-body"></div></div></section>
       <section class="view" id="v-gaps">
         <div class="stats" id="gaps-stats"></div>
         <div class="panel"><div class="head"><h2>Data Gap Analysis</h2><span class="note">Per-account source coverage &amp; missing CS metadata (RevOps §4)</span></div><div class="body" id="gaps-body"></div></div>
@@ -439,6 +454,7 @@ const meta={
   kpi:['Leadership KPIs','Capacity and portfolio allocation'],
   integrations:['Integrations','Connected systems across the CS stack'],
   playbook:['Playbook Controls','Governed CS rule proposals and review'],
+  audit:['Audit Trail','Immutable log of AI actions and approvals for compliance'],
   gaps:['Data Gaps','Per-account source coverage and required-field cleanup'],
   agent:['Agent Automation','Ask the CS Agent: live Bedrock orchestration, playbook enforcement, and self-correction']
 };
@@ -765,21 +781,22 @@ function render(v){
     loadRevenueMotion();
     loadDailyBrief();
   }
-  if(v==='queue') document.getElementById('queue-body').innerHTML=taskTable(DATA.tasks,true);
-  if(v==='protect') document.getElementById('protect-body').innerHTML=taskTable(DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT'),true);
+  if(v==='queue') document.getElementById('queue-body').innerHTML=taskSummaryStrip(DATA.tasks,'All open actions across every mandate')+taskTable(DATA.tasks,true);
+  if(v==='protect'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
   if(v==='expand'){
     const tasks=DATA.tasks.filter(t=>t.mandate==='MUST_EXPAND');
     document.getElementById('expand-body').innerHTML=tasks.length
       ? taskTable(tasks,true)
       : '<div class="callout"><b>No eligible expansion action today</b><div class="sub" style="margin-top:6px">The signed playbook checked the portfolio and found no healthy Strategic account with an active renewal milestone or expansion trigger. This is a governed empty state: no action was invented.</div><div class="chips" style="margin-top:12px"><span class="pill g">Queue checked</span><span class="pill pln">No action invented</span></div><div class="quality-list" style="margin-top:12px"><div><b>Renewals:</b> needs a live HubSpot renewal date inside T-120 to T-30.</div><div><b>Expansion:</b> needs mapped Pendo utilization, API velocity, or strong adoption on a healthy Strategic account.</div><div><b>Next check:</b> refresh after renewal metadata or telemetry mappings change. Risk and recovery remain under Protect.</div></div></div>';
   }
-  if(v==='use') document.getElementById('use-body').innerHTML=taskTable(DATA.tasks.filter(t=>t.mandate==='MUST_USE'),true);
-  if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctTable(DATA.accounts);
+  if(v==='use'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
+  if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
   if(v==='agent') loadAgentFeedbackSummary();
   if(v==='integrations') loadIntegrations();
   if(v==='playbook') loadPlaybook();
+  if(v==='audit') loadAudit();
   if(v==='gaps') loadGaps();
 }
 let _kpiCache=null, _rmCache=null;
@@ -802,6 +819,29 @@ async function loadDailyBrief(){
   }catch(e){target.innerHTML='<span class="muted">Daily brief unavailable.</span>';}
 }
 
+function taskSummaryStrip(tasks,caption){
+  const p1=tasks.filter(t=>t.priority===1).length;
+  const overdueish=tasks.filter(t=>t.priority&&t.priority<=2).length;
+  const accts=new Set(tasks.map(t=>t.account)).size;
+  const cell=(l,v,cls)=>'<div class="ps-cell"><div class="ps-v '+(cls||'')+'">'+v+'</div><div class="ps-l">'+l+'</div></div>';
+  return '<div class="pagestrip"><div class="ps-cap">'+escapeHtml(caption||'')+'</div><div class="ps-cells">'
+    +cell('Actions',tasks.length)
+    +cell('Priority 1',p1,p1>0?'warn':'')
+    +cell('Due now / today',overdueish,overdueish>0?'warn':'')
+    +cell('Accounts',accts)
+    +'</div></div>';
+}
+function acctSummaryStrip(accts){
+  const band=a=>{const h=a.health;return (h&&typeof h==='object')?(h.band||h.rag):h;};
+  let g=0,am=0,r=0,arr=0;
+  accts.forEach(a=>{const b=band(a);if(b==='green')g++;else if(b==='amber')am++;else if(b==='red')r++; if(typeof a.arr_usd==='number')arr+=a.arr_usd;});
+  const cell=(l,v,cls)=>'<div class="ps-cell"><div class="ps-v '+(cls||'')+'">'+v+'</div><div class="ps-l">'+l+'</div></div>';
+  return '<div class="pagestrip"><div class="ps-cap">Every account, worst health first</div><div class="ps-cells">'
+    +cell('Accounts',accts.length)
+    +cell('Healthy',g,'good')+cell('Watch',am,am>0?'warn':'')+cell('At risk',r,r>0?'warn':'')
+    +cell('ARR',fmt(arr))
+    +'</div></div>';
+}
 function taskTable(tasks,withDraft){
   if(!tasks.length) return '<div class="empty">Nothing here right now. The queue is clear.</div>';
   return '<table><thead><tr><th style="width:36px"></th><th>Account</th><th>Mandate</th><th>Why it is here</th></tr></thead><tbody>'+
@@ -893,6 +933,29 @@ async function loadIntegrations(){
       '<div class="dirbadge">'+escapeHtml(access)+'</div>'+detail+
       '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
   }).join('');
+}
+async function loadAudit(){
+  const el=document.getElementById('audit-body'); if(!el)return;
+  let d;
+  try{ d=await (await api('/api/audit')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; el.innerHTML='<div class="empty">Could not load the audit trail.</div>'; return; }
+  const entries=(d.entries||[]).slice().reverse();
+  const intact=d.chain_intact;
+  const banner='<div class="audit-banner '+(intact?'ok':'bad')+'"><b>'+(intact?'✓ Chain verified':'⚠ Chain broken')+'</b>'
+    +'<span>'+(intact?'All '+d.count+' entries are intact and tamper-evident (SHA-256 hash chain).':'The audit chain failed verification, an entry may have been altered.')+'</span></div>';
+  if(!entries.length){ el.innerHTML=banner+'<div class="empty">No audited actions yet. Ask the CS Agent or approve a task to create the first entry.</div>'; return; }
+  const evLabel={agent_answer:'AI answer',task_status_change:'Task approval',hubspot_writeback:'HubSpot write-back'};
+  el.innerHTML=banner+'<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Detail</th><th>Sources read</th></tr></thead><tbody>'
+    +entries.map(e=>{
+      const det=e.detail||{}; const a=e.actor||{};
+      const detailStr=det.question?escapeHtml(det.question.slice(0,80)):(det.task_id?('task '+escapeHtml(det.task_id)+' → '+escapeHtml(det.status||'')):(det.account_id?escapeHtml(det.account_id)+(det.apply?' (applied)':' (dry-run)'):''));
+      const src=(det.data_sources_read||[]).map(escapeHtml).join(', ');
+      return '<tr><td class="muted" style="white-space:nowrap">'+escapeHtml(String(e.ts||'').slice(0,19).replace('T',' '))+'</td>'
+        +'<td><span class="pill '+(e.event==='agent_answer'?'expand':e.event==='hubspot_writeback'?'a':'g')+'">'+escapeHtml(evLabel[e.event]||e.event)+'</span></td>'
+        +'<td>'+escapeHtml(a.name||a.email||a.role||'system')+'</td>'
+        +'<td>'+(detailStr||'<span class="muted">—</span>')+'</td>'
+        +'<td class="muted">'+(src||'—')+'</td></tr>';
+    }).join('')+'</tbody></table>';
 }
 async function loadPlaybook(){
   const out=document.getElementById('playbook-body');
