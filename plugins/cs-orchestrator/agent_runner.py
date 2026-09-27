@@ -754,11 +754,8 @@ def run(question: str, account_id: str | None = None,
     # can answer "my accounts" without the client having to pass csm_owner).
     if role == "csm" and not csm_owner:
         csm_owner = (principal or {}).get("name") or (principal or {}).get("email")
-    conversation_answer = _conversation_answer(question, csm_owner)
-    if conversation_answer is not None:
-        return {"ok": True, "answer": conversation_answer, "transcript": [],
-                "accounts_available": 0, "actions": [],
-                "harness": {"route": "conversation_identity"}}
+    # Jane answers everything herself via the model, grounded in the live evidence and
+    # portfolio knowledge we pass in. No canned/templated replies.
     try:
         import boto3  # noqa: F401
     except Exception:
@@ -791,23 +788,6 @@ def run(question: str, account_id: str | None = None,
     transcript: list[dict] = []
     accounts = tools[0]
 
-    # Clarifying question for genuinely ambiguous asks (deterministic, no model call):
-    # if the user names no account, asks nothing specific, and there is a real book to
-    # narrow, offer one focused question rather than guessing.
-    clarify = _maybe_clarify(question, accounts, account_id)
-    if clarify is not None:
-        return {"ok": True, "answer": clarify, "scope": identity_line, "transcript": [],
-                "accounts_available": len(accounts), "actions": [],
-                "harness": {"route": "clarifying_question"}}
-
-    owner_answer = _owner_account_answer(question, accounts, tools[3], csm_owner=csm_owner)
-    if owner_answer is not None:
-        return {"ok": True, "answer": owner_answer, "scope": identity_line, "transcript": transcript,
-                "model": MODEL, "region": REGION, "profile": PROFILE,
-                "accounts_available": len(accounts),
-                "actions": _actions_for_answer(_structured_actions(tools[3], accounts), owner_answer, accounts, account_id),
-                "harness": {"queue_judge": tools[3].get("judge", {}),
-                            "route": "deterministic_owner_brief"}}
     roster_lines = []
     try:
         import engine as _engine
@@ -978,6 +958,15 @@ def run(question: str, account_id: str | None = None,
              "region", "distribution", "overall", "summary", "how many", "total",
              "who owns", "owner", "expansion", "churn"))
         account_focus = bool(account_id) or named_account or is_comparison or knowledge_intent
+        # Greetings, identity and other social/non-portfolio messages are answered
+        # conversationally and must not require the task queue.
+        ql_s = q_low.strip()
+        social = (len(ql_s) <= 40 and any(t in ql_s for t in
+                  ("hi", "hello", "hey", "thanks", "thank", "who are you", "what are you",
+                   "how are you", "your name", "good morning", "good afternoon",
+                   "good evening", "help", "ok", "cool", "great", "nice"))) or not accounts
+        if social:
+            account_focus = True
         answer = ""
         findings = []
         for attempt in range(MAX_CORRECTIONS + 1):

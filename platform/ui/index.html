@@ -1090,12 +1090,11 @@ function adGreet(){
   const tod=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   adThread=[];
   if(known){
-    // Warm, human greeting, then a soft open (no problem-dump).
-    adThread.push({role:'assistant',content:tod+", "+known+". Lovely to see you. I'm Jane, your CS analyst, here whenever you want a read on your accounts. What would you like to look at today?"});
+    adThread.push({role:'assistant',content:tod+", "+known+". Great to see you. I'm Jane, your CS specialist. I keep an eye on the whole book, health, risk, renewals and growth, so you can focus on the customers that matter most. What would you like to dig into today?"});
   }else{
     // We only have a login, not a real name: greet warmly and ask, nothing else yet.
     window._JANE_ASKING_NAME=true;
-    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS analyst. It's lovely to meet you. May I ask your name?"});
+    adThread.push({role:'assistant',content:tod+". I'm Jane, your CS specialist. It's lovely to meet you. May I ask your name?"});
   }
   adRender();
 }
