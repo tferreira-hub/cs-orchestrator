@@ -226,21 +226,20 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
             </g>
           </svg>
         </div>
-        <!-- health donut: arc paths (robust), 68/22/10 -->
+        <!-- health donut: pathLength=100 so segments are plain percentages (68/22/10) -->
         <div class="panelcard">
           <div class="pt"><b>Health mix</b><span>184 accounts</span></div>
-          <svg viewBox="0 0 140 134" width="100%" height="134" role="img" aria-label="Health: 68 percent healthy, 22 percent watch, 10 percent at risk">
-            <g transform="translate(70,66)">
+          <svg viewBox="0 0 140 128" width="100%" height="128" role="img" aria-label="Health: 68 percent healthy, 22 percent watch, 10 percent at risk">
+            <g transform="translate(70,60) rotate(-90)">
               <circle r="46" fill="none" stroke="#1b2742" stroke-width="16"/>
-              <!-- segments drawn as stroked arcs; angles: healthy 0-244.8, watch 244.8-324, risk 324-360 deg -->
-              <path d="M 0 -46 A 46 46 0 1 1 -41.6 19.6" fill="none" stroke="#34d399" stroke-width="16" stroke-linecap="round"/>
-              <path d="M -41.6 19.6 A 46 46 0 0 1 15.2 43.4" fill="none" stroke="#fbbf24" stroke-width="16" stroke-linecap="round"/>
-              <path d="M 15.2 43.4 A 46 46 0 0 1 0 -46" fill="none" stroke="#fb7185" stroke-width="16" stroke-linecap="round"/>
-              <text x="0" y="-3" text-anchor="middle" fill="#eaf0f8" font-size="20" font-weight="750">68%</text>
-              <text x="0" y="14" text-anchor="middle" fill="#93a9cc" font-size="9">healthy</text>
+              <circle r="46" fill="none" stroke="#34d399" stroke-width="16" pathLength="100" stroke-dasharray="68 32" stroke-dashoffset="0"/>
+              <circle r="46" fill="none" stroke="#fbbf24" stroke-width="16" pathLength="100" stroke-dasharray="22 78" stroke-dashoffset="-68"/>
+              <circle r="46" fill="none" stroke="#fb7185" stroke-width="16" pathLength="100" stroke-dasharray="10 90" stroke-dashoffset="-90"/>
             </g>
+            <text x="70" y="56" text-anchor="middle" fill="#eaf0f8" font-size="22" font-weight="750">68%</text>
+            <text x="70" y="74" text-anchor="middle" fill="#93a9cc" font-size="10">healthy</text>
           </svg>
-          <div class="legend" style="justify-content:center;flex-wrap:wrap;gap:10px"><span><i style="background:#34d399"></i>Healthy 125</span><span><i style="background:#fbbf24"></i>Watch 40</span><span><i style="background:#fb7185"></i>Risk 19</span></div>
+          <div class="legend" style="justify-content:center;flex-wrap:wrap;gap:12px"><span><i style="background:#34d399"></i>Healthy 125</span><span><i style="background:#fbbf24"></i>Watch 40</span><span><i style="background:#fb7185"></i>Risk 19</span></div>
         </div>
         <!-- renewal-stage bars -->
         <div class="panelcard span2">
@@ -275,7 +274,6 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
         <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg><div>Churn risk and renewal cadence, surfaced early.</div></div>
         <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=12 cy=12 r=9/><path d="M12 7v5l3 2"/></svg><div>Drafted outreach ready, grounded in real signals.</div></div>
       </div>
-      <div class=note>You will be redirected to your company login, then straight back to CS Platform.</div>
     </div>
   </section>
 </div></body></html>"""
