@@ -63,6 +63,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 
 /* Sidebar — Planhat-style light, flat, collapsible */
 .side{background:var(--side-bg);color:var(--side-ink);border-right:1px solid var(--side-line);padding:14px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;overflow-x:hidden}
+/* Thin, subtle scrollbar so a long nav does not show a chunky OS bar. */
+.side{scrollbar-width:thin;scrollbar-color:#d4dae6 transparent}
+.side::-webkit-scrollbar{width:7px}
+.side::-webkit-scrollbar-thumb{background:#d4dae6;border-radius:8px}
+.side::-webkit-scrollbar-thumb:hover{background:#c0c8d8}
+.side::-webkit-scrollbar-track{background:transparent}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 6px 14px;position:relative}
 .brand .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:15px;box-shadow:0 3px 10px rgba(91,91,240,.32);flex:0 0 32px}
 .brand .name{font-weight:800;color:var(--ink);font-size:1.02em;letter-spacing:-.01em}
@@ -78,6 +84,11 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .navsection{margin-top:2px}
 .navsection>.ns-head{display:flex;align-items:center;gap:9px;width:100%;background:transparent;border:0;color:var(--side-ink);padding:7px 10px;border-radius:8px;font:inherit;font-size:.86em;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;transition:background .12s}
 .navsection>.ns-head:hover{background:var(--side-hover)}
+.navsection>.ns-head:hover .ns-caret{color:var(--side-ink)}
+/* When a collapsed section contains the active page, mark its header so the user can
+   see where they are without expanding every group - standard product-sidebar behaviour. */
+.navsection.has-active>.ns-head{color:var(--side-active-ink);font-weight:700}
+.navsection.has-active>.ns-head .ns-ico{box-shadow:0 0 0 2px var(--side-bg),0 0 0 4px rgba(91,91,240,.35)}
 .navsection>.ns-head .ns-ico{width:20px;height:20px;flex:0 0 20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.72em;color:#fff;font-weight:800}
 .navsection>.ns-head .ns-caret{margin-left:auto;color:var(--side-ink2);font-size:.7em;transition:transform .15s;flex:0 0 auto}
 .navsection.collapsed>.ns-head .ns-caret{transform:rotate(-90deg)}
@@ -94,9 +105,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .ns-ico.ns-exp{background:#0ca678}
 .ns-ico.ns-obj{background:#7c6cf7}
 .ns-ico.ns-pooled{background:#0e9f9f}
-.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:var(--side-ink);padding:8px 11px;border-radius:9px;font-size:.87em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
+.nav button{position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:var(--side-ink);padding:8px 11px;border-radius:9px;font-size:.87em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
 .nav button:hover{background:var(--side-hover);color:var(--ink)}
 .nav button.active{background:var(--side-active-bg);color:var(--side-active-ink);font-weight:600}
+/* Active-item accent bar on the left edge, like a real product sidebar. */
+.nav button.active::before{content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);width:3px;height:17px;border-radius:3px;background:var(--brand)}
+.navsection>.nav button.active::before{left:16px}
 .nav .ico{width:17px;text-align:center;font-size:1em;opacity:.85;flex:0 0 17px}
 .nav button.active .ico{opacity:1}
 .nav .label{min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -1176,6 +1190,11 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   document.getElementById('v-'+v).classList.add('on');
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
+  // Mark the nav section that contains the active page so the user can see where they are
+  // even when the section is collapsed (standard product-sidebar behaviour).
+  document.querySelectorAll('.navsection').forEach(sec=>{
+    sec.classList.toggle('has-active', !!sec.querySelector('.nav button.active'));
+  });
   document.getElementById('title').textContent=meta[v][0];
   document.getElementById('crumb').textContent=meta[v][1];
   _currentView=v;
