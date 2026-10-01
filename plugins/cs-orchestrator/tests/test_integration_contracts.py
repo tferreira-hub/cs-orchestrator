@@ -1515,3 +1515,22 @@ def test_success_plans_record_and_read(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         server._record_success_plan({"account_id": "auX"}, None)
+
+
+def test_hubspot_ingest_lifecycle_stages_default_and_configurable(monkeypatch):
+    """The whole-book HubSpot scan ingests only 'customer' + churned by default (so the
+    customer book is unchanged), but CS_HUBSPOT_LIFECYCLE_STAGES can add onboarding/lead
+    stages so onboarding accounts enter the platform. This is why the Pooled > Onboarding
+    view is empty until that stage is configured."""
+    from adapters import sources
+
+    monkeypatch.delenv("CS_HUBSPOT_LIFECYCLE_STAGES", raising=False)
+    assert sources.HubSpot._ingest_lifecycle_stages() == ["customer", "20251280"]
+
+    monkeypatch.setenv("CS_HUBSPOT_LIFECYCLE_STAGES", "customer,20251280,onboarding,lead")
+    assert sources.HubSpot._ingest_lifecycle_stages() == [
+        "customer", "20251280", "onboarding", "lead"]
+
+    # Whitespace and empty entries are tolerated.
+    monkeypatch.setenv("CS_HUBSPOT_LIFECYCLE_STAGES", " customer , onboarding , ")
+    assert sources.HubSpot._ingest_lifecycle_stages() == ["customer", "onboarding"]

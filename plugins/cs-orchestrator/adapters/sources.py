@@ -743,6 +743,23 @@ class HubSpot:
     """CRM -> company object (segment, ARR, renewal, contacts) keyed on AUx-yyyyy
     external id. Bi-directional: pushes CS data back for Sales visibility."""
 
+    @staticmethod
+    def _ingest_lifecycle_stages() -> list[str]:
+        """Which HubSpot lifecyclestage values to ingest for the whole-book scan.
+
+        Defaults to the existing customer book ('customer' + the churned-customer stage
+        id '20251280'), so behaviour is unchanged unless configured. To bring ONBOARDING
+        (or lead/opportunity) accounts into the platform, set CS_HUBSPOT_LIFECYCLE_STAGES
+        to a comma-separated list of lifecyclestage values/ids, e.g.
+            CS_HUBSPOT_LIFECYCLE_STAGES=customer,20251280,onboarding
+        The exact onboarding value is site-specific (often a custom numeric stage id),
+        so it is configuration rather than a guessed hardcode."""
+        import os
+        raw = os.environ.get("CS_HUBSPOT_LIFECYCLE_STAGES", "").strip()
+        if not raw:
+            return ["customer", "20251280"]
+        return [s.strip() for s in raw.split(",") if s.strip()]
+
     def live(self) -> bool:
         return config.live_enabled() and bool(config.env("HUBSPOT_TOKEN"))
 
@@ -947,7 +964,7 @@ class HubSpot:
             body = {
                 "filterGroups": [{"filters": [
                     {"propertyName": "lifecyclestage", "operator": "IN",
-                     "values": ["customer", "20251280"]}  # customer + churned-customer stage
+                     "values": self._ingest_lifecycle_stages()}  # customer + churned by default; configurable to add onboarding
                 ]}],
                 "properties": props,
                 "limit": page,
