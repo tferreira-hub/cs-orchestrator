@@ -37,10 +37,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Application = "cs-platform"
-      ManagedBy   = "terraform"
-      Repo        = "cs-orchestrator"
+      Owner       = var.tag_owner
+      Repository  = var.tag_repository
+      Application = var.tag_application
       Environment = var.environment
+      IaC         = "terraform"
+      Lifecycle   = var.tag_lifecycle
     }
   }
 }

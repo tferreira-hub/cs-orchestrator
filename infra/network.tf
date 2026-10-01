@@ -16,8 +16,18 @@ locals {
   public_url     = "https://${var.domain_name}"
   oidc_callback  = "https://${var.domain_name}/auth/callback"
 
-  tags = {
-    Application = "cs-platform"
-    Environment = var.environment
-  }
+  # Mandatory JobAdder tag taxonomy, applied to every resource. Optional tags
+  # (JAInstance, LifecycleEndDate) are included only when set.
+  tags = merge(
+    {
+      Owner       = var.tag_owner
+      Repository  = var.tag_repository
+      Application = var.tag_application
+      Environment = var.environment
+      IaC         = "terraform"
+      Lifecycle   = var.tag_lifecycle
+    },
+    var.tag_ja_instance == "" ? {} : { JAInstance = var.tag_ja_instance },
+    var.tag_lifecycle_end_date == "" ? {} : { LifecycleEndDate = var.tag_lifecycle_end_date },
+  )
 }

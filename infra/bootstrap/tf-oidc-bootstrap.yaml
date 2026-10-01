@@ -53,8 +53,12 @@ Resources:
                   - !Sub "repo:${GitHubRepo}:*"
                   - "repo:JobAdder@*/cs-orchestrator@*:*"
       Tags:
+        - { Key: Owner, Value: cloud-engineering }
+        - { Key: Repository, Value: cs-orchestrator }
         - { Key: Application, Value: cs-platform }
-        - { Key: ManagedBy, Value: cloudformation-bootstrap }
+        - { Key: Environment, Value: prod }
+        - { Key: IaC, Value: cloudformation }
+        - { Key: Lifecycle, Value: persistent }
 
   TfDeployPolicy:
     Type: AWS::IAM::RolePolicy
@@ -74,6 +78,8 @@ Resources:
               - "logs:*"
               - "ec2:Describe*"
               - "ec2:*SecurityGroup*"
+              - "ec2:CreateTags"
+              - "ec2:DeleteTags"
               - "application-autoscaling:*"
             Resource: "*"
           - Sid: ManageCsPlatformIam
@@ -88,6 +94,14 @@ Resources:
               - "iam:UntagRole"
               - "iam:PassRole"
             Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${NamePrefix}-*"
+          # The github_oidc.tf data source reads the account's GitHub OIDC provider,
+          # which is NOT under the role name prefix, so it needs account-level read.
+          - Sid: ReadOidcProvider
+            Effect: Allow
+            Action:
+              - "iam:ListOpenIDConnectProviders"
+              - "iam:GetOpenIDConnectProvider"
+            Resource: "*"
           - Sid: ManageCsPlatformSsm
             Effect: Allow
             Action:
@@ -96,11 +110,18 @@ Resources:
               - "ssm:RemoveTagsFromResource"
               - "ssm:ListTagsForResource"
             Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/*"
+          # DescribeParameters does not support per-parameter resource scoping; the
+          # Terraform SSM data/resource refresh calls it with a region-level resource.
+          - Sid: DescribeCsPlatformSsm
+            Effect: Allow
+            Action: "ssm:DescribeParameters"
+            Resource: "*"
           - Sid: TerraformState
             Effect: Allow
             Action:
               - "s3:GetObject"
               - "s3:PutObject"
+              - "s3:DeleteObject"
               - "s3:ListBucket"
             Resource:
               - !Sub "arn:aws:s3:::${StateBucket}"

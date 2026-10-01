@@ -25,6 +25,43 @@ variable "name_prefix" {
   default     = "cs-platform"
 }
 
+# --- Mandatory JobAdder tag taxonomy -----------------------------------------
+variable "tag_owner" {
+  description = "Owner: accountable team/function (e.g. cloud-engineering, shared, rock)."
+  type        = string
+  default     = "cloud-engineering"
+}
+
+variable "tag_repository" {
+  description = "Repository: where the code lives (comma-separated if multiple)."
+  type        = string
+  default     = "cs-orchestrator"
+}
+
+variable "tag_application" {
+  description = "Application: the workload/service the resource supports."
+  type        = string
+  default     = "cs-platform"
+}
+
+variable "tag_ja_instance" {
+  description = "JAInstance (optional): instance served, e.g. au1. Empty if not instance-specific."
+  type        = string
+  default     = ""
+}
+
+variable "tag_lifecycle" {
+  description = "Lifecycle: persistent or temporary."
+  type        = string
+  default     = "persistent"
+}
+
+variable "tag_lifecycle_end_date" {
+  description = "LifecycleEndDate (required only if lifecycle=temporary), YYYY-MM-DD."
+  type        = string
+  default     = ""
+}
+
 # ---------------------------------------------------------------------------
 # Networking (existing Tooling VPC — discovered, not created here)
 # ---------------------------------------------------------------------------
