@@ -882,6 +882,13 @@ class Handler(BaseHTTPRequestHandler):
             engine.set_principal(principal)
             if auth.auth_required() and not principal:
                 self._json(401, {"error": "authentication required", "login": "/login"}); return
+            # Progressive list enrichment: the UI posts the account ids currently visible
+            # and gets back live-enriched row fields for them, so lists fill in the whole
+            # book a screen at a time without the one-shot full-book fan-out.
+            if path == "/api/accounts/enrich":
+                ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+                self._json(200, engine.enrich_rows([str(i) for i in ids if i]))
+                return
             if path == "/api/agent":
                 question = (body.get("question") or "").strip() or "What are my top CS actions today?"
                 account_id = (body.get("account_id") or "").strip() or None

@@ -1012,6 +1012,52 @@ def account_detail(account_id: str) -> dict:
     }
 
 
+def enrich_rows(account_ids: list) -> dict:
+    """Progressive enrichment for list views: given specific account ids (typically the
+    rows currently visible), live-enrich each ON DEMAND and return only the row-level
+    fields the tables/widgets read. This lets a list fill in health/usage/owner for the
+    whole book a screen at a time, without the one-shot full-book fan-out. Honest: an id
+    with no live HubSpot record is skipped (stays a roster row). Owner-scoped.
+    """
+    out: dict = {}
+    enriched_slice = orchestrate.load_accounts()
+    for aid in (account_ids or [])[:60]:  # cap per call to keep each request snappy
+        if not aid or not can_view_account(aid):
+            continue
+        a = enriched_slice.get(aid)
+        if a is None:
+            try:
+                a = dataaccess.account(aid)
+            except Exception:  # noqa: BLE001
+                continue
+        if not (a and a.get("hubspot")):
+            continue
+        live = _live_account(a)
+        hs = live.get("hubspot", {})
+        h = health_score(live)
+        tasks, _sup = orchestrate.evaluate(aid, a)
+        forecast = renewal_forecast(live, h, expansion_qualified=_expansion_qualified(aid, a))
+        usage = live.get("usage", {}) or {}
+        out[aid] = {
+            "account_id": aid,
+            "name": hs.get("name"),
+            "segment": hs.get("segment_label") or hs.get("segment"),
+            "arr_usd": hs.get("arr_usd"),
+            "renewal_date": hs.get("renewal_date"),
+            "subscription_type": hs.get("subscription_type"),
+            "csm_owner": hs.get("csm_owner"),
+            "lifecycle_stage": hs.get("lifecycle_stage"),
+            "health": h,
+            "renewal_forecast": forecast,
+            "connected": _connected(a),
+            "usage_days_since_visit": usage.get("days_since_last_visit") if _connected(a).get("usage") else None,
+            "csat_30d": (live.get("zendesk", {}) or {}).get("csat_30d") if _connected(a).get("zendesk") else None,
+            "open_task_count": len(tasks),
+            "enriched": True,
+        }
+    return {"accounts": out}
+
+
 def _writeback_payload(account: dict, health: dict, tasks: list) -> dict:
     """The CS data pushed BACK to HubSpot for Sales visibility (req §1 bi-directional).
 

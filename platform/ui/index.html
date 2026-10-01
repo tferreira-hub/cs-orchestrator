@@ -2738,7 +2738,39 @@ function _acctTableInner(rows){
       '<td class="cp-summary">'+summary+'</td></tr>';
   }).join('');
   if(!list.length) return '<table class="acct-list">'+head+'</table><div class="empty">No companies match this view.</div>';
+  // Progressive enrichment: fill in live health/usage/owner for the roster rows currently
+  // shown, a screen at a time, so the whole book populates without the one-shot full-book
+  // fan-out. Fire-and-forget; patches DATA.accounts and re-renders when results arrive.
+  _enrichVisibleRoster(list);
   return '<table class="acct-list">'+head+'<tbody>'+body+'</tbody></table>';
+}
+// Tracks roster ids we've already asked the server to enrich, so we don't re-request.
+const _enrichRequested=new Set();
+function _enrichVisibleRoster(list){
+  const ids=[];
+  for(const a of list){
+    if(a && a.enriched===false && a.account_id && !_enrichRequested.has(a.account_id)){
+      ids.push(a.account_id); _enrichRequested.add(a.account_id);
+      if(ids.length>=40) break; // one screenful per call
+    }
+  }
+  if(!ids.length) return;
+  (async()=>{
+    try{
+      const r=await api('/api/accounts/enrich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+      const j=await r.json(); const got=(j&&j.accounts)||{};
+      if(!Object.keys(got).length) return;
+      // Patch the enriched fields into DATA.accounts in place.
+      const byId={}; (DATA.accounts||[]).forEach(a=>{byId[a.account_id]=a;});
+      let changed=false;
+      Object.keys(got).forEach(id=>{const dst=byId[id]; if(dst){Object.assign(dst,got[id]); changed=true;}});
+      // Re-render the current account table host if it's on screen.
+      if(changed){
+        const host=document.getElementById('acct-table-host'); if(host) host.innerHTML=_acctTableInner(filteredAccounts());
+        const hostCc=document.getElementById('accounts-body-cc'); if(hostCc&&hostCc.offsetParent!==null) hostCc.innerHTML=acctTable(filteredAccounts());
+      }
+    }catch(e){/* leave as roster on failure */}
+  })();
 }
 // Planhat shows renewal as a relative "in days" value, not a raw date.
 function renewalDays(dateStr){
