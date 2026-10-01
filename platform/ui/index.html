@@ -105,6 +105,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .ns-ico.ns-exp{background:#0ca678}
 .ns-ico.ns-obj{background:#7c6cf7}
 .ns-ico.ns-pooled{background:#0e9f9f}
+.ns-ico.ns-reports{background:#3b82f6}
 .nav button{position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:var(--side-ink);padding:8px 11px;border-radius:9px;font-size:.87em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
 .nav button:hover{background:var(--side-hover);color:var(--ink)}
 .nav button.active{background:var(--side-active-bg);color:var(--side-active-ink);font-weight:600}
@@ -449,14 +450,16 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .cc-distsub{font-size:.82em;color:var(--muted);font-weight:500}
 /* Renewals-by-month: a compact 13-column strip (Overdue + 12 months). Thin bars, muted
    empty months, value shown only where there is ARR, so it reads cleanly at panel width. */
-.cc-months{display:flex;align-items:flex-end;gap:5px;height:132px;width:100%}
-.cc-mo{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;min-width:0}
-.cc-mo-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:100%}
-.cc-mo-v{font-size:.66em;font-weight:700;color:var(--ink2);margin-bottom:4px;white-space:nowrap}
-.cc-mo-bar{width:72%;max-width:26px;border-radius:5px 5px 0 0;background:var(--brand);transition:height .2s}
-.cc-mo-bar.zero{background:#e9edf4}
+/* Renewals-by-month: a horizontal row per bucket (Overdue + 12 months) - far more
+   scannable in a narrow panel than 13 vertical slivers. Label | track+bar | amount. */
+.cc-months{display:flex;flex-direction:column;gap:7px;width:100%}
+.cc-mo{display:flex;align-items:center;gap:10px;font-size:.8em}
+.cc-mo-lbl{flex:0 0 54px;color:var(--ink2);font-weight:600}
+.cc-mo-track{flex:1;height:14px;background:#eef1f6;border-radius:7px;overflow:hidden;min-width:0}
+.cc-mo-bar{height:100%;border-radius:7px;background:var(--brand);min-width:2px;transition:width .2s}
 .cc-mo-bar.over{background:var(--red)}
-.cc-mo-lbl{margin-top:7px;font-size:.72em;color:var(--ink2);font-weight:600}
+.cc-mo-v{flex:0 0 56px;text-align:right;font-weight:700;color:var(--ink)}
+.cc-mo-v.muted{color:var(--muted);font-weight:500}
 .cc-mo.is-over .cc-mo-lbl{color:var(--red);font-weight:800}
 .cc-mo.is-now .cc-mo-lbl{color:var(--brand);font-weight:800}
 /* Forecast mix: a horizontal proportion bar + legend (reuses stack-bar look, taller). */
@@ -2029,7 +2032,17 @@ function renderPooledResponseRates(){
 function renderPooledOnboarding(){
   const rows=_pooledAccts().filter(a=>{const p=(a.lifecycle_stage||'').toLowerCase();return p.indexOf('onboard')>=0||p.indexOf('lead')>=0||p.indexOf('opportunit')>=0;});
   const body=rows.map(a=>{const r=_pooledRow(a);return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted">'+r.last+'</td></tr>';}).join('');
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">Pooled 1-20 agency + Corporate in onboarding</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Phase: Onboarding</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Last seen</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="6" class="empty" style="padding:24px">No pooled companies currently onboarding.</td></tr>')+'</tbody></table></div></div>';
+  // Rocket Lane is the system of record for onboarding (projects/status/health). It is
+  // read per account on the detail page; the whole-book onboarding roster depends on it
+  // being connected. When there are no onboarding rows, say WHY honestly instead of
+  // implying the book simply has nobody onboarding.
+  const live=(DATA&&DATA.summary&&DATA.summary.live_sources)||[];
+  const rlLive=live.some(s=>/rocket\s*lane/i.test(String(s)));
+  const emptyRow=rows.length?'':(rlLive
+    ? '<tr><td colspan="6" class="empty" style="padding:24px">No pooled companies are currently in onboarding. Onboarding status comes from Rocket Lane; open an account to see its onboarding project detail.</td></tr>'
+    : '<tr><td colspan="6" class="empty" style="padding:24px"><b>Onboarding source (Rocket Lane) is not connected.</b><div class="sub" style="margin-top:6px">Onboarding is tracked in Rocket Lane, not inferred from CRM stage. Set <code>ROCKET_LANE_KEY</code> to populate this view. No sample data is shown.</div></td></tr>');
+  const srcNote=rlLive?'Live from Rocket Lane':'Rocket Lane not connected';
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">Pooled 1-20 agency + Corporate in onboarding · '+srcNote+'</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Phase: Onboarding</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Last seen</th></tr></thead><tbody>'+(rows.length?body:emptyRow)+'</tbody></table></div></div>';
 }
 function _pooledWorkflowTable(title,note,tasks){
   const body=tasks.length?tasks.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><td><strong>'+escapeHtml(t.account)+'</strong></td><td class="muted">'+(t.owner?escapeHtml(t.owner):'-')+'</td><td>0%</td><td class="muted">'+escapeHtml(t.due||t.sla||'-')+'</td><td>'+escapeHtml((t.trigger||'').slice(0,44))+'</td></tr>').join(''):'<tr><td colspan="5" class="empty" style="padding:24px">No workflows match right now.</td></tr>';
@@ -2575,14 +2588,13 @@ async function renderCommandCenter(){
     if(idx>=0 && idx<12) fwd[idx]+=arr;
   });
   const maxMo=Math.max(1,overdueArr12,...fwd);
-  const barH=v=>v<=0?6:Math.max(10,Math.round((v/maxMo)*100));
-  let moCols=overdueArr12>0?('<div class="cc-mo is-over"><div class="cc-mo-wrap"><span class="cc-mo-v">'+mfmt(overdueArr12)+'</span><div class="cc-mo-bar over" style="height:'+barH(overdueArr12)+'%"></div></div><div class="cc-mo-lbl">Overdue</div></div>'):'';
+  const barW=v=>v<=0?0:Math.max(3,Math.round((v/maxMo)*100));
+  const moRow=(lbl,v,cls)=>'<div class="cc-mo'+(cls?(' '+cls):'')+'"><span class="cc-mo-lbl">'+lbl+'</span><span class="cc-mo-track"><span class="cc-mo-bar'+(cls==='is-over'?' over':'')+'" style="width:'+barW(v)+'%"></span></span><span class="cc-mo-v'+(v>0?'':' muted')+'">'+(v>0?mfmt(v):'-')+'</span></div>';
+  let moCols=overdueArr12>0?moRow('Overdue',overdueArr12,'is-over'):'';
   moCols+=fwd.map((v,i)=>{
-    const m=(nowM+i)%12; const isNow=i===0;
-    return '<div class="cc-mo'+(isNow?' is-now':'')+'"><div class="cc-mo-wrap">'+
-      (v>0?'<span class="cc-mo-v">'+mfmt(v)+'</span>':'')+
-      '<div class="cc-mo-bar'+(v>0?'':' zero')+'" style="height:'+barH(v)+'%"></div></div>'+
-      '<div class="cc-mo-lbl">'+moShort[m]+'</div></div>';
+    const m=(nowM+i)%12; const yr=nowY+Math.floor((nowM+i)/12);
+    const lbl=moShort[m]+' '+String(yr).slice(2);
+    return moRow(lbl,v,i===0?'is-now':'');
   }).join('');
   const anyRen=overdueArr12>0||fwd.some(v=>v>0);
   const renTotal=overdueArr12+fwd.reduce((s,v)=>s+v,0);
