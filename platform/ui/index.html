@@ -149,6 +149,10 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .content{padding:26px 32px 70px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
+.tbl{width:100%;border-collapse:collapse;font-size:.86em}
+.tbl th{text-align:left;color:#8fa6c9;font-weight:600;padding:8px 10px;border-bottom:1px solid #2c3854;position:sticky;top:0;background:#0f1626}
+.tbl td{padding:8px 10px;border-bottom:1px solid #1b2742}
+.tbl tr:hover td{background:#141f36}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 /* Stats */
@@ -784,6 +788,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <div class="nav">
         <button data-v="mydash" onclick="go('mydash')" title="Dashboard"><span class="ico">◱</span> <span class="label">Dashboard</span></button>
         <button class="active" data-v="dash" onclick="go('dash')" title="Command Center"><span class="ico">▚</span> <span class="label">Command Center</span></button>
+        <button data-v="fullbook" onclick="go('fullbook')" title="Full Book (all customers)"><span class="ico">▦</span> <span class="label">Full Book</span></button>
       </div>
     </div>
 
@@ -882,6 +887,22 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <section class="view" id="v-expand"><div class="panel"><div class="head"><h2>Must Expand · Renewals and expansion</h2><span class="note">T-120, T-90, T-60, T-30 cadence and expansion triggers</span></div><div class="body" id="expand-body"></div></div></section>
       <section class="view" id="v-use"><div class="panel"><div class="head"><h2>Must Use · Adoption and hygiene</h2><span class="note">Onboarding, adoption, contact hygiene</span></div><div class="body" id="use-body"></div></div></section>
       <section class="view" id="v-accounts"><div class="panel"><div class="head"><h2>All accounts</h2><span class="note">Click any account for the full picture</span></div><div class="body" id="accounts-body"></div></div></section>
+      <section class="view" id="v-fullbook">
+        <div class="panel">
+          <div class="head">
+            <h2>Full Book</h2>
+            <span class="note">Every customer in HubSpot, Managed and Pooled/Scaled. Lightweight roster; open a company for full live signals.</span>
+          </div>
+          <div class="body">
+            <div id="fullbook-cohort" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+            <div id="fullbook-stats" class="stats"></div>
+            <div id="fullbook-facets" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;font-size:.8em;color:var(--ink2,#8aa)"></div>
+            <input id="fullbook-search" placeholder="Filter companies in view..." oninput="renderFullbookTable()"
+                   style="width:100%;box-sizing:border-box;padding:9px 12px;margin:6px 0 12px;border-radius:9px;border:1px solid #2c3854;background:#0f1626;color:#e8edf5">
+            <div id="fullbook-body"></div>
+          </div>
+        </div>
+      </section>
       <section class="view" id="v-company"><div id="company-body"></div></section>
       <section class="view" id="v-scaled">
         <div class="cc-tabs" id="scaled-tabs">
@@ -996,6 +1017,7 @@ const meta={
   dash:['Command Center','Portfolio overview and priority actions'],
   queue:['Task Queue','Every system-generated action, ranked'],
   accounts:['My Companies','Every account, worst health first'],
+  fullbook:['Full Book','Every customer, Managed and Pooled, filterable'],
   company:['Company','Full customer profile'],
   scaled:['Scaled Customer Success','Pooled and low-touch customers'],
   mydash:['Dashboard','Your personal CS dashboard'],
@@ -2208,7 +2230,87 @@ async function renderCommandCenter(){
   const brief=document.getElementById('daily-brief'); if(brief&&brief.closest('.panel')) brief.closest('.panel').style.display='none';
 }
 
+// ── Full Book (Tier-1 whole-book roster: Managed / Pooled / All) ─────────────
+let _fullbook = null;        // last loaded payload
+let _fullbookCohort = 'all'; // active cohort filter
+async function loadFullbook(cohort){
+  if(cohort) _fullbookCohort = cohort;
+  const body = document.getElementById('fullbook-body');
+  const stats = document.getElementById('fullbook-stats');
+  renderFullbookCohortChips();
+  // Loading state: the whole-book scan can take a while (cached server-side after
+  // the first call), so never block, show a spinner message.
+  body.innerHTML = '<div class="empty" style="padding:24px">Loading the full customer book from HubSpot… this can take a moment the first time, then it is cached.</div>';
+  stats.innerHTML = '';
+  document.getElementById('fullbook-facets').innerHTML = '';
+  try{
+    const q = (_fullbookCohort==='managed'||_fullbookCohort==='pooled') ? ('?cohort='+_fullbookCohort) : '';
+    const d = await (await api('/api/roster'+q)).json();
+    _fullbook = d;
+    renderFullbookShell(d);
+    renderFullbookTable();
+  }catch(e){
+    if(e&&e.message==='unauthenticated') return;
+    body.innerHTML = '<div class="empty" style="padding:24px">Could not load the full book. '+((_fullbook&&_fullbook.summary&&!_fullbook.summary.live)?'HubSpot is not connected.':'Please retry.')+'</div>';
+  }
+}
+function renderFullbookCohortChips(){
+  const host = document.getElementById('fullbook-cohort'); if(!host) return;
+  const chips = [['all','All'],['managed','Managed'],['pooled','Pooled / Scaled']];
+  host.innerHTML = chips.map(([k,label])=>{
+    const on = _fullbookCohort===k;
+    const style = on
+      ? 'background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;border:1px solid transparent'
+      : 'background:#1b2742;color:#cfe0ff;border:1px solid #2c3854';
+    return `<button onclick="loadFullbook('${k}')" style="${style};border-radius:999px;padding:7px 16px;font:600 .84em system-ui;cursor:pointer">${label}</button>`;
+  }).join('');
+}
+function renderFullbookShell(d){
+  const s = d.summary||{};
+  const fmt0 = n => n==null?'-':'$'+Number(n).toLocaleString();
+  document.getElementById('fullbook-stats').innerHTML =
+    statCard('Total customers', (s.total||0).toLocaleString() + (s.capped?'+':'')) +
+    statCard('Managed', (s.managed||0).toLocaleString()) +
+    statCard('Pooled / Scaled', (s.pooled||0).toLocaleString()) +
+    statCard('Book ARR', fmt0(s.total_arr_usd));
+  const seg = (d.facets&&d.facets.segment)||{};
+  document.getElementById('fullbook-facets').innerHTML =
+    'Segments: ' + Object.entries(seg).map(([k,v])=>`<span style="background:#1b2742;border:1px solid #2c3854;border-radius:999px;padding:3px 9px;margin-right:4px">${k}: ${v}</span>`).join('') +
+    (s.capped?' <span style="color:#d98b0b">· showing first '+(s.total)+' (raise CS_FULL_ROSTER_LIMIT for more)</span>':'');
+}
+function statCard(k,v){
+  return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+}
+function renderFullbookTable(){
+  const d = _fullbook; if(!d) return;
+  const q = (document.getElementById('fullbook-search').value||'').toLowerCase();
+  let rows = d.companies||[];
+  if(q) rows = rows.filter(r => (r.name||'').toLowerCase().includes(q) || (r.account_id||'').toLowerCase().includes(q));
+  const fmt0 = n => n==null?'-':'$'+Number(n).toLocaleString();
+  const head = '<tr><th>Company</th><th>Cohort</th><th>Segment</th><th>Lifecycle</th><th>ARR</th><th>Account ID</th></tr>';
+  const trs = rows.slice(0,500).map(r=>{
+    const badge = r.cohort==='managed'
+      ? '<span style="color:#0ca678;font-weight:600">Managed</span>'
+      : '<span style="color:#d98b0b;font-weight:600">Pooled</span>';
+    // Managed rows (tagged with account_id) are clickable to open full enrichment.
+    const name = r.account_id
+      ? `<a href="#" onclick="openCompany('${r.account_id}');return false" style="color:#8ab4ff">${escapeHtmlFB(r.name||r.account_id)}</a>`
+      : escapeHtmlFB(r.name||'(unnamed)');
+    return `<tr><td>${name}</td><td>${badge}</td><td>${escapeHtmlFB(r.segment_label||'-')}</td><td>${escapeHtmlFB(r.lifecycle_stage||'-')}</td><td>${fmt0(r.arr_usd)}</td><td>${r.account_id||'<span style="color:#6b7f9e">untagged</span>'}</td></tr>`;
+  }).join('');
+  document.getElementById('fullbook-body').innerHTML =
+    `<div style="color:var(--ink2,#8aa);font-size:.82em;margin-bottom:6px">${rows.length.toLocaleString()} companies${rows.length>500?' (showing first 500)':''}</div>` +
+    `<table class="tbl">${head}${trs}</table>`;
+}
+function escapeHtmlFB(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// openCompany: open the full account enrichment drawer for a managed (tagged) company.
+function openCompany(aid){
+  if(typeof openAccount==='function'){ openAccount(aid); return; }
+  go('accounts');
+}
+
 function render(v){
+  if(v==='fullbook'){ loadFullbook(); return; }
   // Defensive: never attempt to render account/task data before the portfolio has
   // loaded. If a view is opened during boot, retry once DATA is ready.
   const dataViews=['dash','queue','protect','expand','use','accounts','scaled','mydash','leading','lagging','reviews','calendar','notifications','riskesc','expansions','objadopt','pooled'];

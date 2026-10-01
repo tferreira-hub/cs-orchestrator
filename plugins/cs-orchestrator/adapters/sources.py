@@ -822,6 +822,98 @@ class HubSpot:
                 break
         return ids[:limit]
 
+    def list_all_companies(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Tier-1 lightweight full-book roster: ALL customer companies, cheap fields only.
+
+        Unlike roster()/account() this does NOT fan out to the other vendors or fetch
+        deals/contacts, so it can cover the whole book (thousands of companies) with a
+        handful of paginated HubSpot search calls. It powers the portfolio-wide list and
+        the Managed / Pooled / All filter. Full multi-vendor enrichment stays on demand
+        (when a CSM opens an account).
+
+        Base set = companies with lifecyclestage=customer (the real customer book, not
+        prospects). Each row is classified:
+          managed = has a CS account_id tag (onboarded into CS tracking)
+          pooled  = cs_customer_tier == 'pooled', OR (untagged long-tail customer)
+        Cached for CS_FULL_ROSTER_TTL seconds (default 600) because the whole-book scan
+        is heavier than a single account. Returns [] when not live."""
+        if not self.live():
+            return []
+        import os, time as _t
+        if limit is None:
+            try:
+                limit = int(os.environ.get("CS_FULL_ROSTER_LIMIT", "5000"))
+            except ValueError:
+                limit = 5000
+        try:
+            ttl = int(os.environ.get("CS_FULL_ROSTER_TTL", "600"))
+        except ValueError:
+            ttl = 600
+        cache = getattr(HubSpot, "_full_roster_cache", None)
+        if cache and (_t.time() - cache[0] < ttl) and cache[2] >= limit:
+            return cache[1][:limit]
+
+        props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
+                 "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
+                 "cs_customer_tier", "industry", "country"]
+        rows: list[dict[str, Any]] = []
+        after = None
+        while len(rows) < limit:
+            page = min(100, limit - len(rows))
+            body = {
+                "filterGroups": [{"filters": [
+                    {"propertyName": "lifecyclestage", "operator": "IN",
+                     "values": ["customer", "20251280"]}  # customer + churned-customer stage
+                ]}],
+                "properties": props,
+                "limit": page,
+            }
+            if after:
+                body["after"] = after
+            res = config.http_post(
+                "https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
+            for r in res.get("results", []):
+                p = r.get("properties", {})
+                acc = p.get("account_id")
+                tier = (p.get("cs_customer_tier") or "").strip()
+                managed = bool(acc)
+                pooled = (tier.lower() == "pooled") or (not managed)
+
+                def _n(*keys):
+                    for k in keys:
+                        v = p.get(k)
+                        if v not in (None, ""):
+                            try:
+                                return int(float(v))
+                            except (ValueError, TypeError):
+                                pass
+                    return None
+
+                raw_segment = p.get("icp_sales_segment") or p.get("cs_segment")
+                rows.append({
+                    "company_id": r.get("id"),
+                    "account_id": (identity.normalise(acc) if acc else None),
+                    "name": p.get("name"),
+                    "arr_usd": _n("arr__v2_", "arr", "hs_active_contracts_arr"),
+                    "segment": self._map_segment(raw_segment),
+                    "segment_label": raw_segment,
+                    "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
+                                        .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
+                    "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                    "customer_tier": tier or None,
+                    "managed": managed,
+                    "pooled": pooled,
+                    "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
+                    "country": p.get("country"),
+                    "industry": (p.get("industry") or "").replace("_", " ").title() or None,
+                    "_source": "hubspot-live",
+                })
+            after = (res.get("paging", {}) or {}).get("next", {}).get("after")
+            if not after:
+                break
+        HubSpot._full_roster_cache = (_t.time(), rows, limit)
+        return rows[:limit]
+
     def _find_company(self, account_ref: str) -> dict[str, Any]:
         # HubSpot stores the AUx-yyyy id in the `account_id` company property,
         # uppercase-hyphen form (e.g. AU1-3102).

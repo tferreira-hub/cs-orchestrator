@@ -670,6 +670,64 @@ def portfolio() -> dict:
     }
 
 
+def full_roster(cohort: str | None = None, limit: int | None = None) -> dict:
+    """Tier-1 whole-book roster: ALL customer companies (managed + pooled/long-tail),
+    classified, with portfolio-wide counts and filter facets.
+
+    Lightweight companion to portfolio(): does NOT enrich each company with the other
+    vendors (that stays on-demand when an account is opened). Answers "show the entire
+    book and let me filter Managed / Pooled / All", which the account_id-tagged roster
+    alone cannot. `cohort` optionally filters to 'managed' or 'pooled' (None = all).
+    Rows are scoped: an admin sees the whole book; a scoped CSM sees only what they own."""
+    rows = _src.HUBSPOT.list_all_companies(limit=limit) if _src.HUBSPOT.live() else []
+
+    principal = get_principal()
+    role = (principal or {}).get("role")
+    owner_id = (principal or {}).get("owner_id")
+    scoped = bool(principal and role != "admin")
+    if scoped and owner_id:
+        rows = [r for r in rows if str(r.get("owner_id") or "") == str(owner_id)]
+    elif scoped and not owner_id:
+        rows = []  # a CSM with no resolved owner id sees an empty book, never the whole base
+
+    managed = [r for r in rows if r.get("cohort") == "managed"]
+    pooled = [r for r in rows if r.get("cohort") == "pooled"]
+
+    def _arr(rs):
+        return sum(r.get("arr_usd") or 0 for r in rs)
+
+    def _facet(key):
+        out: dict[str, int] = {}
+        for r in rows:
+            v = r.get(key) or "Unknown"
+            out[v] = out.get(v, 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+    selected = rows
+    if cohort in ("managed", "pooled"):
+        selected = [r for r in rows if r.get("cohort") == cohort]
+
+    return {
+        "summary": {
+            "total": len(rows),
+            "managed": len(managed),
+            "pooled": len(pooled),
+            "total_arr_usd": _arr(rows),
+            "managed_arr_usd": _arr(managed),
+            "pooled_arr_usd": _arr(pooled),
+            "live": _src.HUBSPOT.live(),
+            "capped": len(rows) >= int(os.environ.get("CS_FULL_ROSTER_LIMIT", "5000")),
+            "account_scope": ("all" if not scoped else "csm"),
+            "cohort": cohort or "all",
+        },
+        "facets": {
+            "segment": _facet("segment_label"),
+            "lifecycle": _facet("lifecycle_stage"),
+        },
+        "companies": selected,
+    }
+
+
 def _confidence(account: dict, evidence: dict) -> str:
     sources = account.get("sources", {})
     live_count = sum(1 for value in sources.values() if value == "live")

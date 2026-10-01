@@ -802,6 +802,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/portfolio":
                 self._json(200, engine.portfolio()); return
+            if path == "/api/roster":
+                # Tier-1 whole-book roster (all customers, Managed vs Pooled/Scaled).
+                # ?cohort=managed|pooled|all. Scoped to the principal (admin=all).
+                cohort = (query.get("cohort") or ["all"])[0]
+                cohort = cohort if cohort in ("managed", "pooled") else None
+                self._json(200, engine.full_roster(cohort=cohort)); return
             if path == "/api/daily-brief":
                 self._json(200, engine.daily_brief()); return
             if path == "/api/accounts":
