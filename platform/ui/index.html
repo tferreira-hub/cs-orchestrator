@@ -225,17 +225,17 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 /* Planhat-style filter pill bar */
 .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
 .gfbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:12px 14px;margin-bottom:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
-.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:220px;height:34px;box-sizing:border-box}
-.gf-find input{background:transparent;border:0;color:var(--ink);outline:none;width:100%;font-size:.88em}
+.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 11px;min-width:240px;height:38px;box-sizing:border-box}
+.gf-find input{background:transparent;border:0;color:var(--ink);outline:none;width:100%;font-size:.95em}
 .gf-find input::placeholder{color:var(--muted)}
-.gf-ico{opacity:.55;color:var(--ink2)}
-.gf-l{display:flex;flex-direction:column;font-size:.62em;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--ink2);gap:4px}
-.gf-s{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:0 26px 0 10px;height:34px;font-size:.9em;line-height:34px;cursor:pointer;min-width:132px;max-width:200px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%2398a2b3' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+.gf-ico{opacity:.55;color:var(--ink2);font-size:1.05em}
+.gf-l{display:flex;flex-direction:column;font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink2);gap:5px}
+.gf-s{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:0 28px 0 11px;height:38px;font-size:1em;line-height:38px;cursor:pointer;min-width:140px;max-width:210px;font-weight:500;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='7' viewBox='0 0 11 7'><path d='M1 1l4.5 4.5L10 1' stroke='%2398a2b3' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 11px center}
 .gf-s:hover{border-color:var(--brand)}
 .gf-s:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
-.gf-count{margin-left:auto;align-self:center;color:var(--ink);font-size:.82em;font-weight:600;background:var(--brandsoft);border:1px solid var(--line);border-radius:999px;padding:6px 12px;white-space:nowrap}
+.gf-count{margin-left:auto;align-self:center;color:var(--ink);font-size:.9em;font-weight:700;background:var(--brandsoft);border:1px solid var(--line);border-radius:999px;padding:7px 14px;white-space:nowrap}
 .gf-count em{color:var(--ink2);font-style:normal;font-weight:500}
-.gf-clear{align-self:center;background:transparent;border:1px solid var(--line);color:var(--ink2);border-radius:8px;padding:7px 13px;font-size:.82em;cursor:pointer;height:34px}
+.gf-clear{align-self:center;background:transparent;border:1px solid var(--line);color:var(--ink2);border-radius:8px;padding:8px 15px;font-size:.9em;font-weight:500;cursor:pointer;height:38px}
 .gf-clear:hover{color:var(--ink);border-color:var(--brand);background:var(--brandsoft)}
 .filterbar .fb-find{position:relative;margin-right:4px}
 .filterbar .fb-find input{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px 6px 28px;font:inherit;font-size:.82em;min-width:210px}
@@ -1144,7 +1144,7 @@ function go(v){
   _currentView=v;
   // Global filter bar: show it (into the persistent mount) only on data views that
   // read the portfolio; hide on structural pages (integrations, audit, data model...).
-  const filterViews=['dash','mydash','accounts','queue','protect','expand','use','scaled','pooled','leading','lagging','reviews','riskesc','expansions','objadopt','kpi','life'];
+  const filterViews=['dash','mydash','accounts','queue','protect','expand','use','scaled','pooled','leading','lagging','reviews','riskesc','expansions','objadopt','kpi','life','dataexplorer','datamodel','calendar'];
   const gfm=document.getElementById('globalFilterMount');
   if(gfm){
     if(filterViews.includes(v)&&DATA&&DATA.accounts){ gfm.style.display=''; gfm.innerHTML=globalFilterBar(); }
@@ -1474,15 +1474,19 @@ function leadingTab(tab){
   window.scrollTo({top:0,behavior:'instant'});
 }
 function _healthBuckets(){
-  const accts=filteredAccounts(); let atRisk=0,unc=0,healthy=0,arrRisk=0,arrUnc=0,arrHealthy=0;
-  accts.forEach(a=>{const b=a.health&&a.health.band,arr=a.arr_usd||0;
-    if(b==='red'){atRisk++;arrRisk+=arr;}else if(b==='amber'){unc++;arrUnc+=arr;}else if(b==='green'){healthy++;arrHealthy+=arr;}});
-  return {atRisk,unc,healthy,arrRisk,arrUnc,arrHealthy};
+  const accts=filteredAccounts(); let atRisk=0,unc=0,healthy=0,notScored=0,arrRisk=0,arrUnc=0,arrHealthy=0,arrNotScored=0;
+  accts.forEach(a=>{const h=a.health,comp=h&&h.computable,b=h&&h.band,arr=a.arr_usd||0;
+    if(!comp){notScored++;arrNotScored+=arr;}
+    else if(b==='red'){atRisk++;arrRisk+=arr;}
+    else if(b==='amber'){unc++;arrUnc+=arr;}
+    else if(b==='green'){healthy++;arrHealthy+=arr;}});
+  return {atRisk,unc,healthy,notScored,arrRisk,arrUnc,arrHealthy,arrNotScored};
 }
 function renderPortfolioHealth(){
   const host=document.getElementById('li-pane-health'); if(!host||!DATA)return;
   const b=_healthBuckets();
-  const intro='<div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. These views are computed live from the portfolio health bands and ARR.</div>';
+  const nsNote=b.notScored>0?' <span class="note">'+b.notScored.toLocaleString()+' not scored yet (open to enrich)</span>':'';
+  const intro='<div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. These views are computed live from the portfolio health bands and ARR. Accounts without live signals yet are shown as "Not scored", not blended into a band.'+nsNote+'</div>';
   const tiles='<div class="mdw-grid" style="margin-bottom:16px">'+
     _widgetBig('At Risk',b.atRisk,b.atRisk>0?'warn':'')+
     _widgetBig('Uncertain',b.unc)+
@@ -1490,13 +1494,16 @@ function renderPortfolioHealth(){
     _widgetBig('At Risk ARR',fmt(b.arrRisk),b.arrRisk>0?'warn':'')+
     _widgetBig('Uncertain ARR',fmt(b.arrUnc))+
     _widgetBig('Healthy ARR',fmt(b.arrHealthy),'good')+
+    (b.notScored>0?_widgetBig('Not scored',b.notScored.toLocaleString()):'')+
   '</div>';
   const totArr=b.arrRisk+b.arrUnc+b.arrHealthy||1;
   const pct=n=>Math.round((n/totArr)*100);
   const pctBar='<div class="stack-bar"><span style="width:'+pct(b.arrRisk)+'%;background:var(--red)"></span><span style="width:'+pct(b.arrUnc)+'%;background:var(--amber)"></span><span style="width:'+pct(b.arrHealthy)+'%;background:var(--green)"></span></div>'+
-    '<div class="stack-leg"><span><i style="background:var(--red)"></i>At Risk '+pct(b.arrRisk)+'%</span><span><i style="background:var(--amber)"></i>Uncertain '+pct(b.arrUnc)+'%</span><span><i style="background:var(--green)"></i>Healthy '+pct(b.arrHealthy)+'%</span></div>';
-  const maxC=Math.max(1,b.atRisk,b.unc,b.healthy);
-  const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+    '<div class="stack-leg"><span><i style="background:var(--red)"></i>At Risk '+pct(b.arrRisk)+'%</span><span><i style="background:var(--amber)"></i>Uncertain '+pct(b.arrUnc)+'%</span><span><i style="background:var(--green)"></i>Healthy '+pct(b.arrHealthy)+'%</span></div><div class="muted" style="font-size:.78em;margin-top:6px">% of scored ARR ('+fmt(totArr)+'). Not-scored ARR '+fmt(b.arrNotScored)+' excluded.</div>';
+  const maxC=Math.max(1,b.atRisk,b.unc,b.healthy,b.notScored);
+  const countCols=[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']];
+  if(b.notScored>0)countCols.push(['Not scored',b.notScored,'var(--muted)']);
+  const countBars='<div class="cc-dist" style="height:130px">'+countCols.map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1].toLocaleString()+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   // Average health by segment — computed live.
   const segMap={};filteredAccounts().forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
   const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=70?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
@@ -2387,8 +2394,11 @@ async function renderCommandCenter(){
     else if(b==='amber'){arrMed+=arr;nMed++;}
     else if(b==='green'){arrHigh+=arr;nHigh++;}});
   const maxArr=Math.max(1,arrLow,arrMed,arrHigh,arrNS);
+  const maxN=Math.max(1,nLow,nMed,nHigh,nNS);
   const mfmt=n=>n>=1e6?('$'+(n/1e6).toFixed(2)+'M'):n>=1e3?('$'+Math.round(n/1e3)+'k'):('$'+n);
-  const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.round((arr/maxArr)*100)+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n+' accts</span></div></div>';
+  // Bars scaled by ACCOUNT COUNT (not ARR) so one huge-ARR bucket doesn't flatten the others
+  // into invisible slivers (which left a blank gap). ARR stays as the headline number.
+  const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((n/maxN)*100))+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n.toLocaleString()+' accts</span></div></div>';
   const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2>'+(nNS>0?'<span class="note">'+nNS.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist" style="height:150px">'+
     distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+(nNS>0?distBar('Not scored',arrNS,nNS,'var(--muted,#8aa)'):'')+'</div></div></div>';
   // Portfolio Growth — ARR by segment (real live breakdown, largest first).
@@ -3279,14 +3289,14 @@ function renderCompanyPage(id,d){
   if(typeof adSyncScope==='function') adSyncScope();
   const circle=health.computable?'<span class="hcircle '+hband(health.band)+'">'+health.score+'</span>':'<span class="hcircle hc-none">–</span>';
   const seg=nd(hs.segment_label||hs.segment);
-  // Page tab row (Planhat)
+  // Page tab row (Planhat). Tabs filter which sections of the profile are shown via cpTab().
   const tabs='<div class="cp-tabs">'+
     '<span class="cp-name">'+circle+escapeHtml(title)+'</span>'+
-    '<button class="cp-tab active"><span class="cp-tico">▚</span>Overview</button>'+
-    '<button class="cp-tab" title="See the full evidence trail below">Related Data</button>'+
-    '<button class="cp-tab">Usage</button>'+
-    '<button class="cp-tab">Revenue</button>'+
-    '<button class="cp-tab">Account Planning</button>'+
+    '<button class="cp-tab active" data-cpt="overview" onclick="cpTab(\'overview\',this)"><span class="cp-tico">▚</span>Overview</button>'+
+    '<button class="cp-tab" data-cpt="related" onclick="cpTab(\'related\',this)" title="Live signal evidence">Related Data</button>'+
+    '<button class="cp-tab" data-cpt="usage" onclick="cpTab(\'usage\',this)">Usage</button>'+
+    '<button class="cp-tab" data-cpt="revenue" onclick="cpTab(\'revenue\',this)">Revenue</button>'+
+    '<button class="cp-tab" data-cpt="planning" onclick="cpTab(\'planning\',this)">Account Planning</button>'+
   '</div>';
   // Metric tiles row (grounded in live signals; "no data" where a source is absent)
   const adopt=d.adoption||{};
@@ -3386,21 +3396,22 @@ function renderCompanyPage(id,d){
     '<h3>Live Coverage</h3>'+
     Object.keys(conn).map(k=>'<div class="cp-field"><span class="cp-fk">'+k+'</span><span class="cp-fv">'+(conn[k]?'<span class="pill g">live</span>':'<span class="pill pln">off</span>')+'</span></div>').join('')+
   '</aside>';
-  // Assemble
+  // Assemble. Each section is tagged with the tabs it belongs to (data-cpt, space-separated)
+  // so cpTab() can show the relevant subset; Overview shows everything.
   const left='<div>'+
     '<div class="cp-title"><h1>'+escapeHtml(title)+'</h1>'+circle+
       '<div class="cp-actions"><button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane</button>'+
       '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button></div></div>'+
-    tiles+
-    '<div class="cp-section"><div class="cp-shead"><h2>Signals</h2></div>'+signals+'</div>'+
-    '<div class="cp-section"><div class="cp-shead"><h2>Key metrics</h2><span class="cp-cnt">live signals</span></div>'+keyMetrics+'</div>'+
-    '<div class="cp-section"><div class="cp-shead"><h2>Health</h2><span class="cp-cnt">drivers &amp; trend</span></div>'+
+    '<div data-cpt="overview related usage revenue">'+tiles+'</div>'+
+    '<div class="cp-section" data-cpt="overview related"><div class="cp-shead"><h2>Signals</h2></div>'+signals+'</div>'+
+    '<div class="cp-section" data-cpt="overview related usage"><div class="cp-shead"><h2>Key metrics</h2><span class="cp-cnt">live signals</span></div>'+keyMetrics+'</div>'+
+    '<div class="cp-section" data-cpt="overview usage"><div class="cp-shead"><h2>Health</h2><span class="cp-cnt">drivers &amp; trend</span></div>'+
       (spark?'<div class="callout" style="margin-bottom:10px">'+spark+'</div>':'')+driversHtml+
       healthBreakdownHtml(health)+'</div>'+
-    '<div class="cp-section"><div class="cp-shead"><h2>Conversations &amp; activity</h2><span class="cp-cnt">'+tl.length+'</span></div>'+feed+'</div>'+
-    '<div class="cp-section"><div class="cp-shead"><h2>Contacts</h2><span class="cp-cnt">'+((hs.contacts||[]).length)+'</span></div>'+contactsList+'</div>'+
-    '<div class="cp-section"><div class="cp-shead"><h2>Comments</h2></div><div class="cp-comment"><textarea placeholder="Add a comment for the account team..."></textarea></div></div>'+
-    (d.tasks&&d.tasks.length?('<div class="cp-section"><div class="cp-shead"><h2>Tasks</h2><span class="cp-cnt">'+d.tasks.length+'</span></div>'+
+    '<div class="cp-section" data-cpt="overview related planning"><div class="cp-shead"><h2>Conversations &amp; activity</h2><span class="cp-cnt">'+tl.length+'</span></div>'+feed+'</div>'+
+    '<div class="cp-section" data-cpt="overview planning"><div class="cp-shead"><h2>Contacts</h2><span class="cp-cnt">'+((hs.contacts||[]).length)+'</span></div>'+contactsList+'</div>'+
+    '<div class="cp-section" data-cpt="overview planning"><div class="cp-shead"><h2>Comments</h2></div><div class="cp-comment"><textarea placeholder="Add a comment for the account team..."></textarea></div></div>'+
+    (d.tasks&&d.tasks.length?('<div class="cp-section" data-cpt="overview revenue planning"><div class="cp-shead"><h2>Tasks</h2><span class="cp-cnt">'+d.tasks.length+'</span></div>'+
       d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
         (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+'</div>').join('')+'</div>'):'')+
   '</div>';
@@ -3410,6 +3421,16 @@ function renderCompanyPage(id,d){
   window.ACTIVE_ACCOUNT_ID=id; window.ACTIVE_ACCOUNT_NAME=title;
   if(typeof adSyncScope==='function') adSyncScope();
   if(('#company/'+id)!==location.hash) history.replaceState(null,'',('#company/'+id));
+  window.scrollTo({top:0,behavior:'instant'});
+}
+// Company-profile tab switch: show only the sections tagged for the chosen tab (Overview
+// shows all). Fixes the previously-dead Related Data / Usage / Revenue / Account Planning tabs.
+function cpTab(name,btn){
+  document.querySelectorAll('.cp-tabs .cp-tab').forEach(b=>b.classList.toggle('active',b===btn||b.dataset.cpt===name));
+  document.querySelectorAll('#company-body [data-cpt]').forEach(sec=>{
+    const groups=(sec.getAttribute('data-cpt')||'').split(/\s+/);
+    sec.style.display=groups.includes(name)?'':'none';
+  });
   window.scrollTo({top:0,behavior:'instant'});
 }
 function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');window.ACTIVE_ACCOUNT_ID=null;window.ACTIVE_ACCOUNT_NAME=null;if(typeof adSyncScope==='function')adSyncScope();}
