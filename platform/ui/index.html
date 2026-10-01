@@ -1320,9 +1320,14 @@ function renderMyDashboard(){
   // Top customers by trending usage (most recently active, weighted by ARR).
   const top=uacc.slice().sort((a,b)=>(a.usage_days_since_visit-b.usage_days_since_visit)||((b.arr_usd||0)-(a.arr_usd||0))).slice(0,6);
   const topRows=top.map(a=>{const circle=a.health&&a.health.computable?'<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>':'<span class="hcircle hc-none">–</span>';const d=a.usage_days_since_visit;return '<div class="md-top-row" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+circle+'<span class="md-top-name">'+escapeHtml(a.name||a.account_id)+'</span><span class="md-top-meta">'+(d===0?'today':d+'d ago')+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</span></div>';}).join('');
-  // Renewing next 90 days (live renewal dates).
+  // Renewing soon (live renewal dates): overdue (past-due, not yet churned) first, then the
+  // next 90 days. In this book most dated renewals are already past, so showing only future
+  // ones hid the actionable overdue set.
   const today=new Date();
-  const ren90=accts.filter(a=>{if(!a.renewal_date)return false;const days=(new Date(a.renewal_date)-today)/86400000;return days>=0&&days<=90;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const _rdays=a=>a.renewal_date?((new Date(a.renewal_date)-today)/86400000):null;
+  const ren90=accts.filter(a=>{const dd=_rdays(a);return dd!=null && dd<=90 && !a.churned;})
+    .sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const _renOverdue=ren90.filter(a=>_rdays(a)<0).length;
 
   // ── New live widgets (all from existing per-account signals; honest when absent) ──
   const _days=d=>d?((new Date(d)-today)/86400000):null;
@@ -1378,8 +1383,24 @@ function renderMyDashboard(){
   }
   // (G) QBRs due — Strategic accounts entering the renewal cadence window (honest substitute
   // for "Overdue QBRs"; there is no QBR scheduling source, so we cannot show "overdue").
-  const qbrDue=accts.filter(a=>{const seg=(a.segment||'').toLowerCase();const d=_days(a.renewal_date);return seg.includes('strategic')&&d!=null&&d>=0&&d<=120;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
-  const wQbr=qbrDue.length?('<div class="mdw-big">'+qbrDue.length+'</div><div class="muted" style="font-size:.78em;margin-top:4px">Strategic accounts within 120d of renewal (schedule a QBR). No QBR-completion source, so "overdue" is not shown.</div>'):'<div class="empty">No Strategic accounts in the QBR window for this selection.</div>';
+  // (G) QBRs due — accounts worth a Quarterly Business Review in the renewal cadence
+  // window. "Strategic" is defined by business weight (Strategic tier, OR top-decile ARR,
+  // OR at-risk health), not a specific segment label — this book uses Agency/Corporate
+  // tiers, so a label match would never fire. Honest substitute for "Overdue QBRs"
+  // (no QBR-completion source exists, so we show "due", not "overdue").
+  const _arrVals=accts.map(a=>typeof a.arr_usd==='number'?a.arr_usd:0).filter(v=>v>0).sort((a,b)=>b-a);
+  const _arrP90=_arrVals.length?_arrVals[Math.floor(_arrVals.length*0.1)]||_arrVals[0]:0; // ~top decile
+  const _qbrWorthy=a=>{
+    const tier=(a.customer_tier||'').toLowerCase(), seg=(a.segment||'').toLowerCase();
+    if(tier.includes('strategic')||seg.includes('strategic'))return true;
+    if((a.arr_usd||0)>=_arrP90 && _arrP90>0)return true;              // top-ARR accounts
+    if(a.health&&a.health.computable&&a.health.band==='red')return true; // at-risk, worth a review
+    return false;
+  };
+  const qbrDue=accts.filter(a=>{const d=_days(a.renewal_date);return _qbrWorthy(a)&&d!=null&&d>=0&&d<=120;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const wQbr=qbrDue.length
+    ? '<div class="mdw-big">'+qbrDue.length+'</div><div class="muted" style="font-size:.78em;margin-top:4px">High-value / at-risk accounts within 120d of renewal (schedule a QBR). No QBR-completion source, so "overdue" is not shown.</div>'
+    : '<div class="empty">No high-value accounts are within 120 days of renewal in this selection.</div>';
 
   // Renewing next 90 days (live renewal dates) — continues below.
   // Compact KPI strip.
@@ -1395,7 +1416,7 @@ function renderMyDashboard(){
   host.innerHTML=_mdFilterBar()+strip+
     '<div class="md-2col">'+
       '<div class="panel"><div class="head"><h2>Tasks Due</h2><span class="note">'+tasks.length+' open</span></div><div class="body pad">'+(tasks.length?tasks.slice(0,6).map(t=>'<div class="md-task" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><span class="prio prio'+t.priority+'">'+t.priority+'</span><div><strong>'+escapeHtml(t.account)+'</strong><div class="sub">'+escapeHtml((t.trigger||'').slice(0,60))+'</div></div></div>').join(''):'<div class="empty">No open tasks in your book right now.</div>')+'</div></div>'+
-      '<div class="panel"><div class="head"><h2>Renewing next 90 Days</h2><span class="note">'+ren90.length+'</span></div><div class="body pad">'+(ren90.length?ren90.slice(0,6).map(a=>'<div class="md-task" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><span class="hcircle '+(a.health&&a.health.computable?hband(a.health.band):'hc-none')+'">'+(a.health&&a.health.computable?a.health.score:'–')+'</span><div><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+renewalDays(a.renewal_date)+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</div></div></div>').join(''):'<div class="empty">No companies renewing in the next 90 days.</div>')+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Renewals: overdue &amp; next 90 days</h2><span class="note">'+ren90.length+(_renOverdue?' · '+_renOverdue+' overdue':'')+'</span></div><div class="body pad">'+(ren90.length?ren90.slice(0,6).map(a=>'<div class="md-task" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><span class="hcircle '+(a.health&&a.health.computable?hband(a.health.band):'hc-none')+'">'+(a.health&&a.health.computable?a.health.score:'–')+'</span><div><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+renewalDays(a.renewal_date)+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</div></div></div>').join(''):'<div class="empty">No overdue or upcoming (90-day) renewals with a date in this selection.</div>')+'</div></div>'+
     '</div>'+
     '<div class="sec-title"><h2>Account Insights and Actions</h2></div>'+
     '<div class="md-insights">'+
