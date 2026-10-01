@@ -832,7 +832,7 @@ class HubSpot:
                             "hs_active_contracts_arr", "renewal_date", "hs_next_renewal_date",
                             "contract_renewal_date", "subscription_type", "account_id",
                             "lifecyclestage", "instance", "type", "hubspot_owner_id", "industry",
-                            "state", "hs_state_code", "country"],
+                            "state", "hs_state_code", "country", "cs_customer_tier"],
             "limit": 1,
         }
         res = config.http_post("https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
@@ -867,11 +867,17 @@ class HubSpot:
         arr = _num("arr__v2_", "arr", "hs_active_contracts_arr")
         # Real CS segment lives in icp_sales_segment (e.g. "Corporate", "Agency 21+ Users").
         raw_segment = _first("icp_sales_segment", "cs_segment")
+        # Authoritative pooled/tier flag from HubSpot. When cs_customer_tier is set it is
+        # the source of truth for pooled membership; segment is only a fallback heuristic.
+        customer_tier = _first("cs_customer_tier")
+        pooled = (str(customer_tier or "").strip().lower() == "pooled") if customer_tier else None
         return {
             "company_id": c.get("id"),
             "name": p.get("name"),
             "segment": self._map_segment(raw_segment),  # engine model: Strategic / Scaled
             "segment_label": raw_segment,               # original HubSpot label for display
+            "customer_tier": customer_tier,             # authoritative tier (e.g. "Pooled") when set in HubSpot
+            "pooled": pooled,                           # True/False when tier known; None when unset
             "arr_usd": arr,
             "state": _first("hs_state_code", "state"),
             "country": p.get("country"),

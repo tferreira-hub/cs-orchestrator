@@ -52,33 +52,86 @@
   --green:#0ca678;--greenbg:#e6f7f1;--amber:#d98b0b;--amberbg:#fdf4e3;--red:#e5484d;--redbg:#fdecec;--sky:#2f6bf0;
   --shadow:0 1px 2px rgba(11,18,32,.04),0 2px 6px rgba(11,18,32,.05);
   --shadowmd:0 6px 20px rgba(11,18,32,.08);--shadowlg:0 18px 44px rgba(11,18,32,.18);
+  /* Planhat-style light sidebar */
+  --side-bg:#fbfcfe;--side-line:#eaeef4;--side-ink:#475069;--side-ink2:#8a94a8;--side-active-bg:#eef0fe;--side-active-ink:#4b47d6;--side-hover:#f2f4f9;
+  --side-w:248px;--side-w-collapsed:64px;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-.app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+.app{display:grid;grid-template-columns:var(--side-w) 1fr;min-height:100vh;transition:grid-template-columns .18s ease}
+.app.side-collapsed{grid-template-columns:var(--side-w-collapsed) 1fr}
 
-/* Sidebar */
-.side{background:linear-gradient(180deg,#0b1020,#111834);color:#aeb7cc;padding:20px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto}
-.brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px}
-.brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:16px;box-shadow:0 4px 12px rgba(91,91,240,.4)}
-.brand .name{font-weight:800;color:#fff;font-size:1.06em;letter-spacing:-.01em}
-.brand .sub{font-size:.62em;color:#5c6784;letter-spacing:.14em;text-transform:uppercase;margin-top:1px}
-.navgroup{margin-top:16px}
-.navgroup .lbl{font-size:.64em;text-transform:uppercase;letter-spacing:.1em;color:#5c6784;font-weight:700;padding:0 10px 7px}
-.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:#aeb7cc;padding:9px 11px;border-radius:10px;font-size:.88em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s}
-.nav button:hover{background:rgba(255,255,255,.06);color:#fff}
-.nav button.active{background:var(--brand);color:#fff;box-shadow:0 6px 16px rgba(91,91,240,.35)}
-.nav .ico{width:16px;text-align:center;font-size:.95em;opacity:.9}
-.nav .count{margin-left:auto;background:rgba(255,255,255,.08);color:#cfd6e6;border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px;min-width:22px;text-align:center}
-.nav button.active .count{background:rgba(255,255,255,.24);color:#fff}
+/* Sidebar — Planhat-style light, flat, collapsible */
+.side{background:var(--side-bg);color:var(--side-ink);border-right:1px solid var(--side-line);padding:14px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;overflow-x:hidden}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 6px 14px;position:relative}
+.brand .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:15px;box-shadow:0 3px 10px rgba(91,91,240,.32);flex:0 0 32px}
+.brand .name{font-weight:800;color:var(--ink);font-size:1.02em;letter-spacing:-.01em}
+.brand .sub{font-size:.6em;color:var(--side-ink2);letter-spacing:.14em;text-transform:uppercase;margin-top:1px}
+.brand .brand-txt{min-width:0;overflow:hidden}
+.side-toggle{margin-left:auto;width:26px;height:26px;flex:0 0 26px;border:1px solid var(--side-line);background:#fff;border-radius:7px;color:var(--side-ink2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.9em;transition:background .12s,color .12s}
+.side-toggle:hover{background:var(--side-hover);color:var(--side-active-ink)}
+.navgroup{margin-top:12px}
+.navgroup .lbl{font-size:.62em;text-transform:uppercase;letter-spacing:.1em;color:var(--side-ink2);font-weight:700;padding:0 10px 6px;white-space:nowrap;overflow:hidden}
+/* Planhat "Sections" heading + collapsible section groups with colored icons */
+.side-sections-lbl{font-size:.62em;text-transform:uppercase;letter-spacing:.12em;color:var(--side-ink2);font-weight:700;padding:14px 10px 4px;white-space:nowrap;overflow:hidden}
+.side-top{margin-top:4px;padding-bottom:6px;border-bottom:1px solid var(--side-line)}
+.navsection{margin-top:2px}
+.navsection>.ns-head{display:flex;align-items:center;gap:9px;width:100%;background:transparent;border:0;color:var(--side-ink);padding:7px 10px;border-radius:8px;font:inherit;font-size:.86em;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;transition:background .12s}
+.navsection>.ns-head:hover{background:var(--side-hover)}
+.navsection>.ns-head .ns-ico{width:20px;height:20px;flex:0 0 20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.72em;color:#fff;font-weight:800}
+.navsection>.ns-head .ns-caret{margin-left:auto;color:var(--side-ink2);font-size:.7em;transition:transform .15s;flex:0 0 auto}
+.navsection.collapsed>.ns-head .ns-caret{transform:rotate(-90deg)}
+.navsection.collapsed>.nav{display:none}
+.navsection>.nav{padding-left:6px;margin-top:1px}
+.navsection>.nav button{padding-left:34px}
+/* Section icon colors (Planhat's small colored section glyphs) */
+.ns-ico.ns-daily{background:#5b5bf0}
+.ns-ico.ns-lead{background:#0ca678}
+.ns-ico.ns-scaled{background:#e08b0b}
+.ns-ico.ns-onboard{background:#eab308}
+.ns-ico.ns-risk{background:#e5484d}
+.ns-ico.ns-mgmt{background:#4a5568}
+.ns-ico.ns-exp{background:#0ca678}
+.ns-ico.ns-obj{background:#7c6cf7}
+.ns-ico.ns-pooled{background:#0e9f9f}
+.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:var(--side-ink);padding:8px 11px;border-radius:9px;font-size:.87em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
+.nav button:hover{background:var(--side-hover);color:var(--ink)}
+.nav button.active{background:var(--side-active-bg);color:var(--side-active-ink);font-weight:600}
+.nav .ico{width:17px;text-align:center;font-size:1em;opacity:.85;flex:0 0 17px}
+.nav button.active .ico{opacity:1}
+.nav .label{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nav .count{margin-left:auto;background:#eef1f6;color:var(--side-ink);border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px;min-width:22px;text-align:center;flex:0 0 auto}
+.nav button.active .count{background:#fff;color:var(--side-active-ink)}
 .nav .count.red{background:var(--red);color:#fff}
-.side .foot{margin-top:auto;font-size:.68em;color:#5c6784;padding:16px 8px 0;border-top:1px solid rgba(255,255,255,.06);line-height:1.6}
+.side .foot{margin-top:auto;font-size:.66em;color:var(--side-ink2);padding:14px 8px 0;border-top:1px solid var(--side-line);line-height:1.6}
+/* Collapsed state: icons only */
+.app.side-collapsed .brand .brand-txt,.app.side-collapsed .navgroup .lbl,.app.side-collapsed .nav .label,.app.side-collapsed .nav .count,.app.side-collapsed .side .foot,.app.side-collapsed .side-sections-lbl,.app.side-collapsed .navsection .ns-head span:not(.ns-ico),.app.side-collapsed .navsection .ns-caret{display:none}
+.app.side-collapsed .brand{justify-content:center}
+.app.side-collapsed .side-toggle{position:absolute;top:-2px;right:-4px}
+.app.side-collapsed .nav button{justify-content:center;padding:9px 0}
+.app.side-collapsed .navsection>.nav button{padding-left:0}
+.app.side-collapsed .navsection>.ns-head{justify-content:center;padding:7px 0}
+.app.side-collapsed .navgroup .lbl{padding:0;height:8px}
 
 /* Main */
 .main{min-width:0}
-.topbar{background:rgba(255,255,255,.85);backdrop-filter:saturate(150%) blur(8px);border-bottom:1px solid var(--line);padding:16px 32px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+.topbar{background:rgba(255,255,255,.85);backdrop-filter:saturate(150%) blur(8px);border-bottom:1px solid var(--line);padding:16px 32px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;gap:18px}
 .topbar h1{font-size:1.2em;font-weight:800;letter-spacing:-.02em}
 .topbar .crumb{font-size:.77em;color:var(--muted);margin-top:2px}
+/* Planhat-style centered global search */
+.gsearch{flex:1;max-width:520px;margin:0 auto;position:relative}
+.gsearch input{width:100%;border:1px solid var(--line);background:#f6f7fb;border-radius:9px;padding:8px 14px 8px 34px;font:inherit;font-size:.86em;color:var(--ink);transition:border-color .12s,box-shadow .12s,background .12s}
+.gsearch input:focus{outline:0;background:#fff;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.12)}
+.gsearch input::placeholder{color:var(--muted)}
+.gsearch .gs-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.9em;pointer-events:none}
+.gsearch .gs-results{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadowmd);max-height:360px;overflow:auto;z-index:40;display:none}
+.gsearch .gs-results.on{display:block}
+.gsearch .gs-item{display:flex;align-items:center;gap:10px;padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--line);font-size:.86em}
+.gsearch .gs-item:last-child{border-bottom:0}
+.gsearch .gs-item:hover,.gsearch .gs-item.sel{background:var(--brandsoft)}
+.gsearch .gs-item .gs-name{font-weight:600;color:var(--ink)}
+.gsearch .gs-item .gs-meta{margin-left:auto;font-size:.86em;color:var(--muted)}
+.gsearch .gs-empty{padding:14px;text-align:center;color:var(--muted);font-size:.85em}
 .status{display:flex;align-items:center;gap:8px;font-size:.8em;color:var(--ink2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 13px;box-shadow:var(--shadow)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--greenbg);animation:pulse 2s infinite}
 .modebadge{font-weight:700;font-size:.92em}
@@ -100,26 +153,24 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 
 /* Stats */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:14px;margin-bottom:24px}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden}
-.stat::after{content:"";position:absolute;right:-20px;top:-20px;width:70px;height:70px;border-radius:50%;background:var(--brandsoft);opacity:.6}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:none;position:relative;overflow:hidden}
+.stat::after{content:none}
 .stat .l{font-size:.71em;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;position:relative}
 .stat .v{font-size:2em;font-weight:800;letter-spacing:-.03em;margin-top:8px;position:relative}
 .stat .v.warn{color:var(--red)}.stat .v.good{color:var(--green)}
 .stat .d{font-size:.74em;color:var(--ink2);margin-top:4px;position:relative}
 
 .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:20px}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}
-.panel .head{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:none;margin-bottom:20px;overflow:hidden}
+.panel .head{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 .panel .head h2{font-size:1em;font-weight:700;letter-spacing:-.01em}
 .panel .head .note{font-size:.75em;color:var(--muted);font-weight:500}
-.panel .body{padding:6px 8px}.panel .body.pad{padding:18px 22px}
+.panel .body{padding:2px 6px}.panel .body.pad{padding:16px 20px}
 
 table{width:100%;border-collapse:collapse;font-size:.87em}
-th{text-align:left;padding:11px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:#fafbfe;border-bottom:1px solid var(--line)}
-td{padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}
+th{text-align:left;padding:9px 16px;color:var(--muted);font-size:.72em;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:#fff;border-bottom:1px solid var(--line)}
+td{padding:10px 16px;border-top:1px solid var(--line);vertical-align:middle}
 tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#f6f7ff}
-tbody tr:nth-child(even) td{background:#fcfcfe}
-tbody tr:nth-child(even).click:hover td{background:#f6f7ff}
 .pill{display:inline-block;border-radius:999px;padding:3px 11px;font-size:.72em;font-weight:700;white-space:nowrap}
 .g{background:var(--greenbg);color:var(--green)}.a{background:var(--amberbg);color:var(--amber)}.r{background:var(--redbg);color:var(--red)}
 .protect{background:var(--redbg);color:var(--red)}.expand{background:var(--brandsoft);color:var(--brand)}.use{background:#f3ecff;color:#8b5cf6}
@@ -131,6 +182,249 @@ tbody tr:nth-child(even).click:hover td{background:#f6f7ff}
 .evi{font-size:.78em;color:var(--muted);margin-top:4px}
 .draft{background:linear-gradient(180deg,#fafbff,#f6f7fe);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:10px;padding:11px 13px;margin-top:9px;font-size:.85em;color:var(--ink2)}
 .draft b{color:var(--brand)}
+/* Health breakdown factor scorecard (mirrors a Planhat factor list) */
+.hbreak{background:#f8f9fc;border:1px solid var(--line);border-radius:12px;padding:6px 14px}
+.hbreak .hbrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.85em}
+.hbreak .hbrow:last-child{border-bottom:none}
+.hbreak .hbrow.hbstart{color:var(--muted)}
+.hbreak .hbrow.hbtotal{font-weight:800;padding-top:11px}
+.hbreak .hbrow .hbfactor{color:var(--ink2)}
+.hbreak .hbrow .hbpts{font-variant-numeric:tabular-nums;font-weight:700}
+.hbreak .hbrow .hbpts.pen{color:var(--red)}
+.hbreak .hbrow .hbpts.bonus{color:var(--green)}
+.hbreak .hbrow .hbpts.base{color:var(--muted);font-weight:600}
+/* Renewal forecast pill (mirrors Planhat's AI Forecast column) */
+.fc{display:inline-block;border-radius:999px;padding:3px 11px;font-size:.72em;font-weight:700;white-space:nowrap}
+.fc-churn{background:var(--redbg);color:var(--red)}
+.fc-expansion{background:var(--brandsoft);color:var(--brand)}
+.fc-renewal{background:var(--greenbg);color:var(--green)}
+/* (AI) Growth Potential pill (The Pool) */
+.gp{display:inline-block;border-radius:6px;padding:3px 10px;font-size:.76em;font-weight:700;white-space:nowrap}
+.gp-high{background:#e6f7f1;color:var(--green)}
+.gp-low{background:#fdf4e3;color:#a5670a}
+/* Planhat-style numbered health circle */
+.hcircle{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:.76em;font-weight:800;font-variant-numeric:tabular-nums;border:2px solid;flex:0 0 26px}
+.hcircle.g{color:var(--green);border-color:var(--green);background:var(--greenbg)}
+.hcircle.a{color:var(--amber);border-color:var(--amber);background:var(--amberbg)}
+.hcircle.r{color:var(--red);border-color:var(--red);background:var(--redbg)}
+/* Planhat-style CSM 5-dot rating */
+.csmdots{display:inline-flex;gap:3px;vertical-align:middle}
+.csmdots i{width:9px;height:9px;border-radius:50%;background:#dde2ec;display:inline-block}
+.csmdots i.on{background:var(--green)}
+.csmdots i.on.mid{background:var(--amber)}
+.csmdots i.on.low{background:var(--red)}
+/* Planhat-style filter pill bar */
+.filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.filterbar .fb-find{position:relative;margin-right:4px}
+.filterbar .fb-find input{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px 6px 28px;font:inherit;font-size:.82em;min-width:210px}
+.filterbar .fb-find input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.1)}
+.filterbar .fb-find .fb-ico{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.85em}
+.fpill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font-size:.79em;font-weight:600;color:var(--ink2);cursor:pointer;transition:border-color .12s,background .12s}
+.fpill:hover{border-color:var(--brand);color:var(--brand)}
+.fpill.active{background:var(--amberbg);border-color:#f0d59a;color:#8a5a06}
+.fpill.ghost{color:var(--muted);border-style:dashed}
+.fpill .fp-x{color:var(--muted);font-weight:700;margin-left:2px}
+.filterbar .fb-count{margin-left:auto;font-size:.79em;color:var(--muted);font-weight:600}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink2)}
+th.sortable .arr{opacity:.5;font-size:.9em;margin-left:3px}
+th.sortable.sorted .arr{opacity:1;color:var(--brand)}
+/* Planhat companies list: normal-case headers, airy rows, checkbox + play affordances */
+table.acct-list th{text-transform:none;letter-spacing:0;font-size:.78em;color:var(--ink2);font-weight:600}
+table.acct-list td{padding:12px 16px}
+table.acct-list .col-check,table.acct-list th.col-check{width:34px;padding-right:0;text-align:center}
+table.acct-list .col-play,table.acct-list th.col-play{width:26px;padding-left:6px;padding-right:0}
+table.acct-list input[type=checkbox]{width:14px;height:14px;accent-color:var(--brand);cursor:pointer;vertical-align:middle}
+table.acct-list .rowplay{color:var(--muted);font-size:.8em;opacity:0;transition:opacity .12s}
+table.acct-list tr:hover .rowplay{opacity:1;color:var(--brand)}
+.hcircle.hc-none{border-color:var(--line);color:var(--muted);background:#fff}
+/* (AI) Business Health numeric pill */
+.bhpill{display:inline-block;min-width:30px;text-align:center;border-radius:7px;padding:2px 8px;font-size:.8em;font-weight:700;font-variant-numeric:tabular-nums}
+.bhpill.g{background:var(--greenbg);color:var(--green)}.bhpill.a{background:var(--amberbg);color:var(--amber)}.bhpill.r{background:var(--redbg);color:var(--red)}
+/* Renewal-in-days */
+.rdays{color:var(--ink2)}
+.rdays.rd-near{color:var(--amber);background:var(--amberbg);border-radius:6px;padding:1px 7px}
+.rdays.rd-soon{color:var(--red);background:var(--redbg);border-radius:6px;padding:1px 7px}
+/* Usage Trend recency bar */
+.utrend{display:inline-flex;align-items:center;gap:8px}
+.utrend .utbar{width:54px;height:6px;border-radius:99px;background:#edf0f6;overflow:hidden;display:inline-block}
+.utrend .utfill{display:block;height:100%;border-radius:99px}
+.utrend .utval{font-size:.8em;color:var(--ink2);font-variant-numeric:tabular-nums}
+/* AI columns: keep them readable but bounded */
+table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82em}
+/* Saved-views tab row (Planhat) */
+.viewtabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin-bottom:2px;overflow-x:auto}
+.viewtabs .vtab{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;font-size:.84em;font-weight:600;color:var(--ink2);border:0;background:transparent;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit}
+.viewtabs .vtab:hover{color:var(--ink)}
+.viewtabs .vtab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.viewtabs .vtab .vt-ico{font-size:.9em;opacity:.8}
+.viewtabs .vt-add{color:var(--muted);padding:9px 12px;font-weight:700}
+/* Command Center top tab row (Planhat two-level nav) */
+.cc-tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin:-6px 0 20px;overflow-x:auto}
+.cc-tabs .cc-tab{display:inline-flex;align-items:center;gap:7px;padding:11px 15px;font-size:.87em;font-weight:600;color:var(--ink2);background:transparent;border:0;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit}
+.cc-tabs .cc-tab:hover{color:var(--ink)}
+.cc-tabs .cc-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.cc-tabs .cc-tab .cc-tico{opacity:.75;font-size:.92em}
+.cc-pane{display:none}
+.cc-pane.on{display:block;animation:fade .2s ease}
+/* Personal Dashboard widgets */
+.md-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:900px){.md-2col{grid-template-columns:1fr}}
+/* Compact KPI strip */
+.md-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:1000px){.md-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.md-kpis{grid-template-columns:repeat(2,1fr)}}
+.md-kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 12px;text-align:center}
+.md-kpi-v{font-size:1.5em;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.md-kpi-v.warn{color:var(--red)}.md-kpi-v.good{color:var(--green)}
+.md-kpi-l{font-size:.72em;color:var(--muted);font-weight:600;margin-top:5px}
+/* Task / renewal rows */
+.md-task{display:flex;align-items:flex-start;gap:11px;padding:9px 6px;border-radius:9px;cursor:pointer;transition:background .12s}
+.md-task:hover{background:#f6f7ff}
+.md-task .sub{font-size:.8em;color:var(--muted);margin-top:2px}
+.md-task strong{font-size:.9em}
+/* Insights 3-col */
+.md-insights{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:1000px){.md-insights{grid-template-columns:1fr}}
+.md-insights .panel{margin-bottom:0}
+.md-top-row{display:flex;align-items:center;gap:10px;padding:7px 6px;border-radius:8px;cursor:pointer;transition:background .12s}
+.md-top-row:hover{background:#f6f7ff}
+.md-top-name{font-size:.86em;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md-top-meta{margin-left:auto;font-size:.78em;color:var(--muted);white-space:nowrap}
+.mdw-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:1200px){.mdw-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:820px){.mdw-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.mdw-grid{grid-template-columns:1fr}}
+.mdw{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-height:96px}
+.mdw-h{padding:9px 13px;font-size:.74em;font-weight:700;color:var(--ink2);border-bottom:1px solid var(--line)}
+.mdw-b{padding:11px 13px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.mdw-big{font-size:1.9em;font-weight:800;letter-spacing:-.03em;text-align:center;color:var(--ink)}
+.mdw-big.warn{color:var(--red)}.mdw-big.good{color:var(--green)}
+.mdw-na{font-size:.76em;color:var(--muted);text-align:center;line-height:1.45}
+.mdw.wide{grid-column:span 2}
+@media(max-width:560px){.mdw.wide{grid-column:span 1}}
+.stack-bar{display:flex;height:16px;border-radius:8px;overflow:hidden;background:#edf0f6}
+.stack-bar span{display:block;height:100%}
+.stack-leg{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:.78em;color:var(--ink2)}
+.stack-leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+/* Calendar weekly view */
+.cal-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.cal-title{font-size:1.05em;font-weight:800}
+.cal-count{font-size:.72em;font-weight:600;color:var(--muted);margin-left:8px}
+.cal-filters{display:flex;gap:8px;flex-wrap:wrap}
+.cal-week{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+@media(max-width:900px){.cal-week{grid-template-columns:repeat(2,1fr)}}
+.cal-col{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:220px;display:flex;flex-direction:column}
+.cal-col.cal-today{border-color:var(--brand);box-shadow:0 0 0 2px var(--brandsoft)}
+.cal-dh{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:1px;position:relative}
+.cal-dow{font-size:.8em;font-weight:700;color:var(--ink)}
+.cal-date{font-size:.72em;color:var(--muted)}
+.cal-n{position:absolute;right:12px;top:10px;font-size:.72em;font-weight:800;color:var(--brand);background:var(--brandsoft);border-radius:999px;min-width:20px;text-align:center;padding:1px 7px}
+.cal-body{padding:8px;flex:1;display:flex;flex-direction:column;gap:7px}
+.cal-task{border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:7px 9px;cursor:pointer;transition:box-shadow .12s}
+.cal-task:hover{box-shadow:var(--shadow)}
+.cal-task.prio-l1{border-left-color:var(--red)}.cal-task.prio-l2{border-left-color:var(--amber)}
+.cal-task b{display:block;font-size:.8em;color:var(--ink)}
+.cal-task span{display:block;font-size:.72em;color:var(--muted);margin-top:2px}
+.cal-empty{color:var(--muted);font-size:.85em;text-align:center;padding:14px 0}
+/* Calendar: add task + quick-add + user tasks */
+.cal-add-btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:7px 13px;font:700 .8em Inter,system-ui,sans-serif;cursor:pointer}
+.cal-add-btn:hover{background:var(--brand2)}
+.cal-quickadd{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+.cal-quickadd input{border:1px solid var(--line);border-radius:8px;padding:8px 11px;font:inherit;font-size:.86em}
+.cal-quickadd input#calTaskName{flex:2;min-width:180px}
+.cal-quickadd input#calTaskCompany{flex:1;min-width:150px}
+.cal-add-go{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:700 .82em Inter,system-ui,sans-serif;cursor:pointer}
+.cal-add-go:hover{background:var(--brand2)}
+.cal-add-cancel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:600 .82em Inter,system-ui,sans-serif;color:var(--ink2);cursor:pointer}
+.cal-task.cal-usertask{border-left-color:var(--green)}
+.cal-sel{border:1px solid var(--line);border-radius:7px;padding:5px 9px;font:inherit;font-size:.86em;background:#fff}
+.cal-desc{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font:inherit;font-size:.86em;resize:vertical;min-height:60px}
+.cal-desc:focus,.cal-sel:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.1)}
+.cal-check{display:flex;align-items:center;gap:8px;font-size:.86em;color:var(--ink2);padding:5px 0}
+.cal-addcheck{display:flex;gap:8px;margin-top:8px}
+.cal-addcheck input{flex:1;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;font-size:.85em}
+.cal-addcheck button{background:var(--brandsoft);color:var(--brand);border:1px solid #dedcff;border-radius:8px;padding:7px 12px;font:600 .82em Inter;cursor:pointer}
+.cal-del{margin-top:20px;background:var(--redbg);color:var(--red);border:1px solid #f6c9cb;border-radius:8px;padding:9px 14px;font:700 .82em Inter,system-ui,sans-serif;cursor:pointer}
+.cal-del:hover{background:var(--red);color:#fff}
+/* Data Model: model list + fields table */
+.dm-wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px;align-items:start}
+@media(max-width:900px){.dm-wrap{grid-template-columns:1fr}}
+.dm-list{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px;position:sticky;top:88px;max-height:calc(100vh - 110px);overflow:auto}
+.dm-mi{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:0;border-radius:8px;padding:8px 10px;font:inherit;font-size:.86em;color:var(--ink2);cursor:pointer}
+.dm-mi:hover{background:var(--side-hover);color:var(--ink)}
+.dm-mi.active{background:var(--brandsoft);color:var(--brand);font-weight:700}
+.dm-mico{opacity:.7;font-size:.9em}
+.dm-mcount{margin-left:auto;font-size:.78em;color:var(--muted);background:#eef1f6;border-radius:999px;padding:1px 8px}
+.dm-mi.active .dm-mcount{background:#fff;color:var(--brand)}
+.dm-main{min-width:0}
+/* Data Explorer: main grid + right field picker */
+.de-wrap{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:18px;align-items:start}
+@media(max-width:1000px){.de-wrap{grid-template-columns:1fr}}
+.de-main{min-width:0}
+.de-fields{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;position:sticky;top:88px;max-height:calc(100vh - 110px);overflow:auto}
+.de-fh{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:8px;color:var(--muted)}
+.de-fh input{border:0;outline:0;font:inherit;font-size:.84em;width:100%;color:var(--ink)}
+.de-fgroup{font-size:.66em;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;padding:10px 6px 4px}
+.de-field{display:flex;align-items:center;gap:8px;font-size:.84em;color:var(--ink2);padding:5px 6px;border-radius:7px;cursor:pointer}
+.de-field:hover{background:var(--side-hover)}
+.de-field.on{color:var(--brand);font-weight:600}
+.de-field input{accent-color:var(--brand)}
+.dm-src{font-size:.86em;color:var(--ink2);font-weight:600}
+.dm-cov{display:inline-flex;align-items:center;gap:8px;font-size:.82em;color:var(--ink2);font-variant-numeric:tabular-nums}
+.dm-covbar{width:52px;height:6px;border-radius:99px;background:#edf0f6;overflow:hidden;display:inline-block}
+.dm-covbar span{display:block;height:100%;background:var(--green);border-radius:99px}
+.dm-summary{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 0}
+.dm-srcchip{font-size:.76em;font-weight:600;border-radius:999px;padding:4px 11px;border:1px solid var(--line)}
+.dm-srcchip.on{background:var(--greenbg);color:var(--green);border-color:#bfe6d5}
+.dm-srcchip.off{background:#f1f3f8;color:var(--muted)}
+/* Renewal calendar */
+.ren-cal{display:flex;align-items:flex-end;gap:6px;height:150px}
+.ren-mo{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
+.ren-bar-wrap{flex:1;display:flex;align-items:flex-end;width:100%;justify-content:center}
+.ren-bar{width:64%;background:var(--brand);border-radius:5px 5px 0 0;min-height:2px}
+.ren-n{font-size:.72em;font-weight:700;color:var(--ink2);margin-top:4px}
+.ren-m{font-size:.7em;color:var(--muted);margin-top:2px}
+/* My Command Center top band (Planhat) */
+.cc-big{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 18px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.cc-big .cc-big-l{font-size:.88em;font-weight:700;color:var(--ink2)}
+.cc-big .cc-big-v{font-size:2.2em;font-weight:800;letter-spacing:-.03em;margin-top:8px}
+.cc-big .cc-big-v.warn{color:var(--red)}.cc-big .cc-big-v.good{color:var(--green)}
+.cc-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;margin-bottom:16px;align-items:start}
+.cc-left{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cc-headline{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.cc-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cc-charts .panel{margin-bottom:0}
+.cc-charts .panel .body.pad{padding:14px 16px 16px}
+.cc-right{min-width:0}
+.cc-right .panel{margin-bottom:0}
+@media(max-width:1050px){.cc-grid{grid-template-columns:1fr}.cc-charts{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.cc-headline,.cc-charts{grid-template-columns:1fr}}
+.cc-big{padding:16px 14px}
+.cc-big .cc-big-v{font-size:1.9em;margin-top:6px}
+.cc-dist{display:flex;align-items:flex-end;justify-content:space-around;height:150px;gap:14px;width:100%}
+.cc-distcol{display:flex;flex-direction:column;align-items:center;flex:1;height:100%}
+.cc-distbarwrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:100%;position:relative}
+.cc-distbar{width:60%;max-width:80px;min-height:6px;border-radius:8px 8px 0 0}
+.cc-distn{font-weight:800;font-size:.82em;color:var(--ink);margin-bottom:6px}
+.cc-distlbl{margin-top:10px;font-size:.82em;color:var(--ink2);font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
+.cc-distsub{font-size:.82em;color:var(--muted);font-weight:500}
+/* Meetings grouped rows + contacts */
+tr.mtg-group td{padding:7px 16px;font-size:.74em;font-weight:800;letter-spacing:.02em;text-transform:none}
+tr.mtg-group .mtg-gico{margin-right:7px;font-size:1.05em;vertical-align:-1px}
+tr.mtg-group .mtg-count{margin-left:8px;font-weight:700;font-size:.9em;background:rgba(0,0,0,.06);border-radius:999px;padding:1px 8px}
+tr.mtg-group.g-onboard td{background:#fdf4e3;color:#a5670a}
+tr.mtg-group.g-qbr td{background:#f5f0ff;color:#7c4dd6}
+.mtg-table td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:middle}
+.mtg-table th{padding:9px 16px;background:#fff}
+.mtg-row td:first-child{font-size:.9em}
+.mtg-play{color:var(--muted);font-size:.72em;margin-right:9px;opacity:0;transition:opacity .12s}
+.mtg-row:hover .mtg-play{opacity:1;color:var(--brand)}
+.mtg-due{font-size:.82em;color:var(--ink2);background:#f1f3f8;border-radius:6px;padding:2px 9px;font-weight:600}
+.mtg-action{font-size:.83em;color:var(--ink2);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mtg-avatars{display:inline-flex}
+.mtg-ava{width:24px;height:24px;border-radius:50%;color:#fff;font-size:.64em;font-weight:800;display:inline-flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-7px;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.mtg-ava:first-child{margin-left:0}
 details.draft>summary{cursor:pointer;color:var(--brand);font-weight:700;list-style:none;user-select:none}
 details.draft>summary::-webkit-details-marker{display:none}
 details.draft>summary::before{content:'\25B8';display:inline-block;margin-right:6px;transition:transform .15s}
@@ -155,6 +449,69 @@ body.dock-open .drawer{right:420px}
 .drawer .dhead{flex:0 0 auto;padding:26px 28px 20px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f6f7ff,#eef0fe)}
 .drawer .dbody{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:20px 26px}.drawer .dbody .body.pad{padding:16px 0}.drawer .x{position:absolute;top:22px;right:24px;cursor:pointer;color:var(--muted);font-size:1.5em;line-height:1}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.86em}.kv b{font-variant-numeric:tabular-nums}
+/* ===== Planhat-style full-page Company Profile ===== */
+.company-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+@media(max-width:1100px){.company-wrap{grid-template-columns:1fr}}
+.cp-tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
+.cp-tabs .cp-tab{display:inline-flex;align-items:center;gap:7px;padding:10px 14px;font-size:.86em;font-weight:600;color:var(--ink2);background:transparent;border:0;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit}
+.cp-tabs .cp-tab:hover{color:var(--ink)}
+.cp-tabs .cp-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.cp-tabs .cp-tab .cp-tico{opacity:.7;font-size:.9em}
+.cp-tabs .cp-name{font-weight:800;color:var(--ink);padding:10px 12px 10px 0;margin-right:6px;border-right:1px solid var(--line);display:inline-flex;align-items:center;gap:8px}
+.cp-title{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.cp-title .hcircle{width:34px;height:34px;flex:0 0 34px;font-size:.9em}
+.cp-title h1{font-size:1.5em;font-weight:800;letter-spacing:-.02em}
+.cp-title .cp-sub{font-size:.8em;color:var(--muted);margin-top:2px}
+.cp-title .cp-actions{margin-left:auto;display:flex;gap:8px}
+.cp-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+@media(max-width:760px){.cp-tiles{grid-template-columns:repeat(2,1fr)}}
+.cp-tile{display:flex;align-items:center;gap:13px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+.cp-tile .cp-tico{width:34px;height:34px;flex:0 0 34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1em;background:var(--brandsoft);color:var(--brand)}
+.cp-tile .cp-tv{font-size:1.4em;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.cp-tile .cp-tl{font-size:.76em;color:var(--muted);margin-top:2px}
+.cp-tile.warn .cp-tv{color:var(--red)}.cp-tile.warn .cp-tico{background:var(--redbg);color:var(--red)}
+.cp-tile.good .cp-tico{background:var(--greenbg);color:var(--green)}
+.cp-section{margin-bottom:22px}
+.cp-section .cp-shead{display:flex;align-items:center;gap:9px;margin-bottom:11px}
+.cp-section .cp-shead h2{font-size:1.02em;font-weight:700}
+.cp-section .cp-shead .cp-cnt{font-size:.82em;color:var(--muted);font-weight:600}
+.cp-signals{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:26px;text-align:center;color:var(--muted);font-size:.88em}
+/* Conversations / activity feed */
+.cp-feed{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.cp-feed .cp-fgroup{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;padding:12px 18px 6px}
+.cp-feed .cp-item{display:flex;align-items:flex-start;gap:12px;padding:12px 18px;border-top:1px solid var(--line);cursor:default}
+.cp-feed .cp-item:hover{background:#f8f9fc}
+.cp-feed .cp-iico{width:26px;height:26px;flex:0 0 26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.8em;font-weight:800;background:var(--brandsoft);color:var(--brand)}
+.cp-feed .cp-iico.sev-high{background:var(--redbg);color:var(--red)}.cp-feed .cp-iico.sev-medium{background:var(--amberbg);color:var(--amber)}
+.cp-feed .cp-ibody{min-width:0;flex:1}
+.cp-feed .cp-ititle{font-weight:600;font-size:.88em;color:var(--ink)}
+.cp-feed .cp-idesc{font-size:.82em;color:var(--ink2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-feed .cp-idate{margin-left:auto;font-size:.76em;color:var(--muted);white-space:nowrap;flex:0 0 auto}
+.cp-comment{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cp-comment textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font:inherit;font-size:.86em;resize:vertical;min-height:52px}
+.cp-comment textarea:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.1)}
+/* Right Fields rail */
+.cp-rail{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;position:sticky;top:88px}
+.cp-rail h3{font-size:.72em;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+.cp-rail h3:first-child{margin-top:0;padding-top:0;border-top:0}
+.cp-field{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:.84em}
+.cp-field .cp-fk{color:var(--muted)}
+.cp-field .cp-fv{color:var(--ink);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.cp-rail .cp-attach{display:flex;align-items:center;gap:8px;font-size:.82em;color:var(--ink2);padding:6px 0}
+.cp-rail .cp-attach .cp-aico{color:var(--muted)}
+/* Company page: key metrics grid + contacts */
+.cp-kmgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+@media(max-width:760px){.cp-kmgrid{grid-template-columns:repeat(2,1fr)}}
+.cp-km{background:var(--surface);padding:12px 14px}
+.cp-km-l{font-size:.72em;color:var(--muted);font-weight:600}
+.cp-km-v{font-size:.95em;font-weight:700;color:var(--ink);margin-top:4px}
+.cp-contacts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:760px){.cp-contacts{grid-template-columns:1fr}}
+.cp-contact{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.cp-cav{width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:var(--brandsoft);color:var(--brand);font-weight:800;font-size:.82em;display:flex;align-items:center;justify-content:center}
+.cp-cn{font-size:.86em;font-weight:600;color:var(--ink)}
+.cp-crole{font-size:.82em;color:var(--brand);font-weight:600}
+.cp-ce{font-size:.78em;color:var(--muted);margin-top:1px}
 .sect{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:20px 0 9px}
 .writeback{background:linear-gradient(180deg,#f2f3ff,#eef0fe);border:1px solid #dcdffb;border-radius:12px;padding:13px 15px;font-size:.84em;color:#3b39b8}
 .callout{background:#f8f9fc;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:.85em;color:var(--ink2)}
@@ -411,55 +768,178 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 <body>
 <div class="app">
   <aside class="side">
-    <div class="brand"><div class="logo">CS</div><div><div class="name">CS Platform</div><div class="sub">Customer Success</div></div></div>
-    <div class="navgroup"><div class="lbl">Workspace</div><div class="nav">
-      <button class="active" data-v="dash" onclick="go('dash')"><span class="ico">▚</span> Dashboard</button>
-      <button data-v="queue" onclick="go('queue')"><span class="ico">☰</span> Task Queue <span class="count" id="c-queue"></span></button>
-      <button data-v="accounts" onclick="go('accounts')"><span class="ico">▤</span> Accounts <span class="count" id="c-acct"></span></button>
-    </div></div>
-    <div class="navgroup"><div class="lbl">Playbooks · Three Mandates</div><div class="nav">
-      <button data-v="protect" onclick="go('protect')"><span class="ico">◆</span> Protect · Actions <span class="count" id="c-protect"></span></button>
-      <button data-v="expand" onclick="go('expand')"><span class="ico">▲</span> Expand · Renewals <span class="count" id="c-expand"></span></button>
-      <button data-v="use" onclick="go('use')"><span class="ico">●</span> Adopt · Use <span class="count" id="c-use"></span></button>
-    </div></div>
-    <div class="navgroup"><div class="lbl">Data &amp; Governance</div><div class="nav">
-      <button data-v="life" onclick="go('life')"><span class="ico">◔</span> Lifecycle</button>
-      <button data-v="kpi" onclick="go('kpi')"><span class="ico">▦</span> Leadership KPIs</button>
-      <button data-v="gaps" onclick="go('gaps')"><span class="ico">◇</span> Data Gaps <span class="count" id="c-gaps"></span></button>
-      <button data-v="integrations" onclick="go('integrations')"><span class="ico">⬡</span> Integrations</button>
-      <button data-v="playbook" onclick="go('playbook')"><span class="ico">⚙</span> Playbook Controls</button>
-      <button data-v="audit" onclick="go('audit')"><span class="ico">🛡</span> Audit Trail</button>
-    </div></div>
+    <div class="brand"><div class="logo">CS</div><div class="brand-txt"><div class="name">CS Platform</div><div class="sub">Customer Success</div></div><button class="side-toggle" id="sideToggle" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button></div>
+
+    <div class="nav side-top">
+      <button data-v="datamodel" onclick="go('datamodel')" title="Data Model"><span class="ico">⛃</span> <span class="label">Data Model</span></button>
+      <button data-v="dataexplorer" onclick="go('dataexplorer')" title="Data Explorer"><span class="ico">⧉</span> <span class="label">Data Explorer</span></button>
+      <button data-v="calendar" onclick="go('calendar')" title="Calendar"><span class="ico">▦</span> <span class="label">Calendar</span></button>
+      <button data-v="notifications" onclick="go('notifications')" title="Notifications"><span class="ico">◔</span> <span class="label">Notifications</span></button>
+    </div>
+
+    <div class="side-sections-lbl">Sections</div>
+
+    <div class="navsection" data-sec="daily">
+      <button class="ns-head" onclick="toggleSection('daily')"><span class="ns-ico ns-daily">▶</span><span>CS Day to Day</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="mydash" onclick="go('mydash')" title="Dashboard"><span class="ico">◱</span> <span class="label">Dashboard</span></button>
+        <button class="active" data-v="dash" onclick="go('dash')" title="Command Center"><span class="ico">▚</span> <span class="label">Command Center</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="lead">
+      <button class="ns-head" onclick="toggleSection('lead')"><span class="ns-ico ns-lead">◈</span><span>CS Leadership</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="leading" onclick="go('leading')" title="Leading Indicators"><span class="ico">↗</span> <span class="label">Leading Indicators</span></button>
+        <button data-v="lagging" onclick="go('lagging')" title="Lagging Indicators"><span class="ico">↘</span> <span class="label">Lagging Indicators</span></button>
+        <button data-v="reviews" onclick="go('reviews')" title="Portfolio Reviews"><span class="ico">▦</span> <span class="label">Portfolio Reviews</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="scaled">
+      <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>Scaled Customer Success</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="scaled" onclick="go('scaled')" title="Scaled Customer Success"><span class="ico">◐</span> <span class="label">Scaled Customer Success</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="onboard">
+      <button class="ns-head" onclick="toggleSection('onboard')"><span class="ns-ico ns-onboard">◇</span><span>Onboarding</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="life" onclick="go('life')" title="Lifecycle"><span class="ico">◔</span> <span class="label">Lifecycle</span></button>
+        <button data-v="gaps" onclick="go('gaps')" title="Data Gaps"><span class="ico">◇</span> <span class="label">Data Gaps</span> <span class="count" id="c-gaps"></span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="risk">
+      <button class="ns-head" onclick="toggleSection('risk')"><span class="ns-ico ns-risk">◆</span><span>Risk</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="riskesc" onclick="go('riskesc')" title="Risk &amp; Escalation"><span class="ico">⚠</span> <span class="label">Risk &amp; Escalation</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="expansions">
+      <button class="ns-head" onclick="toggleSection('expansions')"><span class="ns-ico ns-exp">▲</span><span>Expansions</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="expansions" onclick="go('expansions')" title="Expansions"><span class="ico">▲</span> <span class="label">Expansions</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="objadopt">
+      <button class="ns-head" onclick="toggleSection('objadopt')"><span class="ns-ico ns-obj">◎</span><span>Objectives &amp; Adoption</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="objadopt" onclick="go('objadopt')" title="Objectives &amp; Adoption"><span class="ico">◎</span> <span class="label">Objectives &amp; Adoption</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="pooled">
+      <button class="ns-head" onclick="toggleSection('pooled')"><span class="ns-ico ns-pooled">◐</span><span>Pooled CS</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="pooled" data-pctab="inbox" onclick="go('pooled');pooledLeaf('inbox')" title="Inbox"><span class="ico">✉</span> <span class="label">Inbox</span></button>
+        <button data-v="pooled" data-pctab="process" onclick="go('pooled');pooledLeaf('process')" title="Process"><span class="ico">⚙</span> <span class="label">Process</span></button>
+        <button data-v="pooled" data-pctab="nrr" onclick="go('pooled');pooledLeaf('nrr')" title="NRR"><span class="ico">↻</span> <span class="label">NRR</span></button>
+      </div>
+    </div>
+
+    <div class="navsection" data-sec="mgmt">
+      <button class="ns-head" onclick="toggleSection('mgmt')"><span class="ns-ico ns-mgmt">⚙</span><span>Management</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="integrations" onclick="go('integrations')" title="Integrations"><span class="ico">⬡</span> <span class="label">Integrations</span></button>
+        <button data-v="playbook" onclick="go('playbook')" title="Playbook Controls"><span class="ico">⚙</span> <span class="label">Playbook Controls</span></button>
+        <button data-v="audit" onclick="go('audit')" title="Audit Trail"><span class="ico">🛡</span> <span class="label">Audit Trail</span></button>
+      </div>
+    </div>
+
     <div class="foot">One standardised way of working. Live signals are synthesised into one prioritised queue.</div>
   </aside>
 
   <div class="main">
     <div class="topbar">
       <div><h1 id="title">Dashboard</h1><div class="crumb" id="crumb">Portfolio overview and priority actions</div></div>
+      <div class="gsearch">
+        <span class="gs-ico">⌕</span>
+        <input id="globalSearch" type="text" placeholder="Search companies..." autocomplete="off" oninput="globalSearchInput(this.value)" onkeydown="globalSearchKey(event)" onfocus="if(this.value)globalSearchInput(this.value)">
+        <div class="gs-results" id="globalSearchResults"></div>
+      </div>
       <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span> <button class="topbar-jane" onclick="toggleAgentDock(true)"><span>✦</span> Ask Jane</button> <span id="principalBox" style="display:none;margin-left:10px"><span id="principalName" class="src live"></span> <a id="logoutLink" href="/logout" class="src" style="text-decoration:none">Sign out</a></span></div>
     </div>
     <div class="content">
       <section class="view on" id="v-dash">
-        <div class="scopebar" id="scopebar" style="display:none"></div>
-        <div class="stats" id="stats"></div>
-        <div class="sec-title"><h2>Revenue and health</h2><span>Live portfolio economics, evidence-grounded</span></div>
-        <div id="dash-charts"></div>
-        <div id="dash-revchange"></div>
-        <div class="sec-title"><h2>Today's priorities</h2><span>What the signed playbook says to act on now</span></div>
-        <div class="panel"><div class="head"><h2>Daily CS Brief</h2><span class="note">Deterministic queue, live evidence, CSM-owned actions</span></div><div class="body pad" id="daily-brief"><span class="muted">Loading today's brief...</span></div></div>
-        <div class="cols">
-          <div class="panel"><div class="head"><h2>Priority actions</h2><span class="note">Top of the queue</span></div><div class="body" id="dash-tasks"></div></div>
-          <div>
-            <div class="panel"><div class="head"><h2>Portfolio health</h2><span class="note">At risk first</span></div><div class="body" id="dash-accts"></div></div>
-            <div class="panel"><div class="head"><h2>Suppressed noise</h2><span class="note">Multi-instance logic</span></div><div class="body" id="dash-supp"></div></div>
-          </div>
+        <div class="cc-tabs" id="cc-tabs">
+          <button class="cc-tab active" data-cc="command" onclick="ccTab('command')"><span class="cc-tico">▚</span>My Command Center</button>
+          <button class="cc-tab" data-cc="companies" onclick="ccTab('companies')"><span class="cc-tico">▤</span>My Companies</button>
+          <button class="cc-tab" data-cc="renewals" onclick="ccTab('renewals')"><span class="cc-tico">↻</span>My Renewals</button>
         </div>
+        <div class="cc-pane on" id="cc-pane-command">
+        <div class="scopebar" id="scopebar" style="display:none"></div>
+        <div id="cc-command-top"></div>
+        </div><!-- /cc-pane-command -->
+        <div class="cc-pane" id="cc-pane-companies"><div class="panel"><div class="head"><h2>My Companies</h2><span class="note">Click any company for the full profile</span></div><div class="body" id="accounts-body-cc"></div></div></div>
+        <div class="cc-pane" id="cc-pane-renewals"></div>
       </section>
       <section class="view" id="v-queue"><div class="panel"><div class="head"><h2>Task queue</h2><span class="note">System generated, ranked by mandate and SLA</span></div><div class="body" id="queue-body"></div></div></section>
       <section class="view" id="v-protect"><div class="panel"><div class="head"><h2>Must Protect · Risk and recovery</h2><span class="note">Active risk, payment exceptions, and lifecycle recovery</span></div><div class="body" id="protect-body"></div></div></section>
       <section class="view" id="v-expand"><div class="panel"><div class="head"><h2>Must Expand · Renewals and expansion</h2><span class="note">T-120, T-90, T-60, T-30 cadence and expansion triggers</span></div><div class="body" id="expand-body"></div></div></section>
       <section class="view" id="v-use"><div class="panel"><div class="head"><h2>Must Use · Adoption and hygiene</h2><span class="note">Onboarding, adoption, contact hygiene</span></div><div class="body" id="use-body"></div></div></section>
       <section class="view" id="v-accounts"><div class="panel"><div class="head"><h2>All accounts</h2><span class="note">Click any account for the full picture</span></div><div class="body" id="accounts-body"></div></div></section>
+      <section class="view" id="v-company"><div id="company-body"></div></section>
+      <section class="view" id="v-scaled">
+        <div class="cc-tabs" id="scaled-tabs">
+          <button class="cc-tab active" data-sc="pool" onclick="scaledTab('pool')"><span class="cc-tico">▦</span>The Pool</button>
+          <button class="cc-tab" data-sc="dashboard" onclick="scaledTab('dashboard')"><span class="cc-tico">▚</span>Pooled Dashboard</button>
+        </div>
+        <div class="cc-pane on" id="sc-pane-pool"></div>
+        <div class="cc-pane" id="sc-pane-dashboard"></div>
+      </section>
+      <section class="view" id="v-mydash">
+        <div class="cc-tabs" id="mydash-tabs">
+          <button class="cc-tab active" data-md="dashboard" onclick="myDashTab('dashboard')"><span class="cc-tico">◱</span>My Dashboard</button>
+          <button class="cc-tab" data-md="portfolio" onclick="myDashTab('portfolio')"><span class="cc-tico">▤</span>My Portfolio</button>
+          <button class="cc-tab" data-md="workflows" onclick="myDashTab('workflows')"><span class="cc-tico">⇄</span>My Workflows</button>
+          <button class="cc-tab" data-md="renewals" onclick="myDashTab('renewals')"><span class="cc-tico">↻</span>My Renewals</button>
+        </div>
+        <div class="cc-pane on" id="md-pane-dashboard"></div>
+        <div class="cc-pane" id="md-pane-portfolio"></div>
+        <div class="cc-pane" id="md-pane-workflows"></div>
+        <div class="cc-pane" id="md-pane-renewals"></div>
+      </section>
+      <section class="view" id="v-leading">
+        <div class="cc-tabs" id="leading-tabs">
+          <button class="cc-tab active" data-li="health" onclick="leadingTab('health')"><span class="cc-tico">♥</span>Portfolio Health</button>
+          <button class="cc-tab" data-li="upsale" onclick="leadingTab('upsale')"><span class="cc-tico">↻</span>Upsale Opportunities</button>
+        </div>
+        <div class="cc-pane on" id="li-pane-health"></div>
+        <div class="cc-pane" id="li-pane-upsale"></div>
+      </section>
+      <section class="view" id="v-lagging"><div id="lagging-body"></div></section>
+      <section class="view" id="v-reviews"><div id="reviews-body"></div></section>
+      <section class="view" id="v-calendar"><div id="calendar-body"></div></section>
+      <section class="view" id="v-notifications"><div id="notifications-body"></div></section>
+      <section class="view" id="v-datamodel"><div id="datamodel-body"></div></section>
+      <section class="view" id="v-dataexplorer"><div id="dataexplorer-body"></div></section>
+      <section class="view" id="v-riskesc">
+        <div class="cc-tabs" id="riskesc-tabs">
+          <button class="cc-tab active" data-re="health" onclick="riskEscTab('health')"><span class="cc-tico">♥</span>Portfolio Health</button>
+          <button class="cc-tab" data-re="mitigation" onclick="riskEscTab('mitigation')"><span class="cc-tico">◆</span>Risk Mitigation Strategy</button>
+        </div>
+        <div class="cc-pane on" id="re-pane-health"></div>
+        <div class="cc-pane" id="re-pane-mitigation"></div>
+      </section>
+      <section class="view" id="v-expansions">
+        <div class="cc-pane on" id="ex-pane-whitespace"></div>
+      </section>
+      <section class="view" id="v-objadopt">
+        <div class="cc-tabs" id="objadopt-tabs">
+          <button class="cc-tab active" data-oa="adoption" onclick="objAdoptTab('adoption')"><span class="cc-tico">📈</span>Product Adoption</button>
+          <button class="cc-tab" data-oa="insights" onclick="objAdoptTab('insights')"><span class="cc-tico">💡</span>Adoption Insights</button>
+        </div>
+        <div class="cc-pane on" id="oa-pane-adoption"></div>
+        <div class="cc-pane" id="oa-pane-insights"></div>
+      </section>
+      <section class="view" id="v-pooled">
+        <div class="cc-tabs" id="pooled-leaftabs"></div>
+        <div id="pooled-leafbody"></div>
+      </section>
       <section class="view" id="v-agent">
         <div class="agent-studio"><div class="agent-chrome"><span class="agent-lights"><i></i><i></i><i></i></span><span class="agent-tab">cs-orchestrator</span><span class="agent-path">Agent Automation / live session</span></div><div class="agent-workspace"><div class="agent-editor"><div class="agent-editor-head"><strong>CS Agent</strong> portfolio conversation</div><div class="agent-editor-body"><div id="agentOut" class="agent-thread"><div class="agent-turn assistant"><div class="agent-avatar">CS</div><div class="agent-bubble"><span style="color:#b5c1d9">Ready. Ask about your live portfolio and I will return a judged, evidence-backed answer.</span></div></div></div></div><div class="agent-compose"><div class="agent-compose-box"><span class="agent-prefix">@cs-orchestrator</span><input id="agentQ" placeholder="Ask about your portfolio..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAgent();}"><button onclick="askAgent()">Send</button></div><div class="agent-compose-hint">Enter to send · live sources · human approval required</div></div></div><aside class="agent-rail"><h3>Session context</h3><div class="agent-rail-card"><b><span class="live-dot"></span>Live portfolio</b><span>25 accounts · current book</span></div><div class="agent-rail-card"><b>WoW judge</b><span>PASS · signed rules active</span></div><div class="agent-rail-card"><b>Model + Harness</b><span>Bedrock explains. Rules decide.</span></div><h3 style="margin-top:22px">Start with</h3><div class="agent-shortcuts"><button onclick="agentAsk('What are my top 3 actions today?')">Top actions</button><button onclick="agentAsk('Which account needs protection first?')">Protect first</button><button onclick="agentAsk('Which Strategic accounts are disengaged?')">Disengaged accounts</button><button onclick="agentAsk('Where are the expansion signals?')">Expansion signals</button></div></aside></div></div><div class="panel" style="margin-top:18px"><div class="head"><h2>Harness Feedback</h2><span class="note">Anonymous review signals used to improve rules and prompts</span></div><div class="body pad" id="agent-feedback-summary"><span class="muted">No feedback recorded yet.</span></div></div>
       </section>
@@ -509,9 +989,23 @@ const hband=b=>b==='green'?'g':b==='amber'?'a':'r';
 const hcolor=b=>b==='green'?'#0ca678':b==='amber'?'#d98b0b':'#e5484d';
 const fmt=n=>n==null?'-':'$'+Number(n).toLocaleString();
 const meta={
-  dash:['Dashboard','Portfolio overview and priority actions'],
+  calendar:['Calendar','Your tasks and meetings by day'],
+  notifications:['Notifications','Comments, data updates and approvals'],
+  datamodel:['Data Model','Entities and fields across the CS data model'],
+  dataexplorer:['Data Explorer','Explore companies and fields across the live book'],
+  dash:['Command Center','Portfolio overview and priority actions'],
   queue:['Task Queue','Every system-generated action, ranked'],
-  accounts:['Accounts','Every account, worst health first'],
+  accounts:['My Companies','Every account, worst health first'],
+  company:['Company','Full customer profile'],
+  scaled:['Scaled Customer Success','Pooled and low-touch customers'],
+  mydash:['Dashboard','Your personal CS dashboard'],
+  leading:['Leading Indicators','Forward-looking portfolio signals'],
+  lagging:['Lagging Indicators','Realised retention and revenue outcomes'],
+  reviews:['Portfolio Reviews','Structured account review cadence'],
+  riskesc:['Risk & Escalation','Health risk and active escalations'],
+  expansions:['Expansions','Upsell pipeline and whitespace'],
+  objadopt:['Objectives & Adoption','Customer objectives and product adoption'],
+  pooled:['Pooled CS','Pooled 1-20 agency and Corporate accounts'],
   protect:['Must Protect','Defensive risk playbooks'],
   expand:['Must Expand','Renewals and expansion'],
   use:['Must Use','Adoption and hygiene'],
@@ -548,7 +1042,724 @@ function initialView(){
   try{const s=sessionStorage.getItem('cs_view'); if(s&&meta[s]&&s!=='agent') return s;}catch(e){}
   return 'dash';
 }
-window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h&&meta[h]&&DATA) go(h);});
+window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h.indexOf('company/')===0&&DATA){openAccount(h.slice('company/'.length));return;}if(h&&meta[h]&&DATA) go(h);});
+
+// Collapse/expand the Planhat-style light sidebar. Persisted across reloads.
+function toggleSidebar(force){
+  const app=document.querySelector('.app');
+  const collapsed=(typeof force==='boolean')?force:!app.classList.contains('side-collapsed');
+  app.classList.toggle('side-collapsed',collapsed);
+  const tog=document.getElementById('sideToggle');
+  if(tog){tog.textContent=collapsed?'›':'‹';tog.title=collapsed?'Expand sidebar':'Collapse sidebar';}
+  try{localStorage.setItem('cs_side_collapsed',collapsed?'1':'0');}catch(e){}
+}
+try{if(localStorage.getItem('cs_side_collapsed')==='1'){document.querySelector('.app').classList.add('side-collapsed');const t=document.getElementById('sideToggle');if(t){t.textContent='›';t.title='Expand sidebar';}}}catch(e){}
+
+// Planhat "Sections": each nav section expands/collapses independently. State persisted per section.
+function toggleSection(sec){
+  const el=document.querySelector('.navsection[data-sec="'+sec+'"]');
+  if(!el)return;
+  const collapsed=el.classList.toggle('collapsed');
+  try{const st=JSON.parse(localStorage.getItem('cs_side_sections')||'{}');st[sec]=collapsed?1:0;localStorage.setItem('cs_side_sections',JSON.stringify(st));}catch(e){}
+}
+// Restore section expand/collapse state on load.
+try{const st=JSON.parse(localStorage.getItem('cs_side_sections')||'{}');Object.keys(st).forEach(sec=>{if(st[sec]){const el=document.querySelector('.navsection[data-sec="'+sec+'"]');if(el)el.classList.add('collapsed');}});}catch(e){}
+
+// Command Center two-level nav: switch between the top tabs (Planhat pattern).
+let _ccTab='command';
+function ccTab(tab){
+  _ccTab=tab;
+  document.querySelectorAll('#cc-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.cc===tab));
+  document.querySelectorAll('#v-dash .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('cc-pane-'+tab); if(pane)pane.classList.add('on');
+  try{sessionStorage.setItem('cs_cc_tab',tab);}catch(e){}
+  if(tab==='companies'){ const host=document.getElementById('accounts-body-cc'); if(host&&DATA&&DATA.accounts) host.innerHTML=acctTable(DATA.accounts); }
+  else if(tab==='renewals'){ renderCcRenewals(); }
+  window.scrollTo({top:0,behavior:'instant'});
+}
+// My Renewals tab — built from live accounts that carry a renewal date/forecast.
+function renderCcRenewals(){
+  const host=document.getElementById('cc-pane-renewals'); if(!host||!DATA)return;
+  const rows=(DATA.accounts||[]).filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  if(!rows.length){ host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">Upcoming renewals with the deterministic forecast</span></div><div class="body"><div class="empty">No accounts carry a renewal date in HubSpot yet.</div></div></div>'; return; }
+  const body=rows.map(a=>{
+    const fc=a.renewal_forecast;
+    const forecast=(fc&&fc.applicable&&fc.label)?'<span class="fc '+(fc.label==='Churn Risk'?'fc-churn':fc.label==='Expansion'?'fc-expansion':'fc-renewal')+'" title="'+escapeHtml(fc.rationale||'')+'">'+escapeHtml(fc.label)+'</span>':'<span class="muted">not classified</span>';
+    const rationale=(fc&&fc.rationale)?escapeHtml(fc.rationale):'<span class="muted">Deterministic classification pending signals</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td>'+
+      '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span class="muted">no data</span>')+'</td>'+
+      '<td>'+renewalDays(a.renewal_date)+'</td><td>'+forecast+'</td><td class="muted">'+rationale+'</td></tr>';
+  }).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">'+rows.length+' upcoming · deterministic forecast, evidence-grounded</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>ARR (USD)</th><th>Renewal</th><th>AI Forecast</th><th>Forecast rationale</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+
+// ===== Scaled Customer Success: two-level nav (The Pool + pooled views) =====
+let _scaledTab='pool';
+function scaledTab(tab){
+  _scaledTab=tab;
+  document.querySelectorAll('#scaled-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.sc===tab));
+  document.querySelectorAll('#v-scaled .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('sc-pane-'+tab); if(pane)pane.classList.add('on');
+  if(tab==='pool') renderThePool();
+  else if(tab==='dashboard') renderPooledDashboard();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+// The Pool — scaled/low-touch accounts (low ARR), with a Growth Potential column (Planhat).
+function renderThePool(){
+  const host=document.getElementById('sc-pane-pool'); if(!host||!DATA)return;
+  const pool=(DATA.accounts||[]).filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
+  const growth=a=>{
+    const worth=(a.arr_usd||0)>=2000?'High Worth':'Low Worth';
+    const pot=(a.health&&a.health.computable&&a.health.score>=70)?'High Potential':'Low Potential';
+    const cls=pot==='High Potential'?'gp-high':'gp-low';
+    return '<span class="gp '+cls+'">'+worth+', '+pot+'</span>';
+  };
+  const rows=pool.slice().sort((x,y)=>(y.arr_usd||0)-(x.arr_usd||0));
+  const body=rows.map(a=>{
+    const h=a.health,hc=a.connected&&a.connected.hubspot;
+    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
+      '<td class="col-check"><input type="checkbox" onclick="event.stopPropagation()"></td>'+
+      '<td class="col-play"><span class="rowplay">▷</span></td>'+
+      '<td>'+circle+'</td>'+
+      '<td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td>'+
+      '<td class="muted">'+(hc&&a.csm_owner?escapeHtml(a.csm_owner):'<span class="pill pln">The Pool</span>')+'</td>'+
+      '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span class="muted">no data</span>')+'</td>'+
+      '<td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'<span class="muted">no data</span>')+'</td>'+
+      '<td>'+csmDots(a)+'</td>'+
+      '<td>'+growth(a)+'</td></tr>';
+  }).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>The Pool</h2><span class="note">'+rows.length+' pooled companies · ARR under $10k, low-touch</span></div>'+
+    '<div class="filterbar" style="padding-left:16px;padding-right:16px"><span class="fpill active">Customer Type: Pooled</span><span class="fpill active">ARR under $10k</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+rows.length+' companies</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th class="col-check"><input type="checkbox"></th><th class="col-play"></th><th>Health</th><th>Company</th><th>Owner</th><th>ARR (USD)</th><th>Phase</th><th>CSM Score</th><th>(AI) Growth Potential</th></tr></thead><tbody>'+
+    (rows.length?body:'<tr><td colspan="9" class="empty" style="padding:24px">No pooled companies in this book.</td></tr>')+'</tbody></table></div></div>';
+}
+// Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
+function renderPooledDashboard(){
+  const host=document.getElementById('sc-pane-dashboard'); if(!host||!DATA)return;
+  const pool=(DATA.accounts||[]).filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
+  const totalArr=pool.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const phases={};pool.forEach(a=>{const p=a.lifecycle_stage||'Unknown';phases[p]=(phases[p]||0)+1;});
+  const maxP=Math.max(1,...Object.values(phases));
+  const phaseBars=Object.entries(phases).sort((a,b)=>b[1]-a[1]).map(([p,n])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+n+'</span><div class="cc-distbar" style="height:'+Math.round((n/maxP)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml(p)+'</div></div>').join('');
+  host.innerHTML='<div class="cc-headline" style="margin-bottom:16px">'+
+    '<div class="cc-big"><div class="cc-big-l">Total ARR</div><div class="cc-big-v">'+fmt(totalArr)+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">Pooled Customers</div><div class="cc-big-v">'+pool.length+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v good">'+(pool.length?Math.round(pool.reduce((s,a)=>s+((a.health&&a.health.computable)?a.health.score:0),0)/pool.length):0)+'</div></div>'+
+  '</div>'+
+  '<div class="panel"><div class="head"><h2>Pooled Customers by Phase</h2></div><div class="body pad"><div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div></div></div>';
+}
+
+// ===== CS Day to Day: personal Dashboard (two-level nav) =====
+let _myDashTab='dashboard';
+function myDashTab(tab){
+  _myDashTab=tab;
+  document.querySelectorAll('#mydash-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.md===tab));
+  document.querySelectorAll('#v-mydash .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('md-pane-'+tab); if(pane)pane.classList.add('on');
+  ({dashboard:renderMyDashboard,portfolio:renderMyPortfolio,workflows:renderMyWorkflows,renewals:renderMyRenewals}[tab]||function(){})();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function _mdFilterBar(count){
+  return '<div class="filterbar"><span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Find in view..."></span>'+
+    '<span class="fpill ghost">Company</span><span class="fpill ghost">Company Owner</span><span class="fpill ghost">+ Filter</span>'+
+    (count!=null?'<span class="fb-count">'+count+'</span>':'')+'</div>';
+}
+function _widget(title,inner,cls){return '<div class="mdw '+(cls||'')+'"><div class="mdw-h">'+title+'</div><div class="mdw-b">'+inner+'</div></div>';}
+function _widgetBig(title,value,cls){return _widget(title,'<div class="mdw-big '+(cls||'')+'">'+value+'</div>');}
+function renderMyDashboard(){
+  const host=document.getElementById('md-pane-dashboard'); if(!host||!DATA)return;
+  const accts=DATA.accounts||[], tasks=DATA.tasks||[];
+  const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const lowArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
+  const lowPct=totalArr?Math.round((lowArr/totalArr)*100):0;
+  let low=0,med=0,high=0;accts.forEach(a=>{const b=a.health&&a.health.band;if(b==='red')low++;else if(b==='amber')med++;else if(b==='green')high++;});
+  const maxD=Math.max(1,low,med,high);
+  const distBars=[['Low',low,'var(--red)'],['Medium',med,'var(--amber)'],['High',high,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxD)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('');
+  const atRisk=low;
+  const p1=tasks.filter(t=>t.priority===1).length;
+  const avgHealth=accts.filter(a=>a.health&&a.health.computable).length?Math.round(accts.filter(a=>a.health&&a.health.computable).reduce((s,a)=>s+a.health.score,0)/accts.filter(a=>a.health&&a.health.computable).length):0;
+  // Usage recency (live Pendo) — DAU/WAU/MAU proxy by active-window counts.
+  const uacc=accts.filter(a=>a.usage_days_since_visit!=null);
+  const active7=uacc.filter(a=>a.usage_days_since_visit<=7).length;
+  const active30=uacc.filter(a=>a.usage_days_since_visit<=30).length;
+  const active90=uacc.filter(a=>a.usage_days_since_visit<=90).length;
+  const maxA=Math.max(1,active7,active30,active90);
+  const auBars='<div class="cc-dist" style="height:120px">'+[['Daily (≤7d)',active7,'var(--green)'],['Monthly (≤30d)',active30,'var(--brand)'],['Quarterly (≤90d)',active90,'var(--sky)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxA)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+  // Top customers by trending usage (most recently active, weighted by ARR).
+  const top=uacc.slice().sort((a,b)=>(a.usage_days_since_visit-b.usage_days_since_visit)||((b.arr_usd||0)-(a.arr_usd||0))).slice(0,6);
+  const topRows=top.map(a=>{const circle=a.health&&a.health.computable?'<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>':'<span class="hcircle hc-none">–</span>';const d=a.usage_days_since_visit;return '<div class="md-top-row" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+circle+'<span class="md-top-name">'+escapeHtml(a.name||a.account_id)+'</span><span class="md-top-meta">'+(d===0?'today':d+'d ago')+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</span></div>';}).join('');
+  // Renewing next 90 days (live renewal dates).
+  const today=new Date();
+  const ren90=accts.filter(a=>{if(!a.renewal_date)return false;const days=(new Date(a.renewal_date)-today)/86400000;return days>=0&&days<=90;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  // Compact KPI strip.
+  const kpi=(l,v,cls)=>'<div class="md-kpi"><div class="md-kpi-v '+(cls||'')+'">'+v+'</div><div class="md-kpi-l">'+l+'</div></div>';
+  const strip='<div class="md-kpis">'+
+    kpi('Open Tasks',tasks.length,tasks.length>0?'warn':'')+
+    kpi('Priority 1',p1,p1>0?'warn':'good')+
+    kpi('At-risk accounts',atRisk,atRisk>0?'warn':'good')+
+    kpi('% ARR Low Health',lowPct+'%',lowPct>0?'warn':'good')+
+    kpi('Avg Health',avgHealth,avgHealth>=70?'good':avgHealth<50?'warn':'')+
+    kpi('Portfolio ARR',fmt(totalArr))+
+  '</div>';
+  host.innerHTML=_mdFilterBar()+strip+
+    '<div class="md-2col">'+
+      '<div class="panel"><div class="head"><h2>Tasks Due</h2><span class="note">'+tasks.length+' open</span></div><div class="body pad">'+(tasks.length?tasks.slice(0,6).map(t=>'<div class="md-task" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><span class="prio prio'+t.priority+'">'+t.priority+'</span><div><strong>'+escapeHtml(t.account)+'</strong><div class="sub">'+escapeHtml((t.trigger||'').slice(0,60))+'</div></div></div>').join(''):'<div class="empty">No open tasks in your book right now.</div>')+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Renewing next 90 Days</h2><span class="note">'+ren90.length+'</span></div><div class="body pad">'+(ren90.length?ren90.slice(0,6).map(a=>'<div class="md-task" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><span class="hcircle '+(a.health&&a.health.computable?hband(a.health.band):'hc-none')+'">'+(a.health&&a.health.computable?a.health.score:'–')+'</span><div><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+renewalDays(a.renewal_date)+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</div></div></div>').join(''):'<div class="empty">No companies renewing in the next 90 days.</div>')+'</div></div>'+
+    '</div>'+
+    '<div class="sec-title"><h2>Account Insights and Actions</h2></div>'+
+    '<div class="md-insights">'+
+      '<div class="panel"><div class="head"><h2>Portfolio Distribution by Health</h2></div><div class="body pad"><div class="cc-dist" style="height:140px">'+distBars+'</div></div></div>'+
+      '<div class="panel"><div class="head"><h2>Active Users (recency)</h2><span class="note">live Pendo</span></div><div class="body pad">'+auBars+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Top Customers by Usage</h2><span class="note">most active</span></div><div class="body pad">'+(topRows||'<div class="empty">No usage-connected accounts.</div>')+'</div></div>'+
+    '</div>';
+}
+function renderMyPortfolio(){
+  const host=document.getElementById('md-pane-portfolio'); if(!host||!DATA)return;
+  const accts=DATA.accounts||[];
+  const body=accts.map(a=>{
+    const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    const lastSeen=(a.usage_days_since_visit!=null)?(a.usage_days_since_visit===0?'today':a.usage_days_since_visit+'d ago'):'<span class="muted">no data</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
+      '<td>'+circle+'</td>'+
+      '<td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td>'+
+      '<td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td>'+
+      '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td>'+
+      '<td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'<span class="muted">no data</span>')+'</td>'+
+      '<td>'+csmDots(a)+'</td>'+
+      '<td class="muted">'+(a.customer_since?escapeHtml(a.customer_since):'-')+'</td>'+
+      '<td class="muted">'+lastSeen+'</td>'+
+      '<td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td>'+
+      '<td class="muted mono" style="font-size:.85em">'+escapeHtml(a.account_id)+'</td></tr>';
+  }).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>My Portfolio</h2><span class="note">'+accts.length+' companies</span></div>'+_mdFilterBar(accts.length+' companies')+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>CSM Score</th><th>Customer To</th><th>Last seen</th><th>Renewal (in days)</th><th>id</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+function renderMyWorkflows(){
+  const host=document.getElementById('md-pane-workflows'); if(!host||!DATA)return;
+  const wf=(DATA.tasks||[]).filter(t=>t.mandate==='MUST_EXPAND'||t.mandate==='MUST_USE');
+  const today=new Date().toISOString().slice(0,10);
+  const body=wf.length?wf.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')">'+
+    '<td><strong>'+escapeHtml(t.account)+'</strong></td>'+
+    '<td>'+escapeHtml((t.trigger||'Workflow').slice(0,44))+'</td>'+
+    '<td class="muted">'+(t.owner?escapeHtml(t.owner):'-')+'</td>'+
+    '<td>0%</td>'+
+    '<td class="muted">'+escapeHtml(today)+'</td>'+
+    '<td class="muted">'+escapeHtml(t.due||t.sla||'-')+'</td>'+
+    '<td class="muted">-</td></tr>').join(''):'<tr><td colspan="7" class="empty" style="padding:20px">No active workflows.</td></tr>';
+  host.innerHTML='<div class="panel"><div class="head"><h2>My Workflows</h2><span class="note">'+wf.length+' workflow'+(wf.length===1?'':'s')+' · Type: Project</span></div>'+_mdFilterBar(wf.length+' workflow'+(wf.length===1?'':'s'))+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>Name</th><th>Owner</th><th>Percent Done</th><th>Start Date</th><th>Expected Days</th><th>Next Task Start</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+function renderMyRenewals(){
+  const host=document.getElementById('md-pane-renewals'); if(!host||!DATA)return;
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const counts={};(DATA.accounts||[]).forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
+  const maxM=Math.max(1,...Object.values(counts),1);
+  const cal=months.map((m,i)=>'<div class="ren-mo"><div class="ren-bar-wrap"><div class="ren-bar" style="height:'+Math.round(((counts[i]||0)/maxM)*100)+'%"></div></div><div class="ren-n">'+(counts[i]||0)+'</div><div class="ren-m">'+m+'</div></div>').join('');
+  const withDates=(DATA.accounts||[]).filter(a=>a.renewal_date);
+  const rows=withDates.length?withDates.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    const fc=a.renewal_forecast,label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set in HubSpot.</td></tr>';
+  host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">Line-item end date by month</span></div>'+_mdFilterBar()+
+    '<div class="body pad"><div class="ren-cal">'+cal+'</div></div></div>'+
+    '<div class="panel"><div class="head"><h2>Renewal detail</h2><span class="note">You have 0 overdue line items</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Start Date</th><th>Renewal Date</th><th>MRR</th><th>Forecast</th><th>Renewal Status</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+
+// ===== CS Leadership: Leading Indicators (two-level nav) =====
+let _leadingTab='health';
+function leadingTab(tab){
+  _leadingTab=tab;
+  document.querySelectorAll('#leading-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.li===tab));
+  document.querySelectorAll('#v-leading .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('li-pane-'+tab); if(pane)pane.classList.add('on');
+  ({health:renderPortfolioHealth,upsale:renderLeadUpsale}[tab]||function(){})();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function _healthBuckets(){
+  const accts=DATA.accounts||[]; let atRisk=0,unc=0,healthy=0,arrRisk=0,arrUnc=0,arrHealthy=0;
+  accts.forEach(a=>{const b=a.health&&a.health.band,arr=a.arr_usd||0;
+    if(b==='red'){atRisk++;arrRisk+=arr;}else if(b==='amber'){unc++;arrUnc+=arr;}else if(b==='green'){healthy++;arrHealthy+=arr;}});
+  return {atRisk,unc,healthy,arrRisk,arrUnc,arrHealthy};
+}
+function renderPortfolioHealth(){
+  const host=document.getElementById('li-pane-health'); if(!host||!DATA)return;
+  const b=_healthBuckets();
+  const intro='<div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. These views are computed live from the portfolio health bands and ARR.</div>';
+  const tiles='<div class="mdw-grid" style="margin-bottom:16px">'+
+    _widgetBig('At Risk',b.atRisk,b.atRisk>0?'warn':'')+
+    _widgetBig('Uncertain',b.unc)+
+    _widgetBig('Healthy',b.healthy,'good')+
+    _widgetBig('At Risk ARR',fmt(b.arrRisk),b.arrRisk>0?'warn':'')+
+    _widgetBig('Uncertain ARR',fmt(b.arrUnc))+
+    _widgetBig('Healthy ARR',fmt(b.arrHealthy),'good')+
+  '</div>';
+  const totArr=b.arrRisk+b.arrUnc+b.arrHealthy||1;
+  const pct=n=>Math.round((n/totArr)*100);
+  const pctBar='<div class="stack-bar"><span style="width:'+pct(b.arrRisk)+'%;background:var(--red)"></span><span style="width:'+pct(b.arrUnc)+'%;background:var(--amber)"></span><span style="width:'+pct(b.arrHealthy)+'%;background:var(--green)"></span></div>'+
+    '<div class="stack-leg"><span><i style="background:var(--red)"></i>At Risk '+pct(b.arrRisk)+'%</span><span><i style="background:var(--amber)"></i>Uncertain '+pct(b.arrUnc)+'%</span><span><i style="background:var(--green)"></i>Healthy '+pct(b.arrHealthy)+'%</span></div>';
+  const maxC=Math.max(1,b.atRisk,b.unc,b.healthy);
+  const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+  // Average health by segment — computed live.
+  const segMap={};(DATA.accounts||[]).forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
+  const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=70?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
+  const grid='<div class="mdw-grid">'+
+    _widget('% ARR by health',pctBar)+
+    _widget('Count of companies by health',countBars,'wide')+
+    _widget('Average health by segment','<div class="seg-bars">'+segRows+'</div>','wide')+
+  '</div>';
+  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad">'+intro+tiles+grid+'</div></div>';
+}
+function renderLeadUpsale(){
+  const host=document.getElementById('li-pane-upsale'); if(!host||!DATA)return;
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const counts={};(DATA.accounts||[]).forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
+  const maxM=Math.max(1,...Object.values(counts),1);
+  const cal=months.map((m,i)=>'<div class="ren-mo"><div class="ren-bar-wrap"><div class="ren-bar" style="height:'+Math.round(((counts[i]||0)/maxM)*100)+'%"></div></div><div class="ren-n">'+(counts[i]||0)+'</div><div class="ren-m">'+m+'</div></div>').join('');
+  const withDates=(DATA.accounts||[]).filter(a=>a.renewal_date);
+  const rows=withDates.length?withDates.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    const fc=a.renewal_forecast,label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set.</td></tr>';
+  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Upsale Opportunities · Renewals</h2><span class="note">Line-item end date by month</span></div><div class="body pad"><div class="ren-cal">'+cal+'</div></div></div>'+
+    '<div class="panel"><div class="head"><h2>Renewal detail</h2><span class="note">You have 0 overdue line items</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Start Date</th><th>Renewal Date</th><th>MRR</th><th>Forecast</th><th>Renewal Status</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function renderLagging(){
+  const host=document.getElementById('lagging-body'); if(!host||!DATA)return;
+  host.innerHTML='<div class="panel"><div class="head"><h2>Lagging Indicators</h2><span class="note">Realised retention and revenue outcomes · loading</span></div><div class="body pad"><span class="muted">Loading…</span></div></div>';
+  (async()=>{
+    let e={}; try{e=await (await api('/api/executive')).json();}catch(_){}
+    const accts=DATA.accounts||[];
+    const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
+    const atRiskArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
+    const churned=(e.churned_customers!=null)?e.churned_customers:accts.filter(a=>(a.lifecycle_stage||'').indexOf('Churn')>=0).length;
+    const paying=(e.paying_customers!=null)?e.paying_customers:accts.filter(a=>(a.arr_usd||0)>0).length;
+    const grr=(e.grr_pct!=null)?e.grr_pct:null;
+    const grrTarget=(e.grr_target_pct!=null)?e.grr_target_pct:null;
+    const churnedArr=e.churned_arr_usd!=null?e.churned_arr_usd:null;
+    const booked=e.booked_upsell_count!=null?e.booked_upsell_count:null;
+    const bookedArr=e.booked_upsell_arr_usd!=null?e.booked_upsell_arr_usd:null;
+    const tiles='<div class="mdw-grid">'+
+      _widget('Gross Revenue Retention',grr!=null?('<div class="mdw-big '+(grrTarget&&grr>=grrTarget?'good':'warn')+'">'+grr+'%</div>'+(grrTarget!=null?'<div class="mdw-na">Target '+grrTarget+'%</div>':'')):'<div class="mdw-na">GRR needs live contract ARR.</div>')+
+      _widget('Secured ARR','<div class="mdw-big good">'+fmt(totalArr-atRiskArr)+'</div>')+
+      _widget('At-risk ARR','<div class="mdw-big '+(atRiskArr>0?'warn':'')+'">'+fmt(atRiskArr)+'</div>')+
+      _widget('Churned ARR',churnedArr!=null?('<div class="mdw-big warn">'+fmt(churnedArr)+'</div>'):'<div class="mdw-big">'+fmt(0)+'</div>')+
+      _widget('Paying customers','<div class="mdw-big">'+paying+'</div>')+
+      _widget('Churned customers','<div class="mdw-big '+(churned>0?'warn':'')+'">'+churned+'</div>')+
+      (booked!=null?_widget('Booked upsells','<div class="mdw-big good">'+booked+'</div>'+(bookedArr!=null?'<div class="mdw-na">'+fmt(bookedArr)+' expansion ARR</div>':'')):'')+
+      _widget('Portfolio ARR','<div class="mdw-big">'+fmt(totalArr)+'</div>')+
+    '</div>';
+    host.innerHTML='<div class="panel"><div class="head"><h2>Lagging Indicators</h2><span class="note">Realised retention and revenue outcomes · live</span></div><div class="body pad">'+tiles+'</div></div>';
+  })();
+}
+function renderReviews(){
+  const host=document.getElementById('reviews-body'); if(!host||!DATA)return;
+  const accts=(DATA.accounts||[]).slice().sort((x,y)=>((x.health&&x.health.score)||999)-((y.health&&y.health.score)||999));
+  const body=accts.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td><td><span class="pill pln">Not scheduled</span></td></tr>';}).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>Portfolio Reviews</h2><span class="note">Structured review cadence · worst health first</span></div>'+_mdFilterBar(accts.length+' companies')+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Renewal (in days)</th><th>Review Status</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+
+// ===== Calendar: weekly task/meeting view =====
+function renderCalendar(){
+  const host=document.getElementById('calendar-body'); if(!host||!DATA)return;
+  _calLoad();
+  const now=new Date(); const day=now.getDay(); const monday=new Date(now); monday.setDate(now.getDate()-((day+6)%7));
+  const dow=['Monday','Tuesday','Wednesday','Thursday','Friday'];
+  const iso=d=>d.toISOString().slice(0,10);
+  const todayIdx=Math.min(4,((day+6)%7));
+  // Seed engine tasks (deterministic queue) as "due today", plus any user-created tasks by their date.
+  const dayKeys=dow.map((_,i)=>{const dt=new Date(monday);dt.setDate(monday.getDate()+i);return iso(dt);});
+  const byDay={}; dayKeys.forEach(k=>byDay[k]=[]);
+  (DATA.tasks||[]).forEach(t=>{const k=dayKeys[todayIdx]; byDay[k].push({name:t.trigger||'Task',company:t.account,owner:'System',status:'open',engine:true,priority:t.priority});});
+  _calTasks.forEach(t=>{ if(byDay[t.date]) byDay[t.date].push(t); });
+  const total=Object.values(byDay).reduce((s,a)=>s+a.length,0);
+  const cols=dow.map((d,i)=>{
+    const dt=new Date(monday); dt.setDate(monday.getDate()+i); const k=dayKeys[i];
+    const items=byDay[k].map((t,idx)=>{
+      const cls=t.engine?('prio-l'+(t.priority||3)):'cal-usertask';
+      const handler=t.engine?('openAccountByName(\''+escapeHtml(t.company||'')+'\')'):('openCalTask(\''+escapeHtml(k)+'\','+ (t._i!=null?t._i:idx) +')');
+      return '<div class="cal-task '+cls+'" onclick="'+handler+'"><b>'+escapeHtml(t.name)+'</b><span>'+escapeHtml(t.company||'')+'</span></div>';
+    }).join('');
+    return '<div class="cal-col'+(i===todayIdx?' cal-today':'')+'"><div class="cal-dh"><span class="cal-dow">'+d+'</span><span class="cal-date">'+dt.getDate()+(i===todayIdx?' · Today':'')+'</span><span class="cal-n">'+byDay[k].length+'</span></div><div class="cal-body">'+(items||'<div class="cal-empty">No tasks</div>')+'</div></div>';
+  }).join('');
+  const monthLabel=now.toLocaleDateString(undefined,{month:'long',year:'numeric'});
+  const companyOpts=(DATA.accounts||[]).map(a=>'<option value="'+escapeHtml(a.name||a.account_id)+'">').join('');
+  host.innerHTML='<div class="cal-toolbar">'+
+    '<div class="cal-title">'+monthLabel+' <span class="cal-count">'+total+' tasks</span></div>'+
+    '<div class="cal-filters"><span class="fpill ghost">Task Owner: Current</span><span class="fpill ghost">Status</span><span class="fpill ghost">Part of Workflow</span>'+
+      '<button class="cal-add-btn" onclick="calToggleQuickAdd()">+ New task</button></div></div>'+
+    '<div class="cal-quickadd" id="calQuickAdd" style="display:none">'+
+      '<input id="calTaskName" type="text" placeholder="Task name..." onkeydown="if(event.key===\'Enter\')calQuickAdd()">'+
+      '<input id="calTaskCompany" list="calCompanyList" type="text" placeholder="Choose a company...">'+
+      '<datalist id="calCompanyList">'+companyOpts+'</datalist>'+
+      '<input id="calTaskDate" type="date" value="'+dayKeys[todayIdx]+'">'+
+      '<button class="cal-add-go" onclick="calQuickAdd()">Add task</button>'+
+      '<button class="cal-add-cancel" onclick="calToggleQuickAdd(false)">Cancel</button>'+
+    '</div>'+
+    '<div class="cal-week">'+cols+'</div>';
+}
+// User-created calendar tasks (client-side, persisted). Never touch engine data.
+let _calTasks=[];
+function _calLoad(){try{_calTasks=JSON.parse(localStorage.getItem('cs_cal_tasks')||'[]');}catch(e){_calTasks=[];}_calTasks.forEach((t,i)=>t._i=i);}
+function _calSave(){try{localStorage.setItem('cs_cal_tasks',JSON.stringify(_calTasks));}catch(e){}}
+function calToggleQuickAdd(force){const el=document.getElementById('calQuickAdd');if(!el)return;const show=(typeof force==='boolean')?force:el.style.display==='none';el.style.display=show?'flex':'none';if(show){const n=document.getElementById('calTaskName');if(n)n.focus();}}
+function calQuickAdd(){
+  const name=(document.getElementById('calTaskName')||{}).value||'';
+  const company=(document.getElementById('calTaskCompany')||{}).value||'';
+  const date=(document.getElementById('calTaskDate')||{}).value||new Date().toISOString().slice(0,10);
+  if(!name.trim()){const n=document.getElementById('calTaskName');if(n)n.focus();return;}
+  _calTasks.push({name:name.trim(),company:company.trim(),date:date,owner:'Isaac Leung',status:'Someday',tags:[],description:'',checklist:[],created:new Date().toISOString()});
+  _calSave();renderCalendar();
+  // Open the drawer for the just-created task so the user can add details.
+  const idx=_calTasks.length-1; openCalTaskByIndex(idx);
+}
+function openCalTask(dateKey,idx){ // idx here is the global _calTasks index (we set _i)
+  openCalTaskByIndex(idx);
+}
+function openCalTaskByIndex(idx){
+  _calLoad(); const t=_calTasks[idx]; if(!t)return;
+  const d=document.getElementById('drawer'); if(!d)return;
+  const companyLink=t.company?('<a onclick="openAccountByName(\''+escapeHtml(t.company)+'\')" style="color:var(--brand);cursor:pointer">'+escapeHtml(t.company)+'</a>'):'<span class="muted">No company</span>';
+  d.innerHTML='<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
+      '<div style="font-size:1.24em;font-weight:800">'+escapeHtml(t.name)+'</div>'+
+      '<div class="sub" style="margin-top:4px">'+companyLink+' · due '+escapeHtml(t.date)+'</div></div>'+
+    '<div class="dbody">'+
+      '<div class="sect">Overview</div>'+
+      kv('Owner',escapeHtml(t.owner||'Isaac Leung'))+
+      kv('Status','<select onchange="calSetField('+idx+',\'status\',this.value)" class="cal-sel">'+['Someday','To do','In progress','Done'].map(s=>'<option'+(t.status===s?' selected':'')+'>'+s+'</option>').join('')+'</select>')+
+      kv('Company',companyLink)+
+      kv('Due date','<input type="date" value="'+escapeHtml(t.date)+'" onchange="calSetField('+idx+',\'date\',this.value)" class="cal-sel">')+
+      kv('Tags',(t.tags&&t.tags.length)?t.tags.map(x=>'<span class="pill pln">'+escapeHtml(x)+'</span>').join(' '):'<span class="muted">-</span>')+
+      '<div class="sect">Description</div>'+
+      '<textarea class="cal-desc" placeholder="Add a description..." onchange="calSetField('+idx+',\'description\',this.value)">'+escapeHtml(t.description||'')+'</textarea>'+
+      '<div class="sect">Checklist</div>'+
+      '<div id="calChecklist">'+((t.checklist||[]).map((c,ci)=>'<label class="cal-check"><input type="checkbox"'+(c.done?' checked':'')+' onchange="calToggleCheck('+idx+','+ci+')"> '+escapeHtml(c.text)+'</label>').join('')||'<span class="muted" style="font-size:.85em">No checklist items</span>')+'</div>'+
+      '<div class="cal-addcheck"><input id="calCheckInput" type="text" placeholder="Add checklist item..." onkeydown="if(event.key===\'Enter\')calAddCheck('+idx+')"><button onclick="calAddCheck('+idx+')">Add</button></div>'+
+      '<div class="sect">Attachments</div><div class="callout" style="text-align:center;color:var(--muted)">Drop files to attach to this task</div>'+
+      '<div class="sect">Comments</div><textarea class="cal-desc" placeholder="Add a comment..."></textarea>'+
+      '<button class="cal-del" onclick="calDeleteTask('+idx+')">Delete task</button>'+
+    '</div>';
+  d.classList.add('on'); document.getElementById('scrim').classList.add('on');
+}
+function calSetField(idx,field,val){_calLoad();if(_calTasks[idx]){_calTasks[idx][field]=val;_calSave();if(field==='date')renderCalendar();}}
+function calToggleCheck(idx,ci){_calLoad();if(_calTasks[idx]&&_calTasks[idx].checklist[ci]){_calTasks[idx].checklist[ci].done=!_calTasks[idx].checklist[ci].done;_calSave();openCalTaskByIndex(idx);}}
+function calAddCheck(idx){const inp=document.getElementById('calCheckInput');if(!inp||!inp.value.trim())return;_calLoad();if(_calTasks[idx]){_calTasks[idx].checklist=_calTasks[idx].checklist||[];_calTasks[idx].checklist.push({text:inp.value.trim(),done:false});_calSave();openCalTaskByIndex(idx);}}
+function calDeleteTask(idx){_calLoad();_calTasks.splice(idx,1);_calSave();closeDrawer();renderCalendar();}
+// ===== Notifications =====
+let _notifTab='all';
+function renderNotifications(){
+  const host=document.getElementById('notifications-body'); if(!host)return;
+  const tabs=['All','Comments','Data Updates','Approval'];
+  const tabRow='<div class="cc-tabs" style="margin-bottom:16px">'+tabs.map(t=>'<button class="cc-tab'+(t.toLowerCase()===_notifTab?' active':'')+'" onclick="setNotifTab(\''+t.toLowerCase()+'\')">'+t+'</button>').join('')+'</div>';
+  host.innerHTML='<div class="panel"><div class="head"><h2>Notifications</h2></div><div class="body pad">'+tabRow+
+    '<div class="empty" style="padding:48px"><b>No notifications to display</b><div class="sub" style="margin-top:8px">You are all caught up.</div></div></div></div>';
+}
+function setNotifTab(t){_notifTab=t;renderNotifications();}
+
+// ===== Data Model — built from the REAL fields we ingest per source =====
+// This documents what our integration layer actually pulls (adapters -> _live_account),
+// not a borrowed catalog. Each field: [Display Name, api key, Type]. Source = the model key.
+const DM_SOURCE_LABEL={hubspot:'HubSpot',zendesk:'Zendesk',usage:'Pendo',stripe:'Stripe',churn:'Churn Model',platform:'Platform (computed)'};
+const DATA_MODEL={
+ 'HubSpot':[['Name','name','Text'],['Company ID','company_id','Text'],['ARR (USD)','arr_usd','Number'],['Segment','segment','Text'],['Segment label','segment_label','Text'],['Industry','industry','Text'],['Lifecycle stage','lifecycle_stage','List'],['Renewal date','renewal_date','Date'],['Subscription type','subscription_type','List'],['CSM owner','csm_owner','Team member'],['State','state','Text'],['Country','country','Text'],['Instances','instances','Array'],['Contacts','contacts','Array']],
+ 'Zendesk':[['CSAT (30d)','csat_30d','Number'],['Open tickets','open_tickets','Number'],['Tickets last 7d','tickets_last_7d','Number'],['Tickets prev 7d','tickets_prev_7d','Number'],['Sev-1 open','sev1_open','Number'],['By instance','by_instance','Object']],
+ 'Pendo':[['Days since last visit','days_since_last_visit','Number'],['Pendo risk score','pendo_risk_score','List'],['Pendo adoption','pendo_adoption','List'],['Adoption engagement','pendo_adoption_engagement','List'],['Usage trend','pendo_trend','Text'],['Plan tier','plan_tier','Text'],['Plan price','plan_price','Number'],['API velocity source','api_velocity_source','Text'],['Site','site','Text']],
+ 'Stripe':[['Dunning stage','dunning_stage','List'],['Past-due invoices','past_due_invoices','Number'],['Amount due (USD)','amount_due_usd','Number'],['Days past due','days_past_due','Number']],
+ 'Churn Model':[['ML churn score','ml_churn_score','Number'],['Computed fallback','computed','Toggle'],['Method','method','Text'],['Reasons','reasons','Array']],
+ 'Platform (computed)':[['Health score','health.score','Number'],['Health band','health.band','List'],['Health reasons','health.reasons','Array'],['Adoption score','adoption.score','Number'],['Adoption band','adoption.band','List'],['Renewal forecast','renewal_forecast.label','List'],['Open task count','open_task_count','Number'],['Timeline','timeline','Array'],['Health history','health_history','Array'],['Primary instances','primary_instances','Array']]
+};
+const DM_SRC_KEY={'HubSpot':'hubspot','Zendesk':'zendesk','Pendo':'usage','Stripe':'stripe','Churn Model':'churn','Platform (computed)':'platform'};
+const DM_ORDER=['HubSpot','Zendesk','Pendo','Stripe','Churn Model','Platform (computed)'];
+function _dmSrcCoverage(modelName){
+  const key=DM_SRC_KEY[modelName]; const a=(DATA&&DATA.accounts)||[];
+  if(key==='platform')return {live:a.length,total:a.length};
+  return {live:a.filter(x=>x.connected&&x.connected[key]).length,total:a.length};
+}
+let _dmModel='HubSpot';
+function renderDataModel(){
+  const host=document.getElementById('datamodel-body'); if(!host)return;
+  const models=DM_ORDER.filter(m=>DATA_MODEL[m]);
+  if(!DATA_MODEL[_dmModel])_dmModel=models[0];
+  const list='<div class="dm-list">'+models.map(function(m){
+    const cov=_dmSrcCoverage(m);const live=cov.live>0;
+    return '<button class="dm-mi'+(m===_dmModel?' active':'')+'" onclick="dmSelect(\''+m+'\')"><span class="dm-mico">\u25a6</span>'+escapeHtml(m)+'<span class="dm-mcount '+(live?'':'off')+'">'+cov.live+'/'+cov.total+'</span></button>';
+  }).join('')+'</div>';
+  const fields=DATA_MODEL[_dmModel];
+  const cov=_dmSrcCoverage(_dmModel);
+  const live=cov.live>0;
+  const dash='<span class="muted">-</span>';
+  const rows=fields.map(function(f){
+    const status=live?'<span class="pill g">live</span>':'<span class="pill r">not connected</span>';
+    const covTxt=(DM_SRC_KEY[_dmModel]==='platform')?'<span class="muted">computed</span>':('<span class="dm-cov"><span class="dm-covbar"><span style="width:'+Math.round((cov.live/Math.max(1,cov.total))*100)+'%"></span></span>'+cov.live+'/'+cov.total+'</span>');
+    return '<tr><td><strong>'+escapeHtml(f[0])+'</strong></td><td class="mono muted">'+escapeHtml(f[1]||'-')+'</td><td>'+(f[2]?'<span class="pill pln">'+escapeHtml(f[2])+'</span>':dash)+'</td><td>'+status+'</td><td>'+covTxt+'</td></tr>';
+  }).join('');
+  const table='<div class="panel"><div class="head"><h2>'+escapeHtml(_dmModel)+'</h2><span class="note">'+fields.length+' fields ingested \u00b7 '+(live?('live on '+cov.live+'/'+cov.total+' accounts'):'source not connected')+'</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fb-find"><span class="fb-ico">\u2315</span><input type="text" placeholder="Find a field..." oninput="dmFilter(this.value)"></span></div>'+
+    '<div class="body"><table class="acct-list" id="dm-table"><thead><tr><th>Field</th><th>Key</th><th>Type</th><th>Status</th><th>Coverage</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  host.innerHTML='<div class="dm-wrap">'+list+'<div class="dm-main">'+table+'</div></div>';
+}
+function dmSelect(m){_dmModel=m;renderDataModel();}
+function dmFilter(q){q=(q||'').toLowerCase();document.querySelectorAll('#dm-table tbody tr').forEach(function(tr){tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';});}
+
+// ===== Data Explorer — live company/field exploration =====
+// Field groups map to REAL account values so selected columns show live data.
+const DE_FIELDS={
+ 'Default':[['Name',a=>escapeHtml(a.name||a.account_id)],['Owner',a=>a.csm_owner?escapeHtml(a.csm_owner):'-'],['Phase',a=>a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-'],['Segment',a=>a.segment?escapeHtml(a.segment):'-'],['Customer Status',a=>a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-']],
+ 'Health':[['CSM Score',a=>a.health&&a.health.computable?csmDots(a):'-'],['Health',a=>a.health&&a.health.computable?('<span class="pill '+hband(a.health.band)+'">'+a.health.score+'</span>'):'-'],['Last Seen',a=>a.usage_days_since_visit!=null?(a.usage_days_since_visit===0?'today':a.usage_days_since_visit+'d ago'):'-']],
+ 'Revenue':[['ARR',a=>a.arr_usd!=null?fmt(a.arr_usd):'-'],['Renewal',a=>a.renewal_date?escapeHtml(a.renewal_date):'-'],['Renewal (in days)',a=>a.renewal_date?renewalDays(a.renewal_date):'-'],['Subscription',a=>a.subscription_type?escapeHtml(a.subscription_type):'-']],
+ 'Reference':[['Id',a=>'<span class="mono muted">'+escapeHtml(a.account_id)+'</span>']]
+};
+let _deCols=['Name','ARR','Health','Phase','Last Seen','Id'];
+let _deQuery='';
+function _deAllFields(){const m={};Object.values(DE_FIELDS).forEach(g=>g.forEach(f=>m[f[0]]=f[1]));return m;}
+function renderDataExplorer(){
+  const host=document.getElementById('dataexplorer-body'); if(!host)return;
+  const accts=(DATA&&DATA.accounts)||[];
+  const groups=Object.keys(DE_FIELDS);
+  const list='<div class="de-fields"><div class="de-fh"><span class="fb-ico">⌕</span><input type="text" placeholder="Search fields..." value="'+escapeHtml(_deQuery)+'" oninput="deFieldFilter(this.value)"></div>'+
+    groups.map(function(g){return '<div class="de-fgroup">'+escapeHtml(g)+'</div>'+DE_FIELDS[g].filter(function(f){return !_deQuery||f[0].toLowerCase().includes(_deQuery);}).map(function(f){const on=_deCols.includes(f[0]);return '<label class="de-field'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="deToggleCol(\''+f[0].replace(/'/g,"")+'\')"> '+escapeHtml(f[0])+'</label>';}).join('')}).join('')+'</div>';
+  const fmap=_deAllFields();
+  const cols=_deCols.filter(c=>fmap[c]);
+  const head='<tr>'+cols.map(c=>'<th>'+escapeHtml(c)+'</th>').join('')+'</tr>';
+  const rows=accts.map(function(a){return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+cols.map(c=>'<td>'+fmap[c](a)+'</td>').join('')+'</tr>';}).join('');
+  const main='<div class="panel"><div class="head"><h2>Company</h2><span class="note">'+accts.length+' companies · live book</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Company</span><span class="fpill ghost">Dataset</span><span class="fpill ghost">Time-series</span><span class="fb-find" style="margin-left:8px"><span class="fb-ico">⌕</span><input type="text" placeholder="Find in view..." oninput="deRowFilter(this.value)"></span><span class="fb-count">'+accts.length+' companies</span></div>'+
+    '<div class="body"><table class="acct-list" id="de-table"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div></div>';
+  host.innerHTML='<div class="de-wrap"><div class="de-main">'+main+'</div>'+list+'</div>';
+}
+function deToggleCol(c){const i=_deCols.indexOf(c);if(i>=0)_deCols.splice(i,1);else _deCols.push(c);renderDataExplorer();}
+function deFieldFilter(q){_deQuery=(q||'').toLowerCase();renderDataExplorer();}
+function deRowFilter(q){q=(q||'').toLowerCase();document.querySelectorAll('#de-table tbody tr').forEach(function(tr){tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';});}
+
+// ===== Risk & Escalation (two-level nav) =====
+let _riskEscTab='health';
+function riskEscTab(tab){
+  _riskEscTab=tab;
+  document.querySelectorAll('#riskesc-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.re===tab));
+  document.querySelectorAll('#v-riskesc .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('re-pane-'+tab); if(pane)pane.classList.add('on');
+  ({health:renderRiskHealth,mitigation:renderRiskMitigation}[tab]||function(){})();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function renderRiskHealth(){
+  // Reuse the Portfolio Health layout so risk leaders see the same health cohorts.
+  const host=document.getElementById('re-pane-health'); if(!host||!DATA)return;
+  const b=_healthBuckets();
+  const churnFc=(DATA.accounts||[]).filter(a=>{const fc=a.renewal_forecast;return fc&&fc.applicable&&fc.label==='Churn Risk';}).length;
+  const tiles='<div class="mdw-grid" style="margin-bottom:16px">'+
+    _widgetBig('At Risk',b.atRisk,b.atRisk>0?'warn':'')+_widgetBig('Uncertain',b.unc)+_widgetBig('Healthy',b.healthy,'good')+
+    _widgetBig('At Risk ARR',fmt(b.arrRisk),b.arrRisk>0?'warn':'')+_widgetBig('Healthy ARR',fmt(b.arrHealthy),'good')+_widgetBig('Forecast to churn',churnFc,churnFc>0?'warn':'good')+'</div>';
+  const maxC=Math.max(1,b.atRisk,b.unc,b.healthy);
+  const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad"><div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. This risk view slices health by cohort to focus mitigation.</div>'+tiles+'<div class="mdw-grid">'+_widget('Count of companies by health',countBars,'wide')+'</div></div></div>';
+}
+// Risk Mitigation Strategy — companies with Health under 6 (score < 60), worst first.
+function renderRiskMitigation(){
+  const host=document.getElementById('re-pane-mitigation'); if(!host||!DATA)return;
+  const at=(DATA.accounts||[]).filter(a=>a.health&&a.health.computable&&a.health.score<60).sort((x,y)=>x.health.score-y.health.score);
+  const body=at.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
+    const drivers=(a.health.reasons||[]).slice(0,2).join('; ');
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted" style="font-size:.85em">'+escapeHtml(drivers||'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td></tr>';}).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>Risk Mitigation Strategy</h2><span class="note">'+at.length+' companies with Health under 6</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Health: less than 6</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+at.length+' companies</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Risk Drivers</th><th>Renewal (in days)</th></tr></thead><tbody>'+(at.length?body:'<tr><td colspan="7" class="empty" style="padding:24px">No companies below health 6.</td></tr>')+'</tbody></table></div></div>';
+}
+
+// ===== Expansions (two-level nav) =====
+let _expTab='whitespace';
+function expTab(tab){
+  _expTab=tab;
+  const pane=document.getElementById('ex-pane-'+tab); if(pane)pane.classList.add('on');
+  if(tab==='whitespace')renderExpWhitespace();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function renderExpWhitespace(){
+  const host=document.getElementById('ex-pane-whitespace'); if(!host||!DATA)return;
+  // Whitespace = healthy accounts with headroom (real: green band, ARR > 0).
+  const ws=(DATA.accounts||[]).filter(a=>a.health&&a.health.band==='green'&&(a.arr_usd||0)>0).sort((x,y)=>(y.arr_usd||0)-(x.arr_usd||0));
+  const body=ws.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+fmt(a.arr_usd)+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td><span class="gp gp-high">Expansion candidate</span></td></tr>';}).join('');
+  host.innerHTML='<div class="panel"><div class="head"><h2>White Spacing</h2><span class="note">'+ws.length+' healthy companies with expansion headroom</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Healthy · ARR more than 0</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+ws.length+' companies</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Whitespace</th></tr></thead><tbody>'+(ws.length?body:'<tr><td colspan="6" class="empty" style="padding:24px">No healthy companies with expansion headroom right now.</td></tr>')+'</tbody></table></div></div>';
+}
+
+// ===== Objectives & Adoption (two-level nav) =====
+let _objAdoptTab='adoption';
+function objAdoptTab(tab){
+  _objAdoptTab=tab;
+  document.querySelectorAll('#objadopt-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.oa===tab));
+  document.querySelectorAll('#v-objadopt .cc-pane').forEach(p=>p.classList.remove('on'));
+  const pane=document.getElementById('oa-pane-'+tab); if(pane)pane.classList.add('on');
+  ({adoption:renderProdAdoption,insights:renderAdoptInsights}[tab]||function(){})();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+// Product Adoption — REAL: this is data we have per account.
+function renderProdAdoption(){
+  const host=document.getElementById('oa-pane-adoption'); if(!host||!DATA)return;
+  const accts=DATA.accounts||[];
+  // Adoption proxy from health + usage recency (live). Rank best/worst.
+  const withUsage=accts.filter(a=>a.connected&&a.connected.usage);
+  const scored=withUsage.map(a=>{const dsv=a.usage_days_since_visit;const score=(a.health&&a.health.computable)?a.health.score:null;return {a,dsv,score};});
+  const avgHealth=scored.length?Math.round(scored.reduce((s,x)=>s+(x.score||0),0)/scored.length):0;
+  const active=scored.filter(x=>x.dsv!=null&&x.dsv<=14).length;
+  const idle=scored.filter(x=>x.dsv!=null&&x.dsv>28).length;
+  const rows=scored.slice().sort((x,y)=>(x.dsv==null?9999:x.dsv)-(y.dsv==null?9999:y.dsv)).map(x=>{const a=x.a;const circle=a.health&&a.health.computable?'<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    const last=x.dsv==null?'<span class="muted">no data</span>':(x.dsv===0?'today':x.dsv+'d ago');
+    const level=x.dsv==null?0:Math.max(6,Math.min(100,Math.round(100-(x.dsv/60)*100)));
+    const col=x.dsv>=28?'var(--red)':x.dsv>=14?'var(--amber)':'var(--green)';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="utrend"><span class="utbar"><span class="utfill" style="width:'+level+'%;background:'+col+'"></span></span></span></td><td class="muted">'+last+'</td></tr>';}).join('');
+  host.innerHTML=_mdFilterBar()+
+    '<div class="mdw-grid" style="margin-bottom:16px">'+_widgetBig('Avg Adoption Health',avgHealth,avgHealth>=70?'good':avgHealth<50?'warn':'')+_widgetBig('Actively Using (≤14d)',active,'good')+_widgetBig('Idle (>28d)',idle,idle>0?'warn':'')+_widgetBig('Tracked Accounts',withUsage.length)+'</div>'+
+    '<div class="panel"><div class="head"><h2>Product Adoption</h2><span class="note">Usage recency from live Pendo signals · most active first</span></div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage Trend</th><th>Last seen</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="empty" style="padding:24px">No usage-connected accounts.</td></tr>')+'</tbody></table></div></div>';
+}
+// ===== Pooled CS — pooled cohort (authoritative from HubSpot tier, segment fallback) =====
+// Pooled CS uses a two-level nav: leaf (Inbox/Process/NRR) -> sub-tab -> page.
+const POOLED_LEAVES={
+  inbox:{label:'Inbox',tabs:[['inbox','Inbox'],['escalations','Escalations'],['responserates','Response Rates']]},
+  process:{label:'Process',tabs:[['onboarding','Onboarding'],['stalled','Stalled Onboarding'],['lowusage','Low Usage'],['lowusageseq','Low Usage Sequence']]},
+  nrr:{label:'NRR',tabs:[['renewals180','Renewals < 180 Days'],['nrrquarter','NRR Quarter']]}
+};
+let _pooledLeaf='process', _pooledSub='onboarding';
+function pooledLeaf(leaf){
+  _pooledLeaf=leaf;
+  const first=POOLED_LEAVES[leaf].tabs[0][0];
+  _pooledSub=first;
+  const tabsEl=document.getElementById('pooled-leaftabs');
+  if(tabsEl) tabsEl.innerHTML=POOLED_LEAVES[leaf].tabs.map(t=>'<button class="cc-tab'+(t[0]===_pooledSub?' active':'')+'" onclick="pooledSub(\''+t[0]+'\')">'+escapeHtml(t[1])+'</button>').join('');
+  document.querySelectorAll('#v-pooled').forEach(()=>{});
+  document.querySelectorAll('.navsection[data-sec="pooled"] .nav button').forEach(b=>b.classList.toggle('active',b.dataset.pctab===leaf));
+  pooledSub(_pooledSub);
+}
+function pooledSub(tab){
+  _pooledSub=tab;
+  document.querySelectorAll('#pooled-leaftabs .cc-tab').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').indexOf("'"+tab+"'")>=0));
+  const R={inbox:renderPooledInbox,escalations:renderPooledEscalations,responserates:renderPooledResponseRates,onboarding:renderPooledOnboarding,stalled:renderPooledStalled,lowusage:renderPooledLowUsage,lowusageseq:renderPooledLowUsageSeq,renewals180:renderPooledRenewals180,nrrquarter:renderPooledNrrQuarter};
+  (R[tab]||function(){document.getElementById('pooled-leafbody').innerHTML='';})();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function _pooledAccts(){
+  const accts=DATA.accounts||[];
+  if(accts.some(a=>a.pooled!==undefined)) return accts.filter(a=>a.pooled);
+  const POOL=['Agency 1-2 Users','Agency 3-20 Users','Corporate'];
+  return accts.filter(a=>POOL.includes(a.segment));
+}
+function _pooledRow(a){
+  const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+  const last=(a.usage_days_since_visit!=null)?(a.usage_days_since_visit===0?'today':a.usage_days_since_visit+'d ago'):'<span class="muted">no data</span>';
+  return {circle,last};
+}
+function _pooledHost(){return document.getElementById('pooled-leafbody');}
+// --- Inbox leaf (email sync integration; honest connect-state, not fabricated) ---
+function _emailConnectPanel(title,note){
+  return '<div class="panel"><div class="head"><h2>'+title+'</h2><span class="note">'+note+'</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Search..."></span><span class="fpill ghost">Company</span><span class="fpill ghost">Conversation type</span><span class="fb-count">0 conversations</span></div>'+
+    '<div class="body pad"><div class="empty"><b>Email sync not connected</b><div class="sub" style="margin-top:6px">Inbox pages show a filterable feed of emails once an email/calendar source is connected. No sample data is shown.</div></div></div></div>';
+}
+function renderPooledInbox(){_pooledHost().innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails');}
+function renderPooledEscalations(){_pooledHost().innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email');}
+function renderPooledResponseRates(){
+  // Real proxy: outreach drafts prepared across the pooled queue (the tasks with drafts).
+  const pool=_pooledAccts();const poolNames=new Set(pool.map(a=>a.name||a.account_id));
+  const drafts=(DATA.tasks||[]).filter(t=>poolNames.has(t.account)&&t.draft_message).length;
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Response Rates</h2><span class="note">Email statistics require a connected email source</span></div><div class="body pad">'+
+    '<div class="mdw-grid">'+
+      _widgetBig('Drafts prepared',drafts,'good')+
+      _widgetBig('Emails sent (this week)',0)+
+      _widgetBig('Replies (this week)',0)+
+      _widgetBig('Escalations still open',0)+
+    '</div><div class="callout" style="margin-top:14px;color:var(--muted)">Sent/opened/reply counts populate once an email source is connected. Drafts prepared is live from the orchestrator queue.</div></div></div>';
+}
+// --- Process leaf ---
+function renderPooledOnboarding(){
+  const rows=_pooledAccts().filter(a=>{const p=(a.lifecycle_stage||'').toLowerCase();return p.indexOf('onboard')>=0||p.indexOf('lead')>=0||p.indexOf('opportunit')>=0;});
+  const body=rows.map(a=>{const r=_pooledRow(a);return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted">'+r.last+'</td></tr>';}).join('');
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">Pooled 1-20 agency + Corporate in onboarding</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Phase: Onboarding</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Last seen</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="6" class="empty" style="padding:24px">No pooled companies currently onboarding.</td></tr>')+'</tbody></table></div></div>';
+}
+function _pooledWorkflowTable(title,note,tasks){
+  const body=tasks.length?tasks.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><td><strong>'+escapeHtml(t.account)+'</strong></td><td class="muted">'+(t.owner?escapeHtml(t.owner):'-')+'</td><td>0%</td><td class="muted">'+escapeHtml(t.due||t.sla||'-')+'</td><td>'+escapeHtml((t.trigger||'').slice(0,44))+'</td></tr>').join(''):'<tr><td colspan="5" class="empty" style="padding:24px">No workflows match right now.</td></tr>';
+  return '<div class="panel"><div class="head"><h2>'+title+'</h2><span class="note">'+note+'</span></div><div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>Owner</th><th>Percent Done</th><th>Next Task Start</th><th>Step</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+function renderPooledStalled(){
+  const poolNames=new Set(_pooledAccts().map(a=>a.name||a.account_id));
+  const t=(DATA.tasks||[]).filter(t=>poolNames.has(t.account)&&t.mandate==='MUST_USE');
+  _pooledHost().innerHTML=_pooledWorkflowTable('Stalled Onboarding','Pooled onboarding/adoption workflows in the queue',t);
+}
+function renderPooledLowUsage(){
+  const rows=_pooledAccts().filter(a=>a.connected&&a.connected.usage&&a.usage_days_since_visit!=null&&a.usage_days_since_visit>=28).sort((x,y)=>y.usage_days_since_visit-x.usage_days_since_visit);
+  const body=rows.map(a=>{const r=_pooledRow(a);return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill r">'+a.usage_days_since_visit+'d idle</span></td></tr>';}).join('');
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Low Usage</h2><span class="note">Pooled accounts with no product visit in 28+ days (live Pendo)</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Idle 28+ days</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Usage recency</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled companies are low-usage right now.</td></tr>')+'</tbody></table></div></div>';
+}
+function renderPooledLowUsageSeq(){
+  // Low-usage re-engagement sequence: pooled accounts idle 28+ days (live Pendo) that
+  // can be enrolled into the one-to-many re-engagement sequence (guarded write-back).
+  const rows=_pooledAccts().filter(a=>a.usage_days_since_visit!=null&&a.usage_days_since_visit>=28).sort((x,y)=>y.usage_days_since_visit-x.usage_days_since_visit);
+  const body=rows.map(a=>{const r=_pooledRow(a);const id=escapeHtml(a.account_id);
+    return '<tr id="seqrow-'+id+'"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill r">'+a.usage_days_since_visit+'d idle</span></td><td><span class="seq-state" id="seqstate-'+id+'"><button class="review-btn" onclick="enrolSequence(\''+id+'\')">Enrol in sequence</button></span></td></tr>';}).join('');
+  const bulk=rows.length?'<button class="review-btn primary" onclick="enrolSequenceBulk()">Enrol all '+rows.length+' in re-engagement</button>':'';
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Low Usage Sequence</h2><span class="note">Re-engagement for idle pooled accounts · guarded write-back (dry-run unless CS_ALLOW_WRITE=1)</span></div>'+
+    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Idle 28+ days</span><span class="fb-count">'+rows.length+' to enrol</span>'+(bulk?('<span style="margin-left:auto">'+bulk+'</span>'):'')+'</div>'+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage recency</th><th>Sequence</th></tr></thead><tbody id="seq-tbody">'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled accounts need re-engagement right now.</td></tr>')+'</tbody></table></div></div>';
+}
+// Guarded sequence enrolment — mirrors the HubSpot write-back safety (dry-run by default).
+async function enrolSequence(id){
+  const cell=document.getElementById('seqstate-'+id); if(cell)cell.innerHTML='<span class="muted">Enrolling…</span>';
+  try{
+    const r=await (await fetch('/api/accounts/'+id+'/sequence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sequence:'low_usage_reengage',apply:true})})).json();
+    const res=r.result||{}, prep=r.prepared||{};
+    let label,cls;
+    if(res.mode==='applied'||res.enrolled){label='Enrolled';cls='g';}
+    else if(res.mode==='no-sequencing-tool'){label='Prepared · connect sender';cls='a';}
+    else if(res.mode==='dry-run'){label='Prepared (dry-run)';cls='pln';}
+    else if(res.mode==='not-qualified'){label='Not qualified';cls='pln';}
+    else{label='Prepared';cls='pln';}
+    if(cell)cell.innerHTML='<span class="pill '+cls+'" title="'+escapeHtml(res.note||'')+'">'+label+'</span>'+(prep.steps?'<div class="sub" style="margin-top:4px">'+prep.steps.length+' steps: '+escapeHtml(prep.steps.join(' → '))+'</div>':'');
+  }catch(e){ if(cell)cell.innerHTML='<span class="pill r">Failed</span>'; }
+}
+async function enrolSequenceBulk(){
+  const btns=document.querySelectorAll('#seq-tbody tr[id^="seqrow-"]');
+  for(const tr of btns){ const id=tr.id.replace('seqrow-',''); await enrolSequence(id); }
+}
+// --- NRR leaf ---
+function renderPooledRenewals180(){
+  const today=new Date();
+  const soon=_pooledAccts().filter(a=>{if(!a.renewal_date)return false;const d=new Date(a.renewal_date);const days=(d-today)/86400000;return days>=0&&days<=180;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const body=soon.map(a=>{const r=_pooledRow(a);const fc=a.renewal_forecast;const label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';const forecast=(fc&&fc.applicable&&fc.label)?'<span class="fc '+(fc.label==='Churn Risk'?'fc-churn':fc.label==='Expansion'?'fc-expansion':'fc-renewal')+'">'+escapeHtml(label)+'</span>':'<span class="muted">'+label+'</span>';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+renewalDays(a.renewal_date)+'</td><td>'+forecast+'</td></tr>';}).join('');
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Renewals &lt; 180 Days</h2><span class="note">'+soon.length+' pooled renewals in the next 180 days</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Renewal within 180d</span><span class="fb-count">'+soon.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Renewal</th><th>AI Forecast</th></tr></thead><tbody>'+(soon.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled renewals in the next 180 days.</td></tr>')+'</tbody></table></div></div>';
+}
+function renderPooledNrrQuarter(){
+  const pool=_pooledAccts();
+  const totalArr=pool.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const atRiskArr=pool.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
+  const securedPct=totalArr?Math.round(((totalArr-atRiskArr)/totalArr)*100):0;
+  const churned=pool.filter(a=>(a.lifecycle_stage||'').indexOf('Churn')>=0).length;
+  const logoChurn=pool.length?Math.round((churned/pool.length)*100):0;
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>NRR Quarter</h2><span class="note">Pooled retention this quarter · computed from live health + ARR</span></div><div class="body pad">'+
+    '<div class="mdw-grid">'+
+      _widget('Secured ARR (proxy NRR)','<div class="mdw-big good">'+securedPct+'%</div>')+
+      _widget('Gross Retention','<div class="mdw-big '+(securedPct>=90?'good':'warn')+'">'+securedPct+'%</div>')+
+      _widget('Customer Churn (Logo)','<div class="mdw-big '+(logoChurn>0?'warn':'good')+'">'+logoChurn+'%</div>')+
+      _widgetBig('Pooled ARR',fmt(totalArr))+
+      _widgetBig('At-risk ARR',fmt(atRiskArr),atRiskArr>0?'warn':'')+
+      _widgetBig('Pooled companies',pool.length)+
+    '</div></div></div>';
+}
+function renderAdoptInsights(){
+  const host=document.getElementById('oa-pane-insights'); if(!host||!DATA)return;
+  const accts=(DATA.accounts||[]).filter(a=>a.connected&&a.connected.usage&&a.usage_days_since_visit!=null);
+  let a0=0,a1=0,a2=0;accts.forEach(a=>{const d=a.usage_days_since_visit;if(d<=14)a0++;else if(d<=28)a1++;else a2++;});
+  const maxU=Math.max(1,a0,a1,a2);
+  const bars='<div class="cc-dist" style="height:130px">'+[['Active (\u226414d)',a0,'var(--green)'],['Cooling (15-28d)',a1,'var(--amber)'],['Idle (>28d)',a2,'var(--red)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxU)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+  // Top adopters — most recently active accounts (real Pendo recency).
+  const top=accts.slice().sort((x,y)=>(x.usage_days_since_visit)-(y.usage_days_since_visit)).slice(0,10);
+  const rows=top.map(a=>{const circle=a.health&&a.health.computable?'<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>':'<span class="hcircle hc-none">–</span>';const dsv=a.usage_days_since_visit;return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td class="muted">'+(dsv===0?'today':dsv+'d ago')+'</td></tr>';}).join('');
+  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Adoption Insights</h2><span class="note">Usage recency from live Pendo signals</span></div><div class="body pad"><div class="mdw-grid"><div class="mdw wide"><div class="mdw-h">Usage recency distribution</div><div class="mdw-b">'+bars+'</div></div></div></div></div>'+
+    '<div class="panel"><div class="head"><h2>Top adopters</h2><span class="note">Most recently active accounts</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Last seen</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4" class="empty" style="padding:24px">No usage-connected accounts.</td></tr>')+'</tbody></table></div></div>';
+}
 
 // Centralised fetch. On a 401 (expired signed session) we DO NOT auto-navigate:
 // a hard redirect here can create a reload loop if a valid session is intermittently
@@ -896,14 +2107,111 @@ async function boot(){
   setCount('c-use',byMand('MUST_USE'));
   // The Expand badge should reflect real expansion opportunities, not only queued tasks.
   (async()=>{try{const e=await (await api('/api/expansion')).json();const n=(e.count||0)+byMand('MUST_EXPAND');setCount('c-expand',n);}catch(_){}})();
-  go(initialView());
+  // Support shareable company deep-links: #company/<account_id>
+  const bh=(location.hash||'').replace('#','');
+  if(bh.indexOf('company/')===0){ openAccount(bh.slice('company/'.length)); }
+  else if(bh.indexOf('dash/')===0){ go('dash'); ccTab(bh.slice('dash/'.length)); }
+  else if(bh.indexOf('mydash/')===0){ go('mydash'); myDashTab(bh.slice('mydash/'.length)); }
+  else if(bh.indexOf('scaled/')===0){ go('scaled'); scaledTab(bh.slice('scaled/'.length)); }
+  else if(bh.indexOf('leading/')===0){ go('leading'); leadingTab(bh.slice('leading/'.length)); }
+  else if(bh.indexOf('riskesc/')===0){ go('riskesc'); riskEscTab(bh.slice('riskesc/'.length)); }
+  else { go(initialView()); }
 }
 function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.textContent=n;if(red&&n>0)e.classList.add('red');}
+
+// ===== My Command Center top band (mirrors Planhat's Command Center) =====
+// Three headline metrics + Upcoming Meetings, Company Distribution by Health,
+// and Upcoming Renewals — all from live signals; honest "not connected" otherwise.
+async function renderCommandCenter(){
+  const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
+  const tasks=DATA.tasks||[], accts=DATA.accounts||[];
+  const openRisks=tasks.filter(t=>t.mandate==='MUST_PROTECT').length;
+  let exec={}; try{exec=await (await api('/api/executive')).json();}catch(_){}
+  // Upcoming QBRs: Strategic accounts in the proactive renewal cadence window.
+  const qbrs=(exec.renewals_90d!=null)?exec.renewals_90d:0;
+  let exp={}; try{exp=await (await api('/api/expansion')).json();}catch(_){}
+  const expPipelineArr=(exp.candidates||[]).reduce((s,c)=>s+(c.arr_usd||0),0);
+  const expCount=exp.count||0;
+  // Three headline stat cards (Open Risks / Upcoming QBRs / Open Expansion)
+  const bigStat=(l,v,cls)=>'<div class="cc-big"><div class="cc-big-l">'+l+'</div><div class="cc-big-v '+(cls||'')+'">'+v+'</div></div>';
+  const headline='<div class="cc-headline">'+
+    bigStat('Open Risks',openRisks,openRisks>0?'warn':'')+
+    bigStat('Upcoming QBRs',qbrs,'')+
+    bigStat('Open Expansion',expCount?fmt(expPipelineArr):'$0','good')+
+  '</div>';
+  // Upcoming Meetings - Preparation: grouped by meeting type (Onboarding Call / QBR),
+  // derived from the prioritised queue and each account's lifecycle.
+  const groupFor=t=>{
+    const stage=(t.lifecycle_stage||t.phase||'').toLowerCase();
+    if(t.mandate==='MUST_USE'||stage.indexOf('onboard')>=0) return 'Onboarding Call';
+    return 'QBR';
+  };
+  const groupMeta={'Onboarding Call':{cls:'g-onboard',ico:'◔'},'QBR':{cls:'g-qbr',ico:'◈'}};
+  const groups={};
+  tasks.forEach(t=>{const g=groupFor(t);(groups[g]=groups[g]||[]).push(t);});
+  // Contact avatars: colored initials chips from the account name (deterministic colour).
+  const avaColors=['#5b5bf0','#0ca678','#e08b0b','#e5484d','#8b5cf6','#2f6bf0'];
+  const initials=s=>String(s||'').replace(/[^A-Za-z ]/g,'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('')||'?';
+  const avatars=(name)=>{
+    const parts=String(name||'').split(/\s+/).slice(0,2);
+    let s='<span class="mtg-avatars">';
+    parts.forEach((p,i)=>{const c=avaColors[(name.charCodeAt(i)||i)%avaColors.length];s+='<span class="mtg-ava" style="background:'+c+'">'+escapeHtml(initials(p))+'</span>';});
+    return s+'</span>';
+  };
+  let meetingsBody='';
+  ['Onboarding Call','QBR'].concat(Object.keys(groups).filter(g=>g!=='Onboarding Call'&&g!=='QBR')).forEach(g=>{
+    if(!groups[g])return;
+    const gm=groupMeta[g]||{cls:'g-qbr',ico:'•'};
+    meetingsBody+='<tr class="mtg-group '+gm.cls+'"><td colspan="4"><span class="mtg-gico">'+gm.ico+'</span>'+escapeHtml(g)+'<span class="mtg-count">'+groups[g].length+'</span></td></tr>';
+    groups[g].forEach(t=>{
+      meetingsBody+='<tr class="click mtg-row" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')">'+
+        '<td><span class="mtg-play">▷</span><strong>'+escapeHtml(t.account)+'</strong></td>'+
+        '<td><span class="mtg-due">'+escapeHtml(t.due||t.sla||'today')+'</span></td>'+
+        '<td class="mtg-action">'+escapeHtml((t.recommended_action||t.trigger||''))+'</td>'+
+        '<td>'+avatars(t.account)+'</td></tr>';
+    });
+  });
+  if(!meetingsBody) meetingsBody='<tr><td colspan="4" class="empty" style="padding:20px">No meetings to prepare right now.</td></tr>';
+  const meetingsPanel='<div class="panel"><div class="head"><h2>Upcoming Meetings - Preparation</h2></div>'+
+    '<div class="body"><table class="mtg-table"><thead><tr><th>Company</th><th>Due Date</th><th>Action</th><th>Involved Contacts</th></tr></thead><tbody>'+meetingsBody+'</tbody></table></div></div>';
+  // Company Distribution by Health — bars sized by ARR in each band (Low/Medium/High).
+  let arrLow=0,arrMed=0,arrHigh=0,nLow=0,nMed=0,nHigh=0;
+  accts.forEach(a=>{const b=a.health&&a.health.band,arr=a.arr_usd||0;if(b==='red'){arrLow+=arr;nLow++;}else if(b==='amber'){arrMed+=arr;nMed++;}else if(b==='green'){arrHigh+=arr;nHigh++;}});
+  const maxArr=Math.max(1,arrLow,arrMed,arrHigh);
+  const mfmt=n=>n>=1e6?('$'+(n/1e6).toFixed(2)+'M'):n>=1e3?('$'+Math.round(n/1e3)+'k'):('$'+n);
+  const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.round((arr/maxArr)*100)+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n+' accts</span></div></div>';
+  const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2></div><div class="body pad"><div class="cc-dist">'+
+    distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+'</div></div></div>';
+  // Portfolio Growth — ARR by segment (real live breakdown, largest first).
+  const segs=(exec.by_segment||[]).filter(s=>s.arr_usd>0).sort((a,b)=>b.arr_usd-a.arr_usd);
+  const maxSeg=Math.max(1,...segs.map(s=>s.arr_usd));
+  const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
+  const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist">'+growthBars+'</div></div></div>';
+  // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
+  const renRows=accts.filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const renewalsPanel='<div class="panel"><div class="head"><h2>Upcoming Renewals</h2><span class="note">Deterministic forecast, evidence grounded</span></div>'+
+    '<div class="body">'+(renRows.length?('<table class="acct-list"><thead><tr><th>Name</th><th>Company</th><th>ARR</th><th>End Date</th><th>AI Forecast ARR</th><th>AI Forecast</th><th>AI Forecast Summary</th></tr></thead><tbody>'+
+      renRows.map(a=>{const fc=a.renewal_forecast;const label=(fc&&fc.applicable&&fc.label)?fc.label:null;const forecast=label?'<span class="fc '+(label==='Churn Risk'?'fc-churn':label==='Expansion'?'fc-expansion':'fc-renewal')+'">'+escapeHtml(label)+'</span>':'<span class="muted">not classified</span>';
+        const fcArr=label==='Churn Risk'?'0':(a.arr_usd!=null?fmt(a.arr_usd):'no data');
+        return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml((a.name||a.account_id)+' subscription')+'</strong></td><td>'+escapeHtml(a.name||a.account_id)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'no data')+'</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+fcArr+'</td><td>'+forecast+'</td><td class="muted">'+((fc&&fc.rationale)?escapeHtml(fc.rationale):'Awaiting live renewal signals')+'</td></tr>';}).join('')+
+      '</tbody></table>'):'<div class="empty">No accounts carry a renewal date in HubSpot yet. Renewals appear here once a renewal date is set.</div>')+'</div></div>';
+  host.innerHTML=
+    '<div class="cc-grid">'+
+      '<div class="cc-left">'+headline+'<div class="cc-charts">'+dist+growth+'</div></div>'+
+      '<div class="cc-right">'+meetingsPanel+'</div>'+
+    '</div>'+
+    renewalsPanel;
+  // The Command Center shows ONLY the above. Hide the legacy portfolio blocks that were
+  // part of the old dashboard so this tab matches the reference exactly.
+  ['scopebar','stats','dash-charts','dash-revchange','daily-brief'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});
+  document.querySelectorAll('#cc-pane-command .sec-title, #cc-pane-command .cols').forEach(e=>e.style.display='none');
+  const brief=document.getElementById('daily-brief'); if(brief&&brief.closest('.panel')) brief.closest('.panel').style.display='none';
+}
 
 function render(v){
   // Defensive: never attempt to render account/task data before the portfolio has
   // loaded. If a view is opened during boot, retry once DATA is ready.
-  const dataViews=['dash','queue','protect','expand','use','accounts'];
+  const dataViews=['dash','queue','protect','expand','use','accounts','scaled','mydash','leading','lagging','reviews','calendar','notifications','riskesc','expansions','objadopt','pooled'];
   if(dataViews.includes(v) && (!DATA||!DATA.summary)){
     setTimeout(()=>{if(DATA&&DATA.summary)render(v);},300);
     return;
@@ -911,26 +2219,12 @@ function render(v){
   if(v==='dash'){
     const s=DATA.summary;
     if(!DATA.accounts.length){
-      document.getElementById('stats').innerHTML=
+      document.getElementById('cc-command-top').innerHTML=
         '<div class="empty" style="grid-column:1/-1">No live sources connected. Set HubSpot, Zendesk, Pendo and Stripe (rk_) credentials in the environment to load real accounts. This platform shows only live data. No sample data is displayed.</div>';
-      document.getElementById('dash-tasks').innerHTML='<div class="empty">No live accounts, so no tasks yet.</div>';
-      document.getElementById('dash-accts').innerHTML='<div class="empty">No accounts connected.</div>';
-      document.getElementById('dash-supp').innerHTML='<div class="empty">Nothing to show.</div>';
       return;
     }
-    document.getElementById('stats').innerHTML=[
-      ['Accounts',s.accounts,(s.account_scope==='csm'?'in your book':'in the portfolio'),''],
-      ['Priority 1 risk',s.priority1,'need action within 24h',s.priority1>0?'warn':''],
-      ['Portfolio ARR',fmt(s.total_arr_usd),'under management',''],
-      ['Open actions',DATA.tasks.length,'across all mandates',DATA.tasks.length>0?'':'good'],
-      ['Noise suppressed',s.suppressed,'false positives avoided','good']
-    ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
-    document.getElementById('dash-tasks').innerHTML=taskTable(DATA.tasks.slice(0,6),true);
-    document.getElementById('dash-accts').innerHTML=acctTable(DATA.accounts);
-    document.getElementById('dash-supp').innerHTML=suppHtml(DATA.suppressed);
     renderScopeBar(s);
-    loadRevenueMotion();
-    loadDailyBrief();
+    renderCommandCenter();
   }
   if(v==='queue') document.getElementById('queue-body').innerHTML=taskSummaryStrip(DATA.tasks,'All open actions across every mandate')+taskTable(DATA.tasks,true);
   if(v==='protect'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
@@ -942,6 +2236,19 @@ function render(v){
   }
   if(v==='use'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
   if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+  if(v==='scaled') scaledTab(_scaledTab||'pool');
+  if(v==='mydash') myDashTab(_myDashTab||'dashboard');
+  if(v==='leading') leadingTab(_leadingTab||'health');
+  if(v==='lagging') renderLagging();
+  if(v==='reviews') renderReviews();
+  if(v==='calendar') renderCalendar();
+  if(v==='notifications') renderNotifications();
+  if(v==='datamodel') renderDataModel();
+  if(v==='dataexplorer') renderDataExplorer();
+  if(v==='riskesc') riskEscTab(_riskEscTab||'health');
+  if(v==='expansions') expTab(_expTab||'whitespace');
+  if(v==='objadopt') objAdoptTab(_objAdoptTab||'adoption');
+  if(v==='pooled') pooledLeaf(_pooledLeaf||'process');
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
   if(v==='agent') loadAgentFeedbackSummary();
@@ -982,6 +2289,30 @@ function taskSummaryStrip(tasks,caption){
     +cell('Accounts',accts)
     +'</div></div>';
 }
+// Account list view state: sort + text filter + health-band filter (Planhat "filtered view").
+let _acctSort={key:'health',dir:'asc'};
+let _acctFilter={q:'',band:null};
+function acctSetSort(key){
+  if(_acctSort.key===key){_acctSort.dir=_acctSort.dir==='asc'?'desc':'asc';}
+  else{_acctSort.key=key;_acctSort.dir=(key==='name'||key==='segment'||key==='owner'||key==='phase')?'asc':'desc';}
+  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+}
+function acctSetFilter(q){_acctFilter.q=q;_acctRefreshTable();}
+function acctToggleBand(b){_acctFilter.band=(_acctFilter.band===b)?null:b;_acctRefreshTable();}
+function _acctRefreshTable(){
+  const host=document.getElementById('acct-table-host');
+  if(host){host.innerHTML=_acctTableInner(DATA.accounts);}
+}
+// CSM score as a Planhat 5-dot rating, derived transparently from the live health band/score.
+function csmDots(a){
+  const h=a.health;
+  if(!h||!h.computable) return '<span class="muted" title="Not enough live signal">–</span>';
+  const filled=Math.max(1,Math.min(5,Math.round(h.score/20)));
+  const cls=h.band==='red'?'low':h.band==='amber'?'mid':'';
+  let out='<span class="csmdots" title="Health-derived score '+h.score+'/100">';
+  for(let i=1;i<=5;i++)out+='<i class="'+(i<=filled?('on '+cls):'')+'"></i>';
+  return out+'</span>';
+}
 function acctSummaryStrip(accts){
   const band=a=>{const h=a.health;return (h&&typeof h==='object')?(h.band||h.rag):h;};
   let g=0,am=0,r=0,arr=0;
@@ -1005,26 +2336,179 @@ function taskTable(tasks,withDraft){
 }
 function prettyEv(e){return Object.entries(e).map(kv=>kv[0].replace(/_/g,' ')+': '+(Array.isArray(kv[1])?kv[1].join(', '):kv[1])).join('  ·  ');}
 function openAccountByName(name){const row=(DATA.accounts||[]).find(a=>(a.name||a.account_id)===name);if(row)openAccount(row.account_id);}
+
+// Planhat-style global search over the live account book.
+let _gsSel=-1,_gsMatches=[];
+function globalSearchInput(q){
+  const box=document.getElementById('globalSearchResults');
+  q=(q||'').trim().toLowerCase();
+  if(!q){box.classList.remove('on');box.innerHTML='';_gsMatches=[];_gsSel=-1;return;}
+  const accts=(DATA&&DATA.accounts)||[];
+  _gsMatches=accts.filter(a=>{
+    const n=(a.name||'').toLowerCase(),id=(a.account_id||'').toLowerCase(),seg=(a.segment||'').toLowerCase(),own=(a.csm_owner||'').toLowerCase();
+    return n.includes(q)||id.includes(q)||seg.includes(q)||own.includes(q);
+  }).slice(0,8);
+  _gsSel=-1;
+  if(!_gsMatches.length){box.innerHTML='<div class="gs-empty">No matching companies</div>';box.classList.add('on');return;}
+  box.innerHTML=_gsMatches.map((a,i)=>{
+    const h=a.health||{};
+    const circle='<span class="hcircle '+hband(h.band)+'">'+(h.computable?h.score:'–')+'</span>';
+    return '<div class="gs-item" data-i="'+i+'" onmousedown="globalSearchPick('+i+')">'+circle+
+      '<span class="gs-name">'+escapeHtml(a.name||a.account_id)+'</span>'+
+      '<span class="gs-meta">'+escapeHtml(a.segment||'')+(a.csm_owner?(' · '+escapeHtml(a.csm_owner)):'')+'</span></div>';
+  }).join('');
+  box.classList.add('on');
+}
+function globalSearchPick(i){
+  const a=_gsMatches[i];if(!a)return;
+  document.getElementById('globalSearchResults').classList.remove('on');
+  const inp=document.getElementById('globalSearch');if(inp)inp.value='';
+  openAccount(a.account_id);
+}
+function globalSearchKey(e){
+  const box=document.getElementById('globalSearchResults');
+  if(e.key==='Escape'){box.classList.remove('on');e.target.blur();return;}
+  if(!_gsMatches.length)return;
+  if(e.key==='ArrowDown'){e.preventDefault();_gsSel=Math.min(_gsSel+1,_gsMatches.length-1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();_gsSel=Math.max(_gsSel-1,0);}
+  else if(e.key==='Enter'){e.preventDefault();globalSearchPick(_gsSel<0?0:_gsSel);return;}
+  else return;
+  box.querySelectorAll('.gs-item').forEach((el,i)=>el.classList.toggle('sel',i===_gsSel));
+}
+document.addEventListener('click',e=>{const gs=document.querySelector('.gsearch');if(gs&&!gs.contains(e.target)){const b=document.getElementById('globalSearchResults');if(b)b.classList.remove('on');}});
 function acctTable(rows){
   if(!rows||!rows.length) return '<div class="empty">No accounts connected. Connect HubSpot to load the live roster.</div>';
+  // Saved-views tab row (Planhat): each tab applies a preset filter over the same book.
+  const views=[
+    {id:'all',ico:'▦',label:'All Companies'},
+    {id:'risk',ico:'◆',label:'At Risk'},
+    {id:'watch',ico:'▲',label:'Watch'},
+    {id:'renew',ico:'↻',label:'Renewing Soon'},
+    {id:'healthy',ico:'●',label:'Healthy'}
+  ];
+  const tabs='<div class="viewtabs">'+views.map(v=>'<button class="vtab'+(_acctView===v.id?' active':'')+'" onclick="acctSetView(\''+v.id+'\')"><span class="vt-ico">'+v.ico+'</span>'+v.label+'</button>').join('')+'<button class="vtab vt-add" title="Save a new view">+</button></div>';
+  // Filter pill bar (Planhat "filtered view"): find-in-view + health-band pills + count.
+  const bandPill=(b,lbl)=>'<span class="fpill'+(_acctFilter.band===b?' active':'')+'" onclick="acctToggleBand(\''+b+'\')">'+lbl+(_acctFilter.band===b?' <span class="fp-x">×</span>':'')+'</span>';
+  const bar='<div class="filterbar">'+
+    '<span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Find in view..." oninput="acctSetFilter(this.value)"></span>'+
+    bandPill('red','At risk')+bandPill('amber','Watch')+bandPill('green','Healthy')+
+    '<span class="fpill ghost">Company</span><span class="fpill ghost">Owner</span><span class="fpill ghost">+ Filter</span>'+
+    '<span class="fb-count" id="acct-count"></span>'+
+  '</div>';
+  return tabs+bar+'<div id="acct-table-host">'+_acctTableInner(rows)+'</div>';
+}
+// Saved views apply a preset over the shared account book and re-render the whole panel.
+let _acctView='all';
+function acctSetView(v){
+  _acctView=v;
+  if(v==='risk')_acctFilter.band='red';
+  else if(v==='watch')_acctFilter.band='amber';
+  else if(v==='healthy')_acctFilter.band='green';
+  else _acctFilter.band=null;
+  if(v==='renew'){_acctSort={key:'renews',dir:'asc'};}
+  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+}
+function _acctTableInner(rows){
   const NC='<span class="nc">not connected</span>';
   const ND='<span class="muted">no data</span>';
-  return '<table><thead><tr><th>Account</th><th>Segment</th><th>Health state</th><th>ARR</th><th>Renews</th><th>Live coverage</th></tr></thead><tbody>'+
-    rows.map(a=>{
-      const hc=a.connected&&a.connected.hubspot;
-      const name=hc?escapeHtml(a.name||a.account_id):escapeHtml(a.account_id);
-      // When HubSpot is connected, an empty field means "no data", not "not connected".
-      const seg=!hc?NC:(a.segment?escapeHtml(a.segment):ND);
-      const health=a.health&&a.health.computable
-        ?'<span class="hbar"><span class="hfill" style="width:'+a.health.score+'%;background:'+hcolor(a.health.band)+'"></span></span><span class="pill '+hband(a.health.band)+'">'+(a.health.band==='red'?'At risk':a.health.band==='amber'?'Watch':'Healthy')+' · '+a.health.score+'</span>'
-        :ND;
-      const arr=!hc?NC:(a.arr_usd!=null?fmt(a.arr_usd):ND);
-      const renews=!hc?NC:(a.renewal_date?a.renewal_date:ND);
-      const coverage=a.connected?Object.values(a.connected).filter(Boolean).length+'/'+Object.keys(a.connected).length:NC;
-      return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+name+'</strong></td><td class="muted">'+seg+'</td>'+
-        '<td>'+health+'</td><td class="mono">'+arr+'</td><td class="muted">'+renews+'</td><td><span class="pill '+(coverage===Object.keys(a.connected||{}).length+'/'+Object.keys(a.connected||{}).length?'g':'pln')+'">'+coverage+' sources</span></td></tr>';
-    }).join('')+
-    '</tbody></table>';
+  const q=(_acctFilter.q||'').trim().toLowerCase();
+  let list=rows.filter(a=>{
+    if(_acctFilter.band){const b=a.health&&a.health.band;if(b!==_acctFilter.band)return false;}
+    if(q){const hay=((a.name||'')+' '+(a.account_id||'')+' '+(a.segment||'')+' '+(a.csm_owner||'')+' '+(a.lifecycle_stage||'')).toLowerCase();if(!hay.includes(q))return false;}
+    return true;
+  });
+  // Sorting
+  const rank={red:0,amber:1,green:2};
+  const key=_acctSort.key,dir=_acctSort.dir==='asc'?1:-1;
+  const val=a=>{
+    switch(key){
+      case 'name':return (a.name||a.account_id||'').toLowerCase();
+      case 'segment':return (a.segment||'').toLowerCase();
+      case 'owner':return (a.csm_owner||'').toLowerCase();
+      case 'phase':return (a.lifecycle_stage||'').toLowerCase();
+      case 'arr':return a.arr_usd!=null?a.arr_usd:-1;
+      case 'renews':return a.renewal_date||'';
+      case 'health':default:return a.health&&a.health.computable?(rank[a.health.band]*1000 + a.health.score):999999;
+    }
+  };
+  list=list.slice().sort((x,y)=>{const vx=val(x),vy=val(y);return (vx<vy?-1:vx>vy?1:0)*dir;});
+  const cnt=document.getElementById('acct-count');if(cnt)cnt.textContent=list.length+' compan'+(list.length===1?'y':'ies');
+  const sortArr=k=>_acctSort.key===k?('<span class="arr">'+(_acctSort.dir==='asc'?'▲':'▼')+'</span>'):'<span class="arr">↕</span>';
+  const th=(k,lbl,extra)=>'<th class="sortable'+(_acctSort.key===k?' sorted':'')+'" '+(extra||'')+' onclick="acctSetSort(\''+k+'\')">'+lbl+sortArr(k)+'</th>';
+  const head='<thead><tr>'+
+    '<th class="col-check"><input type="checkbox" onclick="event.stopPropagation()" aria-label="Select all"></th>'+
+    '<th class="col-play"></th>'+
+    th('health','Health','style="width:64px"')+th('name','Company')+th('owner','Owner')+
+    th('arr','ARR (USD)')+th('phase','Phase')+'<th>CSM Score</th>'+
+    '<th>Usage Trend</th>'+th('renews','Renewal (in days)')+'<th>(AI) Business Health</th>'+
+    '<th>(AI) Latest News</th><th>(AI) Account Summary</th></tr></thead>';
+  const body=list.map(a=>{
+    const hc=a.connected&&a.connected.hubspot;
+    const name=hc?escapeHtml(a.name||a.account_id):escapeHtml(a.account_id);
+    const h=a.health;
+    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
+    const owner=hc?(a.csm_owner?escapeHtml(a.csm_owner):ND):NC;
+    const arr=!hc?NC:(a.arr_usd!=null?fmt(a.arr_usd):ND);
+    const phase=hc?(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):ND):NC;
+    const usage=usageTrend(a);
+    const renews=!hc?NC:renewalDays(a.renewal_date);
+    // (AI) Business Health — a numeric pill from the computed health score (mirrors Planhat's column).
+    const bh=h&&h.computable?'<span class="bhpill '+hband(h.band)+'" title="Computed business health '+h.score+'/100">'+h.score+'</span>':ND;
+    // (AI) Latest News — Planhat sources this from an external AI news feed. We have no such
+    // live source, so we mark it not connected rather than fabricate a headline.
+    const news='<span class="nc">not connected</span>';
+    // (AI) Account Summary — a FACTUAL snapshot from live fields (no hallucinated prose).
+    const summary=accountSummary(a);
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
+      '<td class="col-check"><input type="checkbox" onclick="event.stopPropagation()" aria-label="Select row"></td>'+
+      '<td class="col-play"><span class="rowplay" title="Open">▷</span></td>'+
+      '<td>'+circle+'</td>'+
+      '<td><strong>'+name+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td>'+
+      '<td class="muted">'+owner+'</td>'+
+      '<td class="mono">'+arr+'</td>'+
+      '<td>'+phase+'</td>'+
+      '<td>'+csmDots(a)+'</td>'+
+      '<td>'+usage+'</td>'+
+      '<td>'+renews+'</td>'+
+      '<td>'+bh+'</td>'+
+      '<td class="cp-news">'+news+'</td>'+
+      '<td class="cp-summary">'+summary+'</td></tr>';
+  }).join('');
+  if(!list.length) return '<table class="acct-list">'+head+'</table><div class="empty">No companies match this view.</div>';
+  return '<table class="acct-list">'+head+'<tbody>'+body+'</tbody></table>';
+}
+// Planhat shows renewal as a relative "in days" value, not a raw date.
+function renewalDays(dateStr){
+  if(!dateStr) return '<span class="muted">no data</span>';
+  const d=new Date(dateStr+(dateStr.length<=10?'T00:00:00':''));
+  if(isNaN(d)) return '<span class="mono">'+escapeHtml(dateStr)+'</span>';
+  const today=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+  const days=Math.round((d-today)/86400000);
+  if(days<0) return '<span class="mono muted" title="'+escapeHtml(dateStr)+'">'+Math.abs(days)+'d ago</span>';
+  const cls=days<=60?'rd-soon':days<=120?'rd-near':'';
+  return '<span class="mono rdays '+cls+'" title="Renews '+escapeHtml(dateStr)+'">'+days+' days</span>';
+}
+// Usage Trend — a recency bar from the live Pendo "days since last visit" signal.
+// Fewer idle days = fuller/greener bar. "no data" when the usage source is off.
+function usageTrend(a){
+  if(!(a.connected&&a.connected.usage)) return '<span class="nc">not connected</span>';
+  const dsv=a.usage_days_since_visit;
+  if(dsv==null) return '<span class="muted">no data</span>';
+  // Map 0..60+ idle days to a 100..0 activity level.
+  const level=Math.max(6,Math.min(100,Math.round(100-(dsv/60)*100)));
+  const col=dsv>=28?'var(--red)':dsv>=14?'var(--amber)':'var(--green)';
+  const label=dsv===0?'active today':dsv+'d idle';
+  return '<span class="utrend" title="'+label+'"><span class="utbar"><span class="utfill" style="width:'+level+'%;background:'+col+'"></span></span><span class="utval">'+dsv+'</span></span>';
+}
+// (AI) Account Summary — a FACTUAL one-line snapshot from live fields (no hallucination).
+function accountSummary(a){
+  if(!(a.connected&&a.connected.hubspot)) return '<span class="nc">not connected</span>';
+  const bits=[];
+  if(a.arr_usd!=null) bits.push('ARR '+fmt(a.arr_usd));
+  if(a.segment) bits.push(escapeHtml(a.segment));
+  if(a.lifecycle_stage) bits.push(escapeHtml(a.lifecycle_stage));
+  if(a.health&&a.health.computable) bits.push('health '+a.health.score);
+  return bits.length?'<span class="muted">'+bits.join(' · ')+'</span>':'<span class="muted">no data</span>';
 }
 function suppHtml(sup){
   if(!sup.length) return '<div class="empty"><b>No live false positives suppressed today.</b><div class="sub" style="margin-top:6px">The multi-instance guard checked the current portfolio and found no support spike concentrated on a test or secondary instance. The guard remains active; a clean result means no suppression was needed.</div><div class="sub" style="margin-top:8px;color:var(--brand)">Demo proof: run the deterministic suppression test to show the guard rejecting test-instance noise.</div></div>';
@@ -1524,80 +3008,179 @@ async function loadGaps(){
     '</tbody></table>';
 }
 
+// Transparent health-score breakdown (mirrors Planhat's factor scorecard). Renders the
+// engine's health.reasons as a factor list: starts at 100, applies each penalty/bonus,
+// ends at the engine's own total score + RAG band. Every figure is parsed from the
+// reason strings the engine produced (e.g. "churn risk 72% (-29)") — nothing invented.
+function healthBreakdownHtml(health){
+  if(!health||!health.computable) return '';
+  const reasons=health.reasons||[];
+  let rows='<div class="hbrow hbstart"><span class="hbfactor">Starting score</span><span class="hbpts base">100</span></div>';
+  reasons.forEach(r=>{
+    // Each reason ends with a signed delta in parentheses, e.g. "(-15)" or "(+3)".
+    const m=r.match(/\(([+\-]\d+)\)\s*$/);
+    const label=r.replace(/\s*\(([+\-]\d+)\)\s*$/,'');
+    if(m){
+      const n=parseInt(m[1],10);
+      const cls=n<0?'pen':'bonus';
+      rows+='<div class="hbrow"><span class="hbfactor">'+escapeHtml(label)+'</span><span class="hbpts '+cls+'">'+(n>0?'+':'')+n+'</span></div>';
+    }else{
+      rows+='<div class="hbrow"><span class="hbfactor">'+escapeHtml(label)+'</span><span class="hbpts">·</span></div>';
+    }
+  });
+  const bandTxt=health.band==='red'?'At risk':health.band==='amber'?'Watch':'Healthy';
+  rows+='<div class="hbrow hbtotal"><span class="hbfactor">Health score · '+escapeHtml(bandTxt)+'</span><span class="pill '+hband(health.band)+'">'+health.score+'</span></div>';
+  return '<div class="sect">Health breakdown</div><div class="hbreak">'+rows+'</div>';
+}
+
+// Renewal forecast pill + rationale (mirrors Planhat's AI Forecast column). Reads the
+// engine's deterministic renewal_forecast output; nothing is inferred client-side.
+function forecastPill(fc){
+  if(!fc||!fc.applicable||!fc.label) return '';
+  const cls=fc.label==='Churn Risk'?'fc-churn':fc.label==='Expansion'?'fc-expansion':'fc-renewal';
+  return '<span class="fc '+cls+'">'+escapeHtml(fc.label)+'</span>';
+}
+
 async function openAccount(id){
+  // Open the full-page company profile. All rich detail is rendered by
+  // renderCompanyPage from the same live account payload (no slide-out drawer).
   window.ACTIVE_ACCOUNT_ID=id;
   const d=await (await fetch('/api/accounts/'+id)).json();
-  const zd=d.signals.zendesk||{},us=d.signals.usage||{},ch=d.signals.churn||{},st=d.signals.stripe||{},jm=d.signals.jiminny||{};
-  const hs=d.hubspot||{};
-  const conn=d.connected||{};
-  const NC='<span class="nc">not connected</span>';
-  // Render a value only when its source is live; otherwise show "not connected".
-  const val=(isConn,v,fmtFn)=>!isConn?NC:(v==null?'<span class="muted">no data</span>':(fmtFn?fmtFn(v):v));
-  const contacts=conn.hubspot?((hs.contacts||[]).map(c=>{
-      const role=c.role?('<b>'+escapeHtml(c.role)+'</b>'):'<span class="muted">no role tagged</span>';
-      const em=c.email?(' · '+escapeHtml(c.email)):'';
-      return role+' / '+escapeHtml(c.name||'(unnamed)')+em;
-    }).join('<br>')||'<span class="muted">No contacts in HubSpot</span>'):NC;
-  const health=d.health||{};
-  const healthPill=health.computable?'<span class="pill '+hband(health.band)+'">'+health.score+'</span>':'<span class="nc">no data</span>';
-  const tr=d.health_trend;
-  const trendBadge=tr?('<span class="trend-badge '+(tr.direction==='down'?'down':tr.direction==='up'?'up':'flat')+'">'+(tr.delta>0?'+':'')+tr.delta+' pts / '+tr.days+'d</span>'):'';
-  const spark=sparkline((d.health_history||[]).map(r=>r.health));
-  const lc=d.lifecycle_state;
-  const lcBadge=lc?('<span class="lc-badge">'+escapeHtml(lc.stage)+'</span>'):'';
-  const title=conn.hubspot?(hs.name||id):id;
-  window.ACTIVE_ACCOUNT_NAME=title;
-  if(typeof adSyncScope==='function') adSyncScope();
-  const nd=v=>v?escapeHtml(String(v)):'<span class="muted">no data</span>';
-  const meta=conn.hubspot
-    ?('Segment '+nd(hs.segment_label||hs.segment)+' · ARR '+(hs.arr_usd!=null?fmt(hs.arr_usd):'<span class="muted">no data</span>')+' · renews '+nd(hs.renewal_date)+' · owner '+nd(hs.csm_owner))
-    :'HubSpot not connected';
-  document.getElementById('drawer').innerHTML=
-    '<div class="dhead"><span class="x" onclick="closeDrawer()">&times;</span>'+
-      '<div style="font-size:1.24em;font-weight:800;letter-spacing:-.01em">'+escapeHtml(title)+' '+healthPill+' '+trendBadge+' '+lcBadge+'</div>'+
-      '<div class="sub" style="margin-top:4px">'+meta+'</div>'+
-      '<button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane about this account</button>'+
-      '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare my meeting</button></div>'+
-    '<div class="dbody">'+
-      kv('Churn model',conn.churn?(ch.churn_status?escapeHtml(ch.churn_status)+' <span class="muted" style="font-weight:400">from Redshift</span>':(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'% <span class="muted" style="font-weight:400">'+(ch.computed?'computed from live signals':'from Redshift')+'</span>':'<span class="muted">no data</span>')):NC)+
-      kv('CSAT (30 days)',val(conn.zendesk,zd.csat_30d))+
-      kv('Support tickets (7d vs prior)',conn.zendesk?((zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-')):NC)+
-      kv('Product usage',conn.usage?(us.days_since_last_visit!=null?us.days_since_last_visit+' days since last visit':'<span class="muted">no data</span>'):NC)+
-      kv('Pendo risk advisor',val(conn.usage,us.pendo_risk_score))+
-      kv('Latest Jiminny call',conn.jiminny?(jm.last_call_date||'<span class="muted">no data</span>'):NC)+
-      kv('Call sentiment',val(conn.jiminny,jm.sentiment))+
-      kv('Payment',conn.stripe?(function(){
-          var stage=st.dunning_stage||'none';
-          if(stage==='none'){
-            return (st.past_due_invoices>0)
-              ? '<span class="pill a">'+st.past_due_invoices+' past-due · '+fmt(st.amount_due_usd)+'</span>'
-              : '<span class="pill g">Up to date</span>';
-          }
-          return '<span class="pill r">'+escapeHtml(stage.replace(/_/g,' '))+'</span>';
-        })():NC)+
-      kv('Primary instances',conn.hubspot?(d.primary_instances.join(', ')||'-'):NC)+
-      kv('Industry',conn.hubspot?nd(hs.industry):NC)+
-      kv('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
-      kv('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
-      (spark?('<div class="sect">Health trend</div><div class="callout">'+spark+(tr?'<div class="sub" style="margin-top:8px">Health has moved '+(tr.delta>0?'up ':'down ')+Math.abs(tr.delta)+' point'+(Math.abs(tr.delta)===1?'':'s')+' over the last '+tr.days+' days ('+tr.past+' to '+tr.current+').</div>':'')+'</div>'):'')+
-      ((d.trend_risks&&d.trend_risks.length)?('<div class="sect">Trend risks</div>'+d.trend_risks.map(r=>'<div class="callout" style="border-left:3px solid '+(r.severity==='high'?'var(--red)':'var(--amber)')+';margin-bottom:8px"><b>'+escapeHtml(r.title)+'</b><div class="sub" style="margin-top:4px">'+escapeHtml(r.evidence)+'</div></div>').join('')):'')+
-      adoptionHtml(d.adoption)+
-      metricsHtml(d.signals&&d.signals.metrics)+
-      successPlansHtml(d.success_plans,id)+
-      '<div class="sect">Health drivers</div><div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>'+
-      timelineHtml(d.timeline)+
-      (d.hubspot_writeback?('<div class="sect">Write-back to HubSpot (Sales visibility)</div>'+
-        '<div class="writeback"><b>Prepared (dry-run):</b> '+(d.hubspot_writeback.cs_health_score==null?'<span class="muted">no health data available</span>':'health '+d.hubspot_writeback.cs_health_score+', status <b>'+String(d.hubspot_writeback.cs_risk_status||'').replace(/_/g,' ')+'</b>')+(d.hubspot_writeback.cs_active_playbook?', active playbook "'+escapeHtml(d.hubspot_writeback.cs_active_playbook)+'"':'')+'.<br><span class="muted">'+escapeHtml(d.hubspot_writeback.note||'No HubSpot mutation is sent. The guarded write-back endpoint verifies/creates missing properties and applies only when both CS_ALLOW_WRITE=1 and apply=true are supplied.')+'</span></div>'):'')+
-      '<div class="sect">Contacts</div><div class="callout">'+contacts+'</div>'+
-      '<div class="sect">Tasks</div>'+(d.tasks.length?d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
-        (t.evidence?'<div class="evi" style="margin-top:6px"><b>Why:</b> '+escapeHtml(prettyEv(t.evidence))+'</div>':'')+
-        (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+
-        (t.draft_message?'<div class="draft"><b>'+escapeHtml(t.draft_type==='internal_recovery'?'Internal recovery note':'Evidence-grounded draft · review before sending')+'</b><br>'+escapeHtml(t.draft_message)+(t.draft_type==='internal_recovery'?'':'<br><button class="agent-draft" onclick="askAgentAbout('+escapeHtml(JSON.stringify('Polish a concise customer-facing message for '+t.account+' regarding: '+t.trigger+'. Use only the evidence in the account and do not mention internal churn scores.'))+')">Polish with AI</button>')+'</div>':'')+'</div>').join(''):'<div class="muted">No open tasks</div>')+
-    '</div>';
-  document.getElementById('drawer').classList.add('on');document.getElementById('scrim').classList.add('on');
+  renderCompanyPage(id,d);
 }
-function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
-function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');window.ACTIVE_ACCOUNT_ID=null;window.ACTIVE_ACCOUNT_NAME=null;if(typeof adSyncScope==='function')adSyncScope();}
+// ===== Full-page Planhat Company Profile =====
+function renderCompanyPage(id,d){
+  const hs=d.hubspot||{}, conn=d.connected||{}, health=d.health||{};
+  const zd=d.signals.zendesk||{},us=d.signals.usage||{},ch=d.signals.churn||{},st=d.signals.stripe||{},jm=d.signals.jiminny||{};
+  const NC='<span class="nc">not connected</span>', ND='<span class="muted">no data</span>';
+  const nd=v=>v?escapeHtml(String(v)):ND;
+  const title=conn.hubspot?(hs.name||id):id;
+  window.ACTIVE_ACCOUNT_ID=id; window.ACTIVE_ACCOUNT_NAME=title;
+  if(typeof adSyncScope==='function') adSyncScope();
+  const circle=health.computable?'<span class="hcircle '+hband(health.band)+'">'+health.score+'</span>':'<span class="hcircle hc-none">–</span>';
+  const seg=nd(hs.segment_label||hs.segment);
+  // Page tab row (Planhat)
+  const tabs='<div class="cp-tabs">'+
+    '<span class="cp-name">'+circle+escapeHtml(title)+'</span>'+
+    '<button class="cp-tab active"><span class="cp-tico">▚</span>Overview</button>'+
+    '<button class="cp-tab" title="See the full evidence trail below">Related Data</button>'+
+    '<button class="cp-tab">Usage</button>'+
+    '<button class="cp-tab">Revenue</button>'+
+    '<button class="cp-tab">Account Planning</button>'+
+  '</div>';
+  // Metric tiles row (grounded in live signals; "no data" where a source is absent)
+  const adopt=d.adoption||{};
+  const openTasks=(d.tasks||[]).length;
+  const convCount=(d.timeline||[]).length;
+  const onbPct=(d.onboarding&&d.onboarding.percent_complete!=null)?d.onboarding.percent_complete+'%':(adopt.onboarding_percent!=null?adopt.onboarding_percent+'%':ND);
+  const usageChange=(us.usage_change_pct!=null)?(us.usage_change_pct>0?'+':'')+us.usage_change_pct+'%':(us.days_since_last_visit!=null?us.days_since_last_visit+'d idle':ND);
+  const plans=(d.success_plans||[]).length;
+  const tile=(ico,v,l,cls)=>'<div class="cp-tile '+(cls||'')+'"><div class="cp-tico">'+ico+'</div><div><div class="cp-tv">'+v+'</div><div class="cp-tl">'+l+'</div></div></div>';
+  const tiles='<div class="cp-tiles">'+
+    tile('◎',plans||'0','Success plans')+
+    tile('☑',openTasks,'Open tasks',openTasks>0?'warn':'')+
+    tile('💬',convCount,'Activity events (30d)')+
+    tile('◔',onbPct,'Onboarding')+
+    tile('📈',usageChange,'Usage change',(us.usage_change_pct!=null&&us.usage_change_pct<0)?'warn':'')+
+    tile('◈',health.computable?health.score:'–','Business health',health.band==='red'?'warn':health.band==='green'?'good':'')+
+  '</div>';
+  // Signals section
+  const trendRisks=d.trend_risks||[];
+  const signals=trendRisks.length
+    ? '<div class="cp-feed">'+trendRisks.map(r=>'<div class="cp-item"><span class="cp-iico sev-'+(r.severity||'medium')+'">!</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(r.title)+'</div><div class="cp-idesc" title="'+escapeHtml(r.evidence||'')+'">'+escapeHtml(r.evidence||'')+'</div></div></div>').join('')+'</div>'
+    : '<div class="cp-signals">No active signals. The health drivers and timeline below carry the current evidence.</div>';
+  // Conversations / activity feed from the timeline (grouped by pinned=high severity, then dated)
+  const tl=(d.timeline||[]).slice();
+  const feedItem=e=>{
+    const sev=e.severity==='high'?'sev-high':e.severity==='medium'?'sev-medium':'';
+    const icoTxt=e.type&&e.type.indexOf('churn')>=0?'⚠':e.type&&e.type.indexOf('renew')>=0?'↻':'•';
+    return '<div class="cp-item"><span class="cp-iico '+sev+'">'+icoTxt+'</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(e.title||e.type||'Event')+'</div><div class="cp-idesc">'+escapeHtml((e.type||'').replace(/_/g,' '))+'</div></div><span class="cp-idate">'+fmtDate(e.date)+'</span></div>';
+  };
+  const highs=tl.filter(e=>e.severity==='high'), rest=tl.filter(e=>e.severity!=='high');
+  const feed=(tl.length)?('<div class="cp-feed">'+
+    (highs.length?'<div class="cp-fgroup">Pinned</div>'+highs.map(feedItem).join(''):'')+
+    (rest.length?'<div class="cp-fgroup">Recent</div>'+rest.map(feedItem).join(''):'')+
+  '</div>'):'<div class="cp-signals">No activity recorded yet for this account.</div>';
+  // Health drivers + trend (reuse existing builders)
+  const spark=sparkline((d.health_history||[]).map(r=>r.health));
+  const driversHtml='<div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>';
+  // Key metrics grid — the live signal detail (was previously only in the drawer).
+  const km=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
+  const churnVal=conn.churn?(ch.churn_status?escapeHtml(ch.churn_status):(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%'+(ch.computed?' <span class="muted" style="font-weight:400;font-size:.85em">computed</span>':' <span class="muted" style="font-weight:400;font-size:.85em">Redshift</span>'):ND)):NC;
+  const payVal=conn.stripe?(function(){var stage=st.dunning_stage||'none';if(stage==='none'){return (st.past_due_invoices>0)?'<span class="pill a">'+st.past_due_invoices+' past-due</span>':'<span class="pill g">Up to date</span>';}return '<span class="pill r">'+escapeHtml(stage.replace(/_/g,' '))+'</span>';})():NC;
+  const adopt2=d.adoption||{};
+  const keyMetrics='<div class="cp-kmgrid">'+
+    km('Churn model',churnVal)+
+    km('CSAT (30 days)',conn.zendesk?nd(zd.csat_30d):NC)+
+    km('Support tickets (7d vs prior)',conn.zendesk?((zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-')):NC)+
+    km('Product usage',conn.usage?(us.days_since_last_visit!=null?us.days_since_last_visit+' days since visit':ND):NC)+
+    km('Pendo risk advisor',conn.usage?nd(us.pendo_risk_score):NC)+
+    km('Pendo adoption',conn.usage?nd(us.pendo_adoption):NC)+
+    km('Pendo engagement',conn.usage?nd(us.pendo_adoption_engagement):NC)+
+    km('Usage trend',conn.usage?nd(us.pendo_trend):NC)+
+    km('Plan tier',conn.usage?nd(us.plan_tier):NC)+
+    km('Product adoption',(adopt2.adoption_score!=null?adopt2.adoption_score+'/100':(adopt2.score!=null?adopt2.score+'/100':ND)))+
+    km('Latest Jiminny call',conn.jiminny?nd(jm.last_call_date):NC)+
+    km('Call sentiment',conn.jiminny?nd(jm.sentiment):NC)+
+    km('Payment',payVal)+
+    km('Primary instances',conn.hubspot?nd((d.primary_instances||[]).join(', ')):NC)+
+    km('Region',conn.hubspot?nd(hs.state||hs.country):NC)+
+    km('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
+    km('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
+  '</div>';
+  // Full contacts list
+  const contactsList=(hs.contacts&&hs.contacts.length)?('<div class="cp-contacts">'+hs.contacts.map(c=>'<div class="cp-contact"><span class="cp-cav">'+escapeHtml((c.name||'?').slice(0,1).toUpperCase())+'</span><div><div class="cp-cn">'+escapeHtml(c.name||'(unnamed)')+(c.role?' <span class="cp-crole">'+escapeHtml(c.role)+'</span>':'')+'</div>'+(c.email?'<div class="cp-ce">'+escapeHtml(c.email)+'</div>':'')+'</div></div>').join('')+'</div>'):'<div class="cp-signals">No contacts in HubSpot.</div>';
+  // Right Fields rail (Planhat)
+  const csm=csmDots({health:health});
+  const fc=d.renewal_forecast||{};
+  const forecastPillHtml=(fc&&fc.applicable&&fc.label)?forecastPill(fc):ND;
+  const field=(k,v)=>'<div class="cp-field"><span class="cp-fk">'+k+'</span><span class="cp-fv">'+v+'</span></div>';
+  const website=hs.website?('<a href="'+escapeHtml(hs.website)+'" target="_blank" rel="noopener" style="color:var(--brand)">'+escapeHtml(hs.website.replace(/^https?:\/\//,''))+'</a>'):ND;
+  const attachments=(hs.contacts&&hs.contacts.length)?hs.contacts.slice(0,4).map(c=>'<div class="cp-attach"><span class="cp-aico">👤</span>'+escapeHtml(c.name||'(unnamed)')+(c.role?(' · '+escapeHtml(c.role)):'')+'</div>').join(''):'<div class="cp-attach"><span class="muted">No contacts in HubSpot</span></div>';
+  const rail='<aside class="cp-rail">'+
+    '<h3>Overview</h3>'+
+    field('Owner',conn.hubspot?nd(hs.csm_owner):NC)+
+    field('Phase',conn.hubspot?(hs.lifecycle_stage?'<span class="pill pln">'+escapeHtml(hs.lifecycle_stage)+'</span>':ND):NC)+
+    field('CSM Score',csm)+
+    field('Segment',conn.hubspot?seg:NC)+
+    field('Website',conn.hubspot?website:NC)+
+    field('Industry',conn.hubspot?nd(hs.industry):NC)+
+    '<h3>Revenue Info</h3>'+
+    field('ARR (USD)',conn.hubspot?(hs.arr_usd!=null?fmt(hs.arr_usd):ND):NC)+
+    field('Renewal',conn.hubspot?renewalDays(hs.renewal_date):NC)+
+    field('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
+    field('AI Forecast',forecastPillHtml)+
+    '<h3>Key Contacts</h3>'+attachments+
+    '<h3>Live Coverage</h3>'+
+    Object.keys(conn).map(k=>'<div class="cp-field"><span class="cp-fk">'+k+'</span><span class="cp-fv">'+(conn[k]?'<span class="pill g">live</span>':'<span class="pill pln">off</span>')+'</span></div>').join('')+
+  '</aside>';
+  // Assemble
+  const left='<div>'+
+    '<div class="cp-title"><h1>'+escapeHtml(title)+'</h1>'+circle+
+      '<div class="cp-actions"><button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane</button>'+
+      '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button></div></div>'+
+    tiles+
+    '<div class="cp-section"><div class="cp-shead"><h2>Signals</h2></div>'+signals+'</div>'+
+    '<div class="cp-section"><div class="cp-shead"><h2>Key metrics</h2><span class="cp-cnt">live signals</span></div>'+keyMetrics+'</div>'+
+    '<div class="cp-section"><div class="cp-shead"><h2>Health</h2><span class="cp-cnt">drivers &amp; trend</span></div>'+
+      (spark?'<div class="callout" style="margin-bottom:10px">'+spark+'</div>':'')+driversHtml+
+      healthBreakdownHtml(health)+'</div>'+
+    '<div class="cp-section"><div class="cp-shead"><h2>Conversations &amp; activity</h2><span class="cp-cnt">'+tl.length+'</span></div>'+feed+'</div>'+
+    '<div class="cp-section"><div class="cp-shead"><h2>Contacts</h2><span class="cp-cnt">'+((hs.contacts||[]).length)+'</span></div>'+contactsList+'</div>'+
+    '<div class="cp-section"><div class="cp-shead"><h2>Comments</h2></div><div class="cp-comment"><textarea placeholder="Add a comment for the account team..."></textarea></div></div>'+
+    (d.tasks&&d.tasks.length?('<div class="cp-section"><div class="cp-shead"><h2>Tasks</h2><span class="cp-cnt">'+d.tasks.length+'</span></div>'+
+      d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
+        (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+'</div>').join('')+'</div>'):'')+
+  '</div>';
+  document.getElementById('company-body').innerHTML=tabs+'<div class="company-wrap">'+left+rail+'</div>';
+  go('company');
+  // go() calls closeDrawer() which clears the active account; restore it for this page.
+  window.ACTIVE_ACCOUNT_ID=id; window.ACTIVE_ACCOUNT_NAME=title;
+  if(typeof adSyncScope==='function') adSyncScope();
+  if(('#company/'+id)!==location.hash) history.replaceState(null,'',('#company/'+id));
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}function closeDrawer(){document.getElementById('drawer').classList.remove('on');document.getElementById('scrim').classList.remove('on');window.ACTIVE_ACCOUNT_ID=null;window.ACTIVE_ACCOUNT_NAME=null;if(typeof adSyncScope==='function')adSyncScope();}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 const agentInput=document.getElementById('agentQ');
 const qualityHeading=document.querySelector('#v-agent .panel .head h2');

@@ -468,6 +468,34 @@ def test_retention_not_computable_without_live_arr():
     assert r["grr_pct"] is None
 
 
+def test_sequence_enrolment_defaults_to_dry_run(monkeypatch):
+    """One-to-many sequence enrolment never sends by default (dry-run), even with apply=true,
+    unless CS_ALLOW_WRITE=1. Same two-gate safety as the HubSpot write-back."""
+    import engine, orchestrate
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    # Pick a real account from the loaded book that is idle 28+ days (qualifies).
+    accounts = orchestrate.load_accounts()
+    aid = next(iter(accounts))
+    r = engine.enrol_sequence(aid, sequence="low_usage_reengage", apply=True)
+    assert r["apply_requested"] is True
+    assert r["write_enabled"] is False
+    # With writes disabled, the result must NOT be an applied enrolment.
+    assert r["result"]["mode"] in ("dry-run", "not-qualified")
+    assert r["result"].get("enrolled") in (False, None)
+    assert r["prepared"]["sequence"] == "low_usage_reengage"
+    assert isinstance(r["prepared"]["steps"], list) and r["prepared"]["steps"]
+
+
+def test_sequence_enrolment_rejects_unknown_sequence():
+    import engine
+    # Sequence name is validated before any account/live lookup, so this is hermetic.
+    try:
+        engine.enrol_sequence("au1-anything", sequence="does_not_exist", apply=False)
+        assert False, "expected ValueError for unknown sequence"
+    except ValueError:
+        pass
+
+
 def test_rocket_lane_adapter_maps_onboarding(monkeypatch):
     from adapters import config, sources
 

@@ -261,6 +261,104 @@ def health_score(account: dict) -> dict:
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
 
+def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = False) -> dict:
+    """Deterministic renewal-outcome forecast for an account (mirrors Planhat's AI
+    Forecast column, but rules-based and fully explainable, NOT an LLM).
+
+    Classifies an account with a renewal into one of three labels, derived ONLY from
+    signals the engine already produces. Nothing is invented; every rationale line
+    traces back to a health `reason` or an expansion trigger.
+
+    Priority order (risk first, then opportunity, then the default):
+      - "Churn Risk"  if health band is red, OR ml_churn_score >= CHURN_RISK (0.70),
+                      OR churn_status == churned.
+      - "Expansion"   if the account already qualifies for a signed expansion trigger
+                      (`expansion_qualified`, computed by the caller from
+                      orchestrate.evaluate() so thresholds are never duplicated here).
+      - "Renewal"     otherwise (on-track renewal).
+
+    `expansion_qualified` is passed in by the caller (the API layer) which asks the
+    rules engine whether an expansion task fired for this account, reusing the signed
+    UTIL_EXPANSION / API_SURGE thresholds rather than re-implementing them.
+
+    Returns {label, rationale, evidence} where `evidence` is the list of grounding
+    strings used to build the one-line rationale, or `applicable: False` when the
+    account has no renewal date (nothing to forecast).
+    """
+    hs = account.get("hubspot", {}) or {}
+    churn = account.get("churn", {}) or {}
+
+    if not hs.get("renewal_date"):
+        return {"applicable": False, "label": None, "rationale": None, "evidence": []}
+
+    band = health.get("band") if isinstance(health, dict) else None
+    reasons = list(health.get("reasons", [])) if isinstance(health, dict) else []
+    computable = bool(health.get("computable")) if isinstance(health, dict) else False
+
+    ml = churn.get("ml_churn_score")
+    churned = str(churn.get("churn_status") or "").lower() == "churned"
+
+    # --- Churn Risk (highest priority) ---
+    churn_signals = []
+    if computable and band == "red":
+        churn_signals.append("health red")
+    if isinstance(ml, (int, float)) and ml >= orchestrate.CHURN_RISK:
+        churn_signals.append(f"churn risk {int(ml * 100)}%")
+    if churned:
+        churn_signals.append("churned")
+    if churn_signals:
+        # Prefer concrete health reasons for the rationale (they carry the penalty
+        # detail), falling back to the trigger summary above.
+        detail = reasons[:2] if reasons else churn_signals
+        return {
+            "applicable": True,
+            "label": "Churn Risk",
+            "rationale": "Churn Risk — " + ", ".join(detail),
+            "evidence": churn_signals + reasons,
+        }
+
+    # --- Expansion (opportunity) ---
+    if expansion_qualified:
+        detail = reasons[:1] if reasons else []
+        rationale = "Expansion — qualifies for an expansion trigger"
+        if detail:
+            rationale += " (" + ", ".join(detail) + ")"
+        return {
+            "applicable": True,
+            "label": "Expansion",
+            "rationale": rationale,
+            "evidence": ["expansion trigger fired"] + reasons,
+        }
+
+    # --- Renewal (on track) ---
+    if computable:
+        rationale = "Renewal — " + (reasons[0] if reasons else f"health {health.get('score')}, on track")
+    else:
+        rationale = "Renewal — on track (no adverse signal)"
+    return {
+        "applicable": True,
+        "label": "Renewal",
+        "rationale": rationale,
+        "evidence": reasons,
+    }
+
+
+def _expansion_qualified(account_id: str, account: dict) -> bool:
+    """Whether the signed expansion playbook fired for this account, reusing the
+    rules engine's own evaluation (UTIL_EXPANSION / API_SURGE / adoption thresholds)
+    so the forecast never duplicates those thresholds."""
+    try:
+        tasks, _ = orchestrate.evaluate(account_id, account)
+    except Exception:  # noqa: BLE001
+        return False
+    expansion_rules = {
+        orchestrate.RULE_EXPANSION_UTILIZATION,
+        orchestrate.RULE_EXPANSION_API_SURGE,
+        orchestrate.RULE_EXPANSION_ADOPTION,
+    }
+    return any(t.get("rule_id") in expansion_rules for t in tasks)
+
+
 def adoption_score(account: dict) -> dict:
     """Multi-signal product-adoption picture (Customer 360 §3/§4). Measures whether the
     customer is actually running their recruitment business in JobAdder, not just logging
@@ -510,17 +608,36 @@ def portfolio() -> dict:
         live = _live_account(a)
         hsobj = live.get("hubspot", {})           # {} unless HubSpot is live
         h = health_score(live)                    # computed from live signals only
+        # Deterministic renewal forecast, grounded in the health reasons + the signed
+        # expansion trigger (reused from orchestrate.evaluate(), not re-thresholded).
+        forecast = renewal_forecast(live, h, expansion_qualified=_expansion_qualified(aid, a))
+        _usage = live.get("usage", {}) or {}
+        # Pooled membership: authoritative from HubSpot cs_customer_tier when set; otherwise
+        # fall back to the segment heuristic (1-20 agency + Corporate = pooled cohort).
+        _seg_label = hsobj.get("segment_label") or hsobj.get("segment")
+        _tier = hsobj.get("customer_tier")
+        if hsobj.get("pooled") is not None:
+            _pooled = bool(hsobj.get("pooled"))
+        else:
+            _pooled = _seg_label in ("Agency 1-2 Users", "Agency 3-20 Users", "Corporate")
         rows.append({
             "account_id": aid,
             "name": hsobj.get("name"),
-            "segment": hsobj.get("segment_label") or hsobj.get("segment"),
+            "segment": _seg_label,
+            "customer_tier": _tier,          # authoritative HubSpot tier when present (e.g. "Pooled")
+            "pooled": _pooled,               # True when pooled (tier-authoritative, else segment fallback)
+            "pooled_source": ("tier" if hsobj.get("pooled") is not None else "segment"),
             "arr_usd": hsobj.get("arr_usd"),
             "renewal_date": hsobj.get("renewal_date"),
             "subscription_type": hsobj.get("subscription_type"),
             "csm_owner": hsobj.get("csm_owner"),
             "lifecycle_stage": hsobj.get("lifecycle_stage"),
             "health": h,
+            "renewal_forecast": forecast,
             "connected": _connected(a),
+            # Live usage-recency signal (Pendo). Powers the "Usage Trend" column; None when
+            # the usage source is not connected, so the UI shows "no data" (never fabricated).
+            "usage_days_since_visit": _usage.get("days_since_last_visit") if _connected(a).get("usage") else None,
             "open_task_count": len(tasks_by_account.get(aid, [])),
         })
     rows.sort(key=lambda r: r["health"]["score"])  # worst health first
@@ -686,6 +803,14 @@ def account_detail(account_id: str) -> dict:
     tasks, suppressed = orchestrate.evaluate(account_id, a)
     live = _live_account(a)
     h = health_score(live)
+    # Expansion qualification reuses the tasks the rules engine just produced, so the
+    # forecast keys off the signed expansion triggers without re-thresholding here.
+    _expansion_rules = {
+        orchestrate.RULE_EXPANSION_UTILIZATION,
+        orchestrate.RULE_EXPANSION_API_SURGE,
+        orchestrate.RULE_EXPANSION_ADOPTION,
+    }
+    expansion_qualified = any(t.get("rule_id") in _expansion_rules for t in tasks)
     return {
         "account_id": account_id,
         "hubspot": live.get("hubspot", {}),
@@ -699,6 +824,7 @@ def account_detail(account_id: str) -> dict:
         },
         "onboarding": live.get("onboarding", {}),
         "health": h,
+        "renewal_forecast": renewal_forecast(live, h, expansion_qualified=expansion_qualified),
         "health_trend": _health_trend_for(account_id),
         "trend_risks": trend_risks(account_id),
         "health_history": _health_history_for(account_id),
@@ -769,6 +895,82 @@ def writeback(account_id: str, apply: bool = False) -> dict:
         "account_id": account_id,
         "apply_requested": bool(apply),
         "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
+# Re-engagement sequences the platform can enrol pooled accounts into. Deterministic
+# catalogue (the actual send is done by the connected sequencing tool on apply).
+SEQUENCES = {
+    "low_usage_reengage": {
+        "label": "Low-usage re-engagement",
+        "steps": ["Value check-in email", "Feature nudge (idle feature)", "Book a 15-min reset call"],
+        "trigger": "No product visit in 28+ days (live Pendo)",
+    },
+    "renewal_180": {
+        "label": "Renewal runway (T-180)",
+        "steps": ["Renewal heads-up", "Success recap", "Renewal confirmation"],
+        "trigger": "Renewal within 180 days",
+    },
+}
+
+
+def enrol_sequence(account_id: str, sequence: str = "low_usage_reengage", apply: bool = False) -> dict:
+    """Prepare or apply a one-to-many re-engagement sequence enrolment.
+
+    Same two-gate safety as the HubSpot write-back: dry-run by default; a real
+    enrolment requires BOTH apply=True AND CS_ALLOW_WRITE=1. Nothing is sent otherwise.
+    Grounded: only enrols accounts that genuinely qualify (e.g. idle 28+ days) and
+    never fabricates a send result.
+    """
+    seq = SEQUENCES.get(sequence)
+    if not seq:
+        raise ValueError(f"unknown sequence {sequence}")
+    account = orchestrate.load_accounts().get(account_id)
+    if not account:
+        raise KeyError(account_id)
+    live = _live_account(account)
+    hs = live.get("hubspot", {}) or {}
+    usage = live.get("usage", {}) or {}
+    dsv = usage.get("days_since_last_visit")
+    # Qualification is deterministic and source-backed.
+    if sequence == "low_usage_reengage":
+        qualifies = dsv is not None and dsv >= 28
+        reason = (f"idle {dsv} days" if qualifies else
+                  (f"active ({dsv} days since visit)" if dsv is not None else "no usage signal"))
+    else:
+        qualifies = bool(hs.get("renewal_date"))
+        reason = "renewal date set" if qualifies else "no renewal date"
+    write_enabled = os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")
+    can_apply = bool(apply) and write_enabled and qualifies
+    prepared = {
+        "sequence": sequence,
+        "label": seq["label"],
+        "steps": seq["steps"],
+        "trigger": seq["trigger"],
+        "account": hs.get("name") or account_id,
+        "qualifies": qualifies,
+        "qualification_reason": reason,
+    }
+    if can_apply:
+        # Live enrolment requires a connected sequencing tool. When none is wired we
+        # do NOT claim a send; we surface an honest "no sequencing tool connected".
+        result = {"enrolled": False, "mode": "no-sequencing-tool",
+                  "note": "CS_ALLOW_WRITE=1 and account qualifies, but no sequencing tool "
+                          "is connected. Connect an email/sequencing source to send."}
+    elif not qualifies:
+        result = {"enrolled": False, "mode": "not-qualified", "note": reason}
+    else:
+        result = {"enrolled": False, "mode": "dry-run",
+                  "note": "Prepared only. Set CS_ALLOW_WRITE=1 and request apply=true "
+                          "with a connected sequencing tool to enrol."}
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": account_id,
+        "apply_requested": bool(apply),
+        "write_enabled": write_enabled,
+        "prepared": prepared,
         "result": result,
     }
 
