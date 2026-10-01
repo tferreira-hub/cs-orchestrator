@@ -116,6 +116,20 @@ Resources:
             Effect: Allow
             Action: "ssm:DescribeParameters"
             Resource: "*"
+          # Manage the csplatform DNS record in the jobadder.tools Route 53 zone.
+          - Sid: ManageDnsRecords
+            Effect: Allow
+            Action:
+              - "route53:ChangeResourceRecordSets"
+              - "route53:ListResourceRecordSets"
+              - "route53:GetHostedZone"
+            Resource: "arn:aws:route53:::hostedzone/Z0618813QQJF3P1SS6OD"
+          - Sid: Route53Read
+            Effect: Allow
+            Action:
+              - "route53:GetChange"
+              - "route53:ListHostedZones"
+            Resource: "*"
           - Sid: TerraformState
             Effect: Allow
             Action:
