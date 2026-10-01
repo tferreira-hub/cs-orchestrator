@@ -261,6 +261,18 @@ def health_score(account: dict) -> dict:
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
 
+def _roster_band(company: dict) -> dict:
+    """Lightweight health band for a non-enriched (Tier-1) roster row. We have no live
+    signals here, so health is not computable; we surface a neutral band and let the UI
+    show the account at roster level. Opening the account triggers full enrichment."""
+    lc = str(company.get("lifecycle_stage") or "").lower()
+    if "churn" in lc:
+        return {"score": 40, "band": "red", "reasons": ["churned"], "computable": False}
+    # Not computable without live signals: neutral/amber, flagged non-computable so the
+    # UI renders it as "not scored yet" rather than a fabricated green.
+    return {"score": 70, "band": "amber", "reasons": [], "computable": False}
+
+
 def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = False) -> dict:
     """Deterministic renewal-outcome forecast for an account (mirrors Planhat's AI
     Forecast column, but rules-based and fully explainable, NOT an LLM).
@@ -642,6 +654,62 @@ def portfolio() -> dict:
         })
     rows.sort(key=lambda r: r["health"]["score"])  # worst health first
 
+    # --- Whole-book merge (Tier-1 lightweight) --------------------------------
+    # The enriched rows above are the deeply-signalled slice. Merge in the REST of the
+    # customer book from the cheap full-roster scan so every page sees the whole book
+    # and the global filter has a real population to work on. These rows carry roster-
+    # level fields only (name, segment, owner, ARR, renewal, cohort) with a lightweight
+    # health band; full per-account signals load on demand when an account is opened.
+    enriched_ids = {r["account_id"] for r in rows}
+    include_churned = str(os.environ.get("CS_INCLUDE_CHURNED", "")).lower() in ("1", "true", "yes")
+    book_total = managed_count = pooled_count = 0
+    try:
+        if _src.HUBSPOT.live():
+            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+                lc = str(c.get("lifecycle_stage") or "").lower()
+                is_churned = "churn" in lc
+                book_total += 1
+                if c.get("cohort") == "managed":
+                    managed_count += 1
+                else:
+                    pooled_count += 1
+                aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
+                if aid in enriched_ids:
+                    continue  # already have the deeply-enriched version
+                if is_churned and not include_churned:
+                    continue  # active book by default; churned available via filter/env
+                band = _roster_band(c)
+                rows.append({
+                    "account_id": aid,
+                    "name": c.get("name"),
+                    "segment": c.get("segment_label") or c.get("segment"),
+                    "customer_tier": c.get("customer_tier"),
+                    "pooled": (c.get("cohort") == "pooled"),
+                    "pooled_source": "roster",
+                    "cohort": c.get("cohort"),
+                    "arr_usd": c.get("arr_usd"),
+                    "renewal_date": None,
+                    "subscription_type": None,
+                    "csm_owner": None,
+                    "csm_owner_id": c.get("owner_id"),
+                    "lifecycle_stage": c.get("lifecycle_stage"),
+                    "churned": is_churned,
+                    "health": band,
+                    "renewal_forecast": {"applicable": False, "label": None, "rationale": None, "evidence": []},
+                    "connected": {},
+                    "usage_days_since_visit": None,
+                    "open_task_count": 0,
+                    "enriched": False,
+                })
+    except Exception:  # noqa: BLE001
+        pass
+    # Tag the enriched rows as fully enriched + give them a cohort for the filter.
+    for r in rows:
+        if "enriched" not in r:
+            r["enriched"] = True
+            r.setdefault("cohort", "pooled" if r.get("pooled") else "managed")
+    rows.sort(key=lambda r: (r["health"]["score"], not r.get("enriched")))
+
     # Only sum ARR that is genuinely live-sourced (HubSpot live). No fixture ARR.
     total_arr = sum(r["arr_usd"] or 0 for r in rows)
     at_risk_arr = sum(r["arr_usd"] or 0 for r in rows
@@ -662,6 +730,13 @@ def portfolio() -> dict:
             "principal": ({"name": get_principal().get("name"), "email": get_principal().get("email"),
                            "role": get_principal().get("role")} if get_principal() else None),
             "judge": result.get("judge", {"verdict": "UNKNOWN", "violations": []}),
+            # Whole-book counts (all customers, not just the enriched slice) so the UI
+            # can show "showing N of M" and drive the global cohort filter.
+            "book_total": book_total,
+            "book_managed": managed_count,
+            "book_pooled": pooled_count,
+            "enriched_count": len(enriched_ids),
+            "churned_included": include_churned,
         },
         "accounts": rows,
         "tasks": result["tasks"],
