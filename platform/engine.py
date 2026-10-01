@@ -79,7 +79,16 @@ def can_view_account(account_id: str) -> bool:
         return True
     accounts = dataaccess.all_accounts()
     a = accounts.get(account_id)
-    return bool(a) and _owns(a, p.get("owner_id"))
+    if a is None:
+        # Whole-book roster account outside the enriched slice: resolve ownership from a
+        # single on-demand live lookup so a CSM can still open their own roster accounts.
+        try:
+            a = dataaccess.account(account_id)
+        except Exception:  # noqa: BLE001
+            return False
+        if not (a and a.get("hubspot")):
+            return False
+    return _owns(a, p.get("owner_id"))
 
 
 # The rules engine reads accounts through this provider, so scoping is uniform.
@@ -930,9 +939,20 @@ def account_detail(account_id: str) -> dict:
     if not can_view_account(account_id):
         raise ForbiddenError(account_id)
     accounts = orchestrate.load_accounts()
-    if account_id not in accounts:
-        raise KeyError(account_id)
-    a = accounts[account_id]
+    if account_id in accounts:
+        a = accounts[account_id]
+    else:
+        # Whole-book roster account (Tier-1, not in the deeply-enriched slice). Enrich it
+        # live ON DEMAND so the detail page works for EVERY account, not just the enriched
+        # ~slice. This is the single-account fan-out (HubSpot + Zendesk + Pendo + Jiminny +
+        # Stripe + churn + onboarding), the same assembler the roster uses per account.
+        try:
+            a = dataaccess.account(account_id)
+        except Exception as exc:  # noqa: BLE001
+            raise KeyError(account_id) from exc
+        # No live HubSpot record for this id -> genuinely unknown account (honest 404).
+        if not (a and a.get("hubspot")):
+            raise KeyError(account_id)
     tasks, suppressed = orchestrate.evaluate(account_id, a)
     live = _live_account(a)
     h = health_score(live)

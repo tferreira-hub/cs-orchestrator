@@ -141,6 +141,11 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .src.live{background:var(--greenbg);color:var(--green)}
 .src.sample{background:var(--amberbg);color:var(--amber)}
 .nc{display:inline-block;font-size:.9em;font-weight:600;color:var(--muted);background:#f1f3f8;border:1px dashed #cbd2df;border-radius:6px;padding:1px 8px}
+/* Whole-book roster row: data loads on open. Honest, calm styling (not the dashed "not connected"). */
+.roster-cell{display:inline-block;font-size:.82em;color:var(--ink2,#8aa);font-style:italic}
+.roster-badge{display:inline-block;font-size:.6em;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--brand,#3b82f6);background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);border-radius:5px;padding:1px 5px;vertical-align:middle;margin-left:4px}
+tr.row-roster td{opacity:.82}
+tr.row-roster:hover td{opacity:1}
 .cov{display:inline-flex;gap:4px}
 .covdot{font-size:.62em;font-weight:800;border-radius:5px;padding:2px 5px;letter-spacing:.02em}
 .covdot.on{background:var(--greenbg);color:var(--green)}.covdot.partial{background:var(--amberbg);color:var(--amber)}
@@ -219,14 +224,16 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 .csmdots i.on.low{background:var(--red)}
 /* Planhat-style filter pill bar */
 .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
-.gfbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;background:var(--card,#141c2b);border:1px solid var(--line,#243149);border-radius:12px}
-.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:8px;padding:5px 10px;min-width:200px}
-.gf-find input{background:transparent;border:0;color:inherit;outline:none;width:100%;font-size:.9em}
+.gfbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:12px 14px;margin-bottom:14px;background:var(--card,#141c2b);border:1px solid var(--line,#243149);border-radius:12px}
+.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:8px;padding:7px 10px;min-width:220px;height:34px;box-sizing:border-box}
+.gf-find input{background:transparent;border:0;color:inherit;outline:none;width:100%;font-size:.88em}
 .gf-ico{opacity:.6}
-.gf-l{display:flex;flex-direction:column;font-size:.64em;text-transform:uppercase;letter-spacing:.5px;color:var(--ink2,#8aa);gap:3px}
-.gf-s{background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);color:var(--ink,#e8edf5);border-radius:8px;padding:5px 8px;font-size:1.25em;cursor:pointer}
-.gf-count{margin-left:auto;color:var(--ink2,#8aa);font-size:.85em;font-weight:600}
-.gf-clear{background:transparent;border:1px solid var(--line,#2c3854);color:var(--ink2,#8aa);border-radius:8px;padding:5px 11px;font-size:.82em;cursor:pointer}
+.gf-l{display:flex;flex-direction:column;font-size:.62em;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--ink2,#8aa);gap:4px}
+.gf-s{background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);color:var(--ink,#e8edf5);border-radius:8px;padding:0 26px 0 10px;height:34px;font-size:.9em;line-height:34px;cursor:pointer;min-width:132px;max-width:200px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238aa' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+.gf-s:focus{outline:0;border-color:var(--brand,#3b82f6);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.gf-count{margin-left:auto;align-self:center;color:var(--ink,#e8edf5);font-size:.82em;font-weight:600;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:999px;padding:6px 12px;white-space:nowrap}
+.gf-count em{color:var(--ink2,#8aa);font-style:normal;font-weight:500}
+.gf-clear{align-self:center;background:transparent;border:1px solid var(--line,#2c3854);color:var(--ink2,#8aa);border-radius:8px;padding:7px 13px;font-size:.82em;cursor:pointer;height:34px}
 .gf-clear:hover{color:var(--ink,#fff);border-color:var(--brand,#3b82f6)}
 .filterbar .fb-find{position:relative;margin-right:4px}
 .filterbar .fb-find input{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px 6px 28px;font:inherit;font-size:.82em;min-width:210px}
@@ -1051,6 +1058,38 @@ function filteredAccounts(){
     return true;
   });
 }
+// True when any filter deviates from the default (whole active book). Used to decide
+// whether dashboard aggregates should be recomputed client-side from the filtered set
+// vs. trusting the richer server-side whole-book roll-up (rm.*).
+function _filterActive(){
+  return FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||!!FILTER.search;
+}
+// Client-side aggregates over the filtered accounts, matching the shape of the server
+// revenue-motion (rm.*) fields the dashboard reads. Only the figures that CAN be honestly
+// recomputed from per-account data are produced; GRR/retention stay server-only (they need
+// prior-period ARR history we don't have client-side) and are omitted when filtering.
+function _filteredAgg(){
+  const accts=filteredAccounts();
+  const counts={green:0,amber:0,red:0};
+  let arr=0, atRisk=0;
+  const segMap={};
+  accts.forEach(a=>{
+    const b=a.health&&a.health.band, v=(typeof a.arr_usd==='number')?a.arr_usd:0;
+    if(counts[b]!==undefined) counts[b]++;
+    arr+=v;
+    if(b==='red'||b==='amber') atRisk+=v;
+    const seg=a.segment||'Unsegmented';
+    (segMap[seg]=segMap[seg]||{segment:seg,accounts:0,arr_usd:0});
+    segMap[seg].accounts++; segMap[seg].arr_usd+=v;
+  });
+  return {
+    health_mix:counts,
+    total_arr_usd:arr,
+    at_risk_arr_usd:atRisk,
+    by_segment:Object.values(segMap).sort((x,y)=>y.arr_usd-x.arr_usd),
+    account_count:accts.length,
+  };
+}
 function _facetValues(key){
   const s=new Set();(DATA&&DATA.accounts||[]).forEach(a=>{
     let v;
@@ -1066,6 +1105,10 @@ function globalFilterBar(){
     opts.map(o=>`<option value="${o[0]}"${o[0]===val?' selected':''}>${o[1]}</option>`).join('')}</select></label>`;
   const segOpts=[['all','All segments']].concat(_facetValues('segment').map(s=>[s,s]));
   const ownOpts=[['all','All owners']].concat(_facetValues('owner').map(s=>[s,s]));
+  const nf=x=>x.toLocaleString();
+  const countLabel=(n===total)
+    ? nf(total)+' <em>companies</em>'
+    : nf(n)+' <em>of</em> '+nf(total)+' <em>companies</em>';
   return '<div class="gfbar">'+
     '<span class="gf-find"><span class="gf-ico">⌕</span><input type="text" placeholder="Search companies..." value="'+(FILTER.search.replace(/"/g,'&quot;'))+'" oninput="setSearchFilter(this.value)"></span>'+
     sel('cohort','Cohort',[['all','All'],['managed','Managed'],['pooled','Scaled / Pooled']],FILTER.cohort)+
@@ -1073,7 +1116,7 @@ function globalFilterBar(){
     sel('owner','Owner',ownOpts,FILTER.owner)+
     sel('health','Health',[['all','All'],['red','At risk'],['amber','Watch'],['green','Healthy']],FILTER.health)+
     sel('lifecycle','Lifecycle',[['active','Active'],['churned','Churned'],['all','All']],FILTER.lifecycle)+
-    '<span class="gf-count">'+n+' of '+total+'</span>'+
+    '<span class="gf-count">'+countLabel+'</span>'+
     (FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||FILTER.search?'<button class="gf-clear" onclick="clearFilter()">Clear</button>':'')+
   '</div>';
 }
@@ -1081,7 +1124,7 @@ function _refreshFilterMount(){const gfm=document.getElementById('globalFilterMo
 function setSearchFilter(v){FILTER.search=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}
   // Re-render the view body only (not the mount) so the search box keeps focus; update the count label in place.
   render(_currentView);
-  const c=document.querySelector('#globalFilterMount .gf-count');if(c)c.textContent=filteredAccounts().length+' of '+((DATA&&DATA.accounts||[]).length);}
+  const c=document.querySelector('#globalFilterMount .gf-count');if(c){const n=filteredAccounts().length,total=(DATA&&DATA.accounts||[]).length,nf=x=>x.toLocaleString();c.innerHTML=(n===total)?nf(total)+' <em>companies</em>':nf(n)+' <em>of</em> '+nf(total)+' <em>companies</em>';}}
 function setFilter(k,v){FILTER[k]=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
 function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
 try{const _sf=JSON.parse(sessionStorage.getItem('cs_filter')||'null');if(_sf)Object.assign(FILTER,_sf);}catch(e){}
@@ -1269,6 +1312,60 @@ function renderMyDashboard(){
   // Renewing next 90 days (live renewal dates).
   const today=new Date();
   const ren90=accts.filter(a=>{if(!a.renewal_date)return false;const days=(new Date(a.renewal_date)-today)/86400000;return days>=0&&days<=90;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+
+  // ── New live widgets (all from existing per-account signals; honest when absent) ──
+  const _days=d=>d?((new Date(d)-today)/86400000):null;
+  const withArr=a=>typeof a.arr_usd==='number'?a.arr_usd:0;
+  // (A) % ARR renewing in the next 60 days (HubSpot renewal_date + ARR).
+  const arrAll=accts.reduce((s,a)=>s+withArr(a),0);
+  const arr60=accts.filter(a=>{const d=_days(a.renewal_date);return d!=null&&d>=0&&d<=60;}).reduce((s,a)=>s+withArr(a),0);
+  const pct60=arrAll?Math.round((arr60/arrAll)*100):0;
+  const wArrRenew='<div class="mdw-big '+(pct60>0?'':'')+'">'+pct60+'%</div><div class="muted" style="font-size:.78em;margin-top:4px">'+fmt(arr60)+' of '+fmt(arrAll)+' ARR renews within 60 days</div>';
+  // (B) Overdue tasks (task_metrics-style: due date passed, not completed). Client mirror.
+  const _todayISO=today.toISOString().slice(0,10);
+  const overdue=(tasks||[]).filter(t=>{const due=t.due_on||t.due;return due&&String(due).length>=10&&_todayISO>String(due).slice(0,10);});
+  const wOverdue='<div class="mdw-big '+(overdue.length>0?'warn':'good')+'">'+overdue.length+'</div><div class="muted" style="font-size:.78em;margin-top:4px">'+(overdue.length?overdue.slice(0,3).map(t=>escapeHtml((t.account||'')+'')).join(', '):'No tasks past their due date')+'</div>';
+  // (C) Time to renewal distribution (buckets over accounts with a renewal date).
+  const ttrB={'≤30d':0,'31-60d':0,'61-90d':0,'91-180d':0,'>180d':0};
+  accts.forEach(a=>{const d=_days(a.renewal_date);if(d==null||d<0)return;if(d<=30)ttrB['≤30d']++;else if(d<=60)ttrB['31-60d']++;else if(d<=90)ttrB['61-90d']++;else if(d<=180)ttrB['91-180d']++;else ttrB['>180d']++;});
+  const ttrMax=Math.max(1,...Object.values(ttrB));
+  const ttrHas=Object.values(ttrB).some(v=>v>0);
+  const wTtr=ttrHas?'<div class="cc-dist" style="height:130px">'+Object.entries(ttrB).map(([k,v])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+v+'</span><div class="cc-distbar" style="height:'+Math.round((v/ttrMax)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+k+'</div></div>').join('')+'</div>':'<div class="empty">No renewal dates set in HubSpot for this selection.</div>';
+  // (D) Portfolio development — health trajectory from DATA.health_history when present.
+  let wDev;
+  const hist=(DATA&&DATA.health_history)||null;
+  if(hist&&hist.points&&hist.points.length>=2){
+    wDev=sparkline(hist.points.map(p=>p.avg_health))+'<div class="muted" style="font-size:.78em;margin-top:4px">Avg health '+hist.points[0].avg_health+' → '+hist.points[hist.points.length-1].avg_health+' over '+hist.points.length+' snapshots</div>';
+  }else{
+    wDev='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">Health trajectory appears once daily snapshots accumulate (.cs-health-history).</div>';
+  }
+  // (E) Open expansion ARR — pipeline (computable) + honest not-connected for booked.
+  const rc=(_rmCache&&_rmCache.revenue_change)||null;
+  let wExp;
+  if(rc){
+    const pipeArr=rc.expansion_pipeline_arr_usd||0, pipeN=rc.expansion_pipeline_accounts||0;
+    const booked=rc.upsell_computable?('<div class="muted" style="font-size:.78em;margin-top:4px">Booked upsell '+fmt(rc.upsell_arr_usd)+' ('+rc.upsell_count+')</div>'):'<div class="muted" style="font-size:.78em;margin-top:4px"><span class="nc">booked ARR not connected</span></div>';
+    wExp='<div class="mdw-big">'+fmt(pipeArr)+'</div><div class="muted" style="font-size:.78em;margin-top:2px">'+pipeN+' accounts in expansion pipeline</div>'+booked;
+  }else{
+    wExp='<div class="nc">not connected</div>';
+  }
+  // (F) CSAT distribution (Zendesk csat_30d) — the honest substitute for NPS (no NPS source).
+  const csatVals=accts.map(a=>a.connected&&a.connected.zendesk?(a.csat_30d!=null?a.csat_30d:(a.zendesk&&a.zendesk.csat_30d)):null).filter(v=>typeof v==='number');
+  let wCsat;
+  if(csatVals.length){
+    const cb={'Promoters (≥90)':0,'Passives (75-89)':0,'Detractors (<75)':0};
+    csatVals.forEach(v=>{if(v>=90)cb['Promoters (≥90)']++;else if(v>=75)cb['Passives (75-89)']++;else cb['Detractors (<75)']++;});
+    const cmax=Math.max(1,...Object.values(cb)),cols={'Promoters (≥90)':'var(--green)','Passives (75-89)':'var(--amber)','Detractors (<75)':'var(--red)'};
+    wCsat='<div class="cc-dist" style="height:130px">'+Object.entries(cb).map(([k,v])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+v+'</span><div class="cc-distbar" style="height:'+Math.round((v/cmax)*100)+'%;background:'+cols[k]+'"></div></div><div class="cc-distlbl">'+k+'</div></div>').join('')+'</div>';
+  }else{
+    wCsat='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">CSAT (Zendesk) stands in for NPS — there is no NPS survey source connected.</div>';
+  }
+  // (G) QBRs due — Strategic accounts entering the renewal cadence window (honest substitute
+  // for "Overdue QBRs"; there is no QBR scheduling source, so we cannot show "overdue").
+  const qbrDue=accts.filter(a=>{const seg=(a.segment||'').toLowerCase();const d=_days(a.renewal_date);return seg.includes('strategic')&&d!=null&&d>=0&&d<=120;}).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const wQbr=qbrDue.length?('<div class="mdw-big">'+qbrDue.length+'</div><div class="muted" style="font-size:.78em;margin-top:4px">Strategic accounts within 120d of renewal (schedule a QBR). No QBR-completion source, so "overdue" is not shown.</div>'):'<div class="empty">No Strategic accounts in the QBR window for this selection.</div>';
+
+  // Renewing next 90 days (live renewal dates) — continues below.
   // Compact KPI strip.
   const kpi=(l,v,cls)=>'<div class="md-kpi"><div class="md-kpi-v '+(cls||'')+'">'+v+'</div><div class="md-kpi-l">'+l+'</div></div>';
   const strip='<div class="md-kpis">'+
@@ -1289,6 +1386,13 @@ function renderMyDashboard(){
       '<div class="panel"><div class="head"><h2>Portfolio Distribution by Health</h2></div><div class="body pad"><div class="cc-dist" style="height:140px">'+distBars+'</div></div></div>'+
       '<div class="panel"><div class="head"><h2>Active Users (recency)</h2><span class="note">live Pendo</span></div><div class="body pad">'+auBars+'</div></div>'+
       '<div class="panel"><div class="head"><h2>Top Customers by Usage</h2><span class="note">most active</span></div><div class="body pad">'+(topRows||'<div class="empty">No usage-connected accounts.</div>')+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>% ARR Renewing next 60 Days</h2><span class="note">live HubSpot</span></div><div class="body pad">'+wArrRenew+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Overdue Tasks</h2><span class="note">past due date</span></div><div class="body pad">'+wOverdue+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Time to Renewal</h2><span class="note">days to renewal</span></div><div class="body pad">'+wTtr+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Portfolio Development</h2><span class="note">health trajectory</span></div><div class="body pad">'+wDev+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>Open Expansion ARR</h2><span class="note">pipeline</span></div><div class="body pad">'+wExp+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>CSAT Distribution</h2><span class="note">Zendesk · NPS not connected</span></div><div class="body pad">'+wCsat+'</div></div>'+
+      '<div class="panel"><div class="head"><h2>QBRs Due</h2><span class="note">Strategic · renewal window</span></div><div class="body pad">'+wQbr+'</div></div>'+
     '</div>';
 }
 function renderMyPortfolio(){
@@ -1984,12 +2088,19 @@ function renderScopeBar(sm){
 function renderCharts(portfolio,kpis,rm){
   const wrap=document.getElementById('dash-charts'); if(!wrap)return;
   rm=rm||{}; kpis=kpis||{};
+  // When the global filter is active, recompute the health/ARR/segment aggregates from the
+  // filtered accounts so the dashboard reflects exactly what the user filtered to. When
+  // unfiltered, trust the richer server whole-book roll-up (rm.*). GRR/retention and the
+  // paying/churned revenue strip stay server-sourced (they need ARR-change history we can't
+  // recompute client-side) and are suppressed while filtering to avoid mixing scopes.
+  const flt=_filterActive();
+  const agg=flt?_filteredAgg():null;
   const band=a=>{const h=a.health;return (h&&typeof h==='object')?(h.band||h.rag):h;};
-  const counts=rm.health_mix||(function(){const c={green:0,amber:0,red:0};portfolio.accounts.forEach(a=>{const b=band(a);if(c[b]!==undefined)c[b]++;});return c;})();
-  const total=(counts.green+counts.amber+counts.red)||portfolio.accounts.length||1;
-  const arr=rm.total_arr_usd!=null?rm.total_arr_usd:(portfolio.summary.total_arr_usd||0);
-  const atRisk=rm.at_risk_arr_usd!=null?rm.at_risk_arr_usd:(portfolio.summary.at_risk_arr_usd||0);
-  const ret=rm.retention||kpis.retention||{};
+  const counts=agg?agg.health_mix:(rm.health_mix||(function(){const c={green:0,amber:0,red:0};portfolio.accounts.forEach(a=>{const b=band(a);if(c[b]!==undefined)c[b]++;});return c;})());
+  const total=(counts.green+counts.amber+counts.red)||(agg?agg.account_count:portfolio.accounts.length)||1;
+  const arr=agg?agg.total_arr_usd:(rm.total_arr_usd!=null?rm.total_arr_usd:(portfolio.summary.total_arr_usd||0));
+  const atRisk=agg?agg.at_risk_arr_usd:(rm.at_risk_arr_usd!=null?rm.at_risk_arr_usd:(portfolio.summary.at_risk_arr_usd||0));
+  const ret=flt?{}:(rm.retention||kpis.retention||{});
 
   // 1. Portfolio health RAG donut.
   const atRiskPct=Math.round(((counts.red+counts.amber)/total)*100);
@@ -1999,7 +2110,7 @@ function renderCharts(portfolio,kpis,rm){
     +'</div></div>';
 
   // 2. ARR by segment (Chartio 'ARR by...' distribution) - where the revenue sits.
-  const segsAll=(rm.by_segment||[]).filter(s=>(s.arr_usd||0)>0);
+  const segsAll=((agg?agg.by_segment:rm.by_segment)||[]).filter(s=>(s.arr_usd||0)>0);
   const segTotal=segsAll.reduce((a,s)=>a+(s.arr_usd||0),0)||1;
   const segs=segsAll.slice(0,5);
   const smax=Math.max(1,...segs.map(s=>s.arr_usd||0));
@@ -2016,7 +2127,9 @@ function renderCharts(portfolio,kpis,rm){
     c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Target '+tgt+'% · churned '+fmt(ret.churned_arr_usd)+'</div><div class="cc-body"><div class="cc-center">'
       +svgGauge(ret.grr_pct,tgt,{w:150})+'<div class="cc-num" style="justify-content:flex-end;padding-bottom:6px"><b>'+ret.grr_pct+'%</b><span>'+(ret.grr_pct>=tgt?'above target':'below target')+'</span></div></div></div></div>';
   }else{
-    c3='<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned ARR from Redshift or HubSpot.</span></div></div>';
+    c3=flt
+      ? '<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Whole-book metric</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR is a portfolio-wide figure (needs prior-period ARR history) and is not recomputed for a filtered subset. Clear the filter to see it.</span></div></div>'
+      : '<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned ARR from Redshift or HubSpot.</span></div></div>';
   }
 
   // 4. Revenue at risk vs total ARR.
@@ -2029,7 +2142,7 @@ function renderCharts(portfolio,kpis,rm){
 
   // Revenue-motion headline strip (Chartio single-value metrics), only when we have it.
   let strip='';
-  if(rm.paying_customers!=null){
+  if(!flt && rm.paying_customers!=null){
     strip='<div class="rev-strip">'
       +'<div class="rev-cell"><div class="rev-l">Paying customers</div><div class="rev-v">'+rm.paying_customers+'</div></div>'
       +'<div class="rev-cell"><div class="rev-l">Churned</div><div class="rev-v '+(rm.churned_customers>0?'warn':'')+'">'+rm.churned_customers+'</div></div>'
@@ -2037,8 +2150,8 @@ function renderCharts(portfolio,kpis,rm){
       +'<div class="rev-cell"><div class="rev-l">Churned ARR</div><div class="rev-v '+(rm.churned_arr_usd>0?'warn':'')+'">'+fmt(rm.churned_arr_usd)+'</div></div>'
       +'</div>';
   }
-  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+c5(rm)+'</div>';
-  renderRevChange(rm);
+  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+(flt?'':c5(rm))+'</div>';
+  renderRevChange(flt?null:rm);
 }
 function c5(rm){
   const states=(rm&&rm.by_state)||[];
@@ -2247,14 +2360,21 @@ async function renderCommandCenter(){
   if(!meetingsBody) meetingsBody='<tr><td colspan="4" class="empty" style="padding:20px">No meetings to prepare right now.</td></tr>';
   const meetingsPanel='<div class="panel"><div class="head"><h2>Upcoming Meetings - Preparation</h2></div>'+
     '<div class="body"><table class="mtg-table"><thead><tr><th>Company</th><th>Due Date</th><th>Action</th><th>Involved Contacts</th></tr></thead><tbody>'+meetingsBody+'</tbody></table></div></div>';
-  // Company Distribution by Health — bars sized by ARR in each band (Low/Medium/High).
-  let arrLow=0,arrMed=0,arrHigh=0,nLow=0,nMed=0,nHigh=0;
-  accts.forEach(a=>{const b=a.health&&a.health.band,arr=a.arr_usd||0;if(b==='red'){arrLow+=arr;nLow++;}else if(b==='amber'){arrMed+=arr;nMed++;}else if(b==='green'){arrHigh+=arr;nHigh++;}});
-  const maxArr=Math.max(1,arrLow,arrMed,arrHigh);
+  // Company Distribution by Health — bars sized by ARR in each band (Low/Medium/High),
+  // PLUS an honest "Not scored" bucket for whole-book roster accounts that have no live
+  // signals yet (health.computable === false). Without this, ~1300 roster rows would all
+  // land in "Medium" and misrepresent portfolio health.
+  let arrLow=0,arrMed=0,arrHigh=0,arrNS=0,nLow=0,nMed=0,nHigh=0,nNS=0;
+  accts.forEach(a=>{const h=a.health,arr=a.arr_usd||0;const comp=h&&h.computable;const b=h&&h.band;
+    if(!comp){arrNS+=arr;nNS++;}
+    else if(b==='red'){arrLow+=arr;nLow++;}
+    else if(b==='amber'){arrMed+=arr;nMed++;}
+    else if(b==='green'){arrHigh+=arr;nHigh++;}});
+  const maxArr=Math.max(1,arrLow,arrMed,arrHigh,arrNS);
   const mfmt=n=>n>=1e6?('$'+(n/1e6).toFixed(2)+'M'):n>=1e3?('$'+Math.round(n/1e3)+'k'):('$'+n);
   const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.round((arr/maxArr)*100)+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n+' accts</span></div></div>';
-  const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2></div><div class="body pad"><div class="cc-dist">'+
-    distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+'</div></div></div>';
+  const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2>'+(nNS>0?'<span class="note">'+nNS.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist">'+
+    distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+(nNS>0?distBar('Not scored',arrNS,nNS,'var(--muted,#8aa)'):'')+'</div></div></div>';
   // Portfolio Growth — ARR by segment (real live breakdown, largest first).
   const segs=(exec.by_segment||[]).filter(s=>s.arr_usd>0).sort((a,b)=>b.arr_usd-a.arr_usd);
   const maxSeg=Math.max(1,...segs.map(s=>s.arr_usd));
@@ -2505,6 +2625,9 @@ function _acctTableInner(rows){
     }
   };
   list=list.slice().sort((x,y)=>{const vx=val(x),vy=val(y);return (vx<vy?-1:vx>vy?1:0)*dir;});
+  // Enriched accounts first within the current sort, so the deeply-signalled rows (with live
+  // health/usage) sit above the Tier-1 roster rows that only carry name/segment/ARR.
+  list=list.slice().sort((x,y)=>((x.enriched===false)?1:0)-((y.enriched===false)?1:0));
   const cnt=document.getElementById('acct-count');if(cnt)cnt.textContent=list.length+' compan'+(list.length===1?'y':'ies');
   const sortArr=k=>_acctSort.key===k?('<span class="arr">'+(_acctSort.dir==='asc'?'▲':'▼')+'</span>'):'<span class="arr">↕</span>';
   const th=(k,lbl,extra)=>'<th class="sortable'+(_acctSort.key===k?' sorted':'')+'" '+(extra||'')+' onclick="acctSetSort(\''+k+'\')">'+lbl+sortArr(k)+'</th>';
@@ -2515,32 +2638,40 @@ function _acctTableInner(rows){
     th('arr','ARR (USD)')+th('phase','Phase')+'<th>CSM Score</th>'+
     '<th>Usage Trend</th>'+th('renews','Renewal (in days)')+'<th>(AI) Business Health</th>'+
     '<th>(AI) Latest News</th><th>(AI) Account Summary</th></tr></thead>';
+  // A roster row has not been deep-enriched yet; it carries only the cheap whole-book fields
+  // (name/segment/ARR/phase). Live-only signals (CSM score, usage, business health) load when
+  // the account is opened — we show an honest "open to load", NOT a misleading "not connected".
+  const ROSTER='<span class="roster-cell" title="Live signals load when you open this account">roster</span>';
   const body=list.map(a=>{
+    const roster=(a.enriched===false);
     const hc=a.connected&&a.connected.hubspot;
-    const name=hc?escapeHtml(a.name||a.account_id):escapeHtml(a.account_id);
+    // Roster rows still have a real HubSpot-sourced name/segment/ARR/phase from the cheap scan,
+    // so render those; only live-fanned signals are deferred.
+    const haveHs=hc||roster;
+    const name=escapeHtml(a.name||a.account_id);
     const h=a.health;
-    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
-    const owner=hc?(a.csm_owner?escapeHtml(a.csm_owner):ND):NC;
-    const arr=!hc?NC:(a.arr_usd!=null?fmt(a.arr_usd):ND);
-    const phase=hc?(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):ND):NC;
-    const usage=usageTrend(a);
-    const renews=!hc?NC:renewalDays(a.renewal_date);
+    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none" title="'+(roster?'Not scored yet — open to load live signals':'No computable health')+'">–</span>';
+    const owner=haveHs?(a.csm_owner?escapeHtml(a.csm_owner):(roster&&a.csm_owner_id?ND:ND)):NC;
+    const arr=haveHs?(a.arr_usd!=null?fmt(a.arr_usd):ND):NC;
+    const phase=haveHs?(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):ND):NC;
+    const usage=roster?ROSTER:usageTrend(a);
+    const renews=haveHs?renewalDays(a.renewal_date):NC;
     // (AI) Business Health — a numeric pill from the computed health score (mirrors Planhat's column).
-    const bh=h&&h.computable?'<span class="bhpill '+hband(h.band)+'" title="Computed business health '+h.score+'/100">'+h.score+'</span>':ND;
+    const bh=h&&h.computable?'<span class="bhpill '+hband(h.band)+'" title="Computed business health '+h.score+'/100">'+h.score+'</span>':(roster?ROSTER:ND);
     // (AI) Latest News — Planhat sources this from an external AI news feed. We have no such
     // live source, so we mark it not connected rather than fabricate a headline.
     const news='<span class="nc">not connected</span>';
     // (AI) Account Summary — a FACTUAL snapshot from live fields (no hallucinated prose).
-    const summary=accountSummary(a);
-    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
+    const summary=roster?ROSTER:accountSummary(a);
+    return '<tr class="click'+(roster?' row-roster':'')+'" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
       '<td class="col-check"><input type="checkbox" onclick="event.stopPropagation()" aria-label="Select row"></td>'+
       '<td class="col-play"><span class="rowplay" title="Open">▷</span></td>'+
       '<td>'+circle+'</td>'+
-      '<td><strong>'+name+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td>'+
+      '<td><strong>'+name+'</strong>'+(roster?' <span class="roster-badge" title="Whole-book roster row — open to load full live signals">roster</span>':'')+'<div class="sub">'+escapeHtml(a.segment||'')+'</div></td>'+
       '<td class="muted">'+owner+'</td>'+
       '<td class="mono">'+arr+'</td>'+
       '<td>'+phase+'</td>'+
-      '<td>'+csmDots(a)+'</td>'+
+      '<td>'+(roster?ROSTER:csmDots(a))+'</td>'+
       '<td>'+usage+'</td>'+
       '<td>'+renews+'</td>'+
       '<td>'+bh+'</td>'+
