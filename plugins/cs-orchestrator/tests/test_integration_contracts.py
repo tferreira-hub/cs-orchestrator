@@ -793,7 +793,22 @@ def test_agent_feedback_learning_guidance_is_safe_and_metadata_only(tmp_path, mo
     monkeypatch.setattr(agent_runner, "FEEDBACK_LOG", log)
     guidance = agent_runner._feedback_learning_guidance()
     assert "wrong priority" in guidance
-    assert "Learning from CSM feedback" in guidance
+    assert "Learning from recent CSM feedback" in guidance
+    # Still metadata only: no customer/answer content leaks through.
+    assert "subscription" not in guidance
+
+    # Recency weighting: a reason that only appears in the OLDEST entries should rank
+    # below one that dominates the most RECENT entries, even if raw counts are equal.
+    log2 = tmp_path / "fb2.jsonl"
+    lines = (
+        [json.dumps({"rating": "needs_correction", "reason": "source_gap"})] * 3 +
+        [json.dumps({"rating": "needs_correction", "reason": "missing_evidence"})] * 3
+    )
+    log2.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(agent_runner, "FEEDBACK_LOG", log2)
+    g2 = agent_runner._feedback_learning_guidance()
+    # missing_evidence is newest -> it should be listed first in the ranked reasons.
+    assert g2.index("missing evidence") < g2.index("source gap")
 
 
 def test_agent_tools_include_portfolio_snapshot_and_parse_frontmatter():

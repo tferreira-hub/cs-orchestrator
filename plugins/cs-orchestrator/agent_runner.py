@@ -52,43 +52,76 @@ def _feedback_learning_guidance() -> str:
     """Turn accumulated CSM feedback into a short 'what to do better' note for Jane.
 
     This is the self-learning loop: every time a CSM rates an answer 'needs correction'
-    with a reason, that reason is aggregated here and fed forward into the next prompt,
-    so Jane's behaviour adapts to real usage instead of staying static. Metadata only,
-    never answer or customer content. Silent (empty string) when there is no signal.
+    with a reason, that reason is fed forward into the next prompt so Jane adapts to real
+    usage instead of staying static. Improvements over a flat tally:
+      * Recency weighting - the most RECENT corrections count more than months-old ones
+        (exponential decay by position), so Jane tracks what CSMs are correcting NOW.
+      * Trend signal - compares the recent helpful:correction balance so Jane knows
+        whether she is improving or regressing, and tunes tone accordingly.
+    Metadata only, never answer or customer content. Silent (empty) when there is no signal.
     """
     try:
         if not FEEDBACK_LOG.exists():
             return ""
-        helpful = 0
-        reasons: dict[str, int] = {}
+        rows: list[dict] = []
         for line in FEEDBACK_LOG.read_text(encoding="utf-8").splitlines():
             try:
-                row = json.loads(line)
+                rows.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-            if row.get("rating") == "helpful":
-                helpful += 1
-            elif row.get("rating") == "needs_correction":
-                r = row.get("reason") or "other"
-                reasons[r] = reasons.get(r, 0) + 1
-        if not reasons and not helpful:
+        if not rows:
             return ""
+
+        # Recency-weighted reason tally. The newest entry gets weight 1.0; each older
+        # entry decays by 0.92, so a reason corrected repeatedly in the last few sessions
+        # dominates stale history. Weights are rounded for a readable prompt count.
+        DECAY = 0.92
+        reasons: dict[str, float] = {}
+        helpful_w = 0.0
+        correction_w = 0.0
+        n = len(rows)
+        for idx, row in enumerate(rows):
+            weight = DECAY ** (n - 1 - idx)  # oldest -> smallest, newest -> 1.0
+            rating = row.get("rating")
+            if rating == "helpful":
+                helpful_w += weight
+            elif rating == "needs_correction":
+                correction_w += weight
+                r = row.get("reason") or "other"
+                reasons[r] = reasons.get(r, 0.0) + weight
+        if correction_w == 0 and helpful_w == 0:
+            return ""
+
         # Map each recurring correction reason to a concrete behavioural adjustment.
         fixes = {
-            "wrong_priority": "double-check you are leading with the highest-priority action first and stating the correct SLA",
-            "missing_evidence": "always cite the specific live signal (churn score, usage recency, CSAT, payment) behind each claim",
+            "wrong_priority": "lead with the highest-priority action first and state the correct SLA",
+            "missing_evidence": "cite the specific live signal (churn score, usage recency, CSAT, payment) behind every claim",
             "irrelevant_action": "only recommend actions that match this account's actual signals; drop generic advice",
             "source_gap": "name the missing data source plainly rather than guessing around it",
+            "too_long": "keep the answer tight; lead with the point and cut filler",
+            "too_vague": "be concrete: name the account, the number, and the next step",
+            "wrong_tone": "sound like a senior CS partner talking to a colleague, not a system log",
             "other": "be more precise and specific to what was asked",
         }
-        top = sorted(reasons.items(), key=lambda kv: -kv[1])[:2]
-        if not top:
+
+        # Trend: of the recent weighted volume, how much was positive? Tells Jane whether
+        # she is trending well (reinforce) or poorly (tighten up).
+        total_w = helpful_w + correction_w
+        helpful_share = (helpful_w / total_w) if total_w else 0.0
+
+        if not reasons:
             return ("\n[What CSMs value] Recent feedback has been positive; keep answers specific, "
-                    "warm and grounded.\n")
+                    "warm and grounded, and keep doing what is working.\n")
+
+        top = sorted(reasons.items(), key=lambda kv: -kv[1])[:3]
         notes = "; ".join(fixes.get(r, fixes["other"]) for r, _ in top)
-        return ("\n[Learning from CSM feedback] CSMs have most often asked for improvement on: "
-                + ", ".join(f"{r.replace('_', ' ')} ({c})" for r, c in top)
-                + ". For this answer specifically: " + notes + ".\n")
+        trend = ("You have been trending well lately, so keep it up while you "
+                 if helpful_share >= 0.6 else
+                 "CSMs have been correcting you more than usual lately, so take extra care to ")
+        top_label = ", ".join(f"{r.replace('_', ' ')} ({int(round(c))})" for r, c in top)
+        return ("\n[Learning from recent CSM feedback] Weighted toward the latest sessions, CSMs "
+                "most often ask you to improve on: " + top_label + ". " + trend
+                + "focus on this: " + notes + ".\n")
     except Exception:  # noqa: BLE001
         return ""
 
@@ -1126,15 +1159,37 @@ def run(question: str, account_id: str | None = None,
                     "live_sources": sorted({value.get("_source") for account in tools[0].values() for value in account.values() if isinstance(value, dict) and value.get("_source")})}}
     except Exception as e:  # noqa: BLE001
         msg = str(e)
-        if any(k in msg for k in ("ExpiredToken", "InvalidGrant", "NoCredentials",
-                                  "UnrecognizedClient", "sso", "SSO", "token has expired",
-                                  "could not be found", "AccessDenied")):
-            profile_hint = (f"local dev: run aws sso login and set CS_BEDROCK_PROFILE, "
-                            if PROFILE else "the ECS task role needs bedrock:InvokeModel, ")
-            return {"ok": False, "error": "Bedrock not available. " + profile_hint +
-                    f"region {REGION}, model {MODEL}.",
+        # Pull the AWS error code when boto3 raised a ClientError, so the UI/logs show the
+        # REAL reason (AccessDenied vs model-access-not-enabled vs throttling) instead of a
+        # generic hint that hides it. This is what makes a Bedrock failure diagnosable.
+        aws_code = ""
+        try:
+            aws_code = getattr(e, "response", {}).get("Error", {}).get("Code", "") or ""
+        except Exception:  # noqa: BLE001
+            aws_code = ""
+
+        cred_markers = ("ExpiredToken", "InvalidGrant", "NoCredentials", "UnrecognizedClient",
+                        "sso", "SSO", "token has expired", "could not be found")
+        access_markers = ("AccessDenied", "AccessDeniedException")
+        is_cred = any(k in msg for k in cred_markers) or aws_code in (
+            "ExpiredTokenException", "UnrecognizedClientException")
+        is_access = any(k in msg for k in access_markers) or aws_code == "AccessDeniedException"
+
+        if is_cred or is_access:
+            if PROFILE:
+                how = f"local dev: run aws sso login and set CS_BEDROCK_PROFILE, "
+            else:
+                how = ("the ECS task role needs bedrock:InvokeModel on this model AND the model "
+                       "must be enabled for the account in the Bedrock console (Model access), ")
+            detail = f" [{aws_code}]" if aws_code else ""
+            return {"ok": False,
+                    "error": f"Bedrock not available.{detail} {how}region {REGION}, model {MODEL}.",
+                    "aws_code": aws_code or None,
                     "transcript": transcript}
-        return {"ok": False, "error": f"{type(e).__name__}: {e}", "transcript": transcript}
+        # Any other AWS/boto error: surface its code and message verbatim so it can be fixed.
+        label = aws_code or type(e).__name__
+        return {"ok": False, "error": f"{label}: {e}", "aws_code": aws_code or None,
+                "transcript": transcript}
 
 
 if __name__ == "__main__":
