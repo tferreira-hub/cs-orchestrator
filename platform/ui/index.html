@@ -2621,9 +2621,10 @@ async function renderCommandCenter(){
   const moShort=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const nowM=_rbmAsOf.getMonth(), nowY=_rbmAsOf.getFullYear();
   // 12 forward buckets keyed by year-month from the current month.
-  const fwd=new Array(12).fill(0); let overdueArr12=0;
+  const fwd=new Array(12).fill(0); let overdueArr12=0; let datedCount=0;
   accts.forEach(a=>{
     if(!a.renewal_date) return;
+    datedCount++;
     const dd=_rbmDays(a.renewal_date); const arr=a.arr_usd||0;
     if(dd==null) return;
     if(dd<0){ overdueArr12+=arr; return; }
@@ -2643,8 +2644,15 @@ async function renderCommandCenter(){
   }).join('');
   const anyRen=overdueArr12>0||fwd.some(v=>v>0);
   const renTotal=overdueArr12+fwd.reduce((s,v)=>s+v,0);
-  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+(anyRen?(mfmt(renTotal)+' up for renewal, next 12 months'):'Next 12 months')+'</span></div><div class="body pad"><div class="cc-months">'+
-    (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
+  // Be honest about coverage: most accounts have no renewal_date in HubSpot yet, so the
+  // empty months reflect missing data, not a quiet year. Surface the dated count and point
+  // to where that gap is tracked.
+  const covNote=accts.length?(datedCount+' of '+accts.length+' accounts have a renewal date'):'';
+  const headNote=anyRen?(mfmt(renTotal)+' up for renewal · '+covNote):(covNote||'Next 12 months');
+  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+headNote+'</span></div><div class="body pad"><div class="cc-months">'+
+    (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection. Add renewal dates (see Data Gaps) to populate this chart.</div>')+'</div>'+
+    (anyRen&&accts.length&&datedCount<accts.length?'<div class="muted" style="font-size:.78em;margin-top:10px">Empty months mean no renewal date is set for those accounts, not that nothing renews. '+(accts.length-datedCount).toLocaleString()+' accounts are missing a renewal date (tracked in Data Gaps).</div>':'')+
+    '</div></div>';
   // Renewal Forecast — the deterministic outcome mix across dated accounts, drawn as a
   // horizontal proportion bar + legend. A stacked bar reads a MIX far better than four
   // separate columns, and categories with no accounts simply drop out (no empty "0" bar).
