@@ -439,6 +439,10 @@ tr.mtg-group .mtg-gico{margin-right:7px;font-size:1.05em;vertical-align:-1px}
 tr.mtg-group .mtg-count{margin-left:8px;font-weight:700;font-size:.9em;background:rgba(0,0,0,.06);border-radius:999px;padding:1px 8px}
 tr.mtg-group.g-onboard td{background:#fdf4e3;color:#a5670a}
 tr.mtg-group.g-qbr td{background:#f5f0ff;color:#7c4dd6}
+/* Overdue renewal rows: subtle red tint + left accent so past-due items read at a glance. */
+tr.ren-overdue td{background:#fdf1f1}
+tr.ren-overdue td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+.head .note.warn{color:var(--red);font-weight:700}
 .mtg-table td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:middle}
 .mtg-table th{padding:9px 16px;background:#fff}
 .mtg-row td:first-child{font-size:.9em}
@@ -2507,13 +2511,42 @@ async function renderCommandCenter(){
   const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
   const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+growthBars+'</div></div></div>';
   // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
-  const renRows=accts.filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
-  const renewalsPanel='<div class="panel"><div class="head"><h2>Upcoming Renewals</h2><span class="note">Deterministic forecast, evidence grounded</span></div>'+
-    '<div class="body">'+(renRows.length?('<table class="acct-list"><thead><tr><th>Name</th><th>Company</th><th>ARR</th><th>End Date</th><th>AI Forecast ARR</th><th>AI Forecast</th><th>AI Forecast Summary</th></tr></thead><tbody>'+
-      renRows.map(a=>{const fc=a.renewal_forecast;const label=(fc&&fc.applicable&&fc.label)?fc.label:null;const forecast=label?'<span class="fc '+(label==='Churn Risk'?'fc-churn':label==='Expansion'?'fc-expansion':'fc-renewal')+'">'+escapeHtml(label)+'</span>':'<span class="muted">not classified</span>';
-        const fcArr=label==='Churn Risk'?'0':(a.arr_usd!=null?fmt(a.arr_usd):'no data');
-        return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml((a.name||a.account_id)+' subscription')+'</strong></td><td>'+escapeHtml(a.name||a.account_id)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'no data')+'</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+fcArr+'</td><td>'+forecast+'</td><td class="muted">'+((fc&&fc.rationale)?escapeHtml(fc.rationale):'Awaiting live renewal signals')+'</td></tr>';}).join('')+
-      '</tbody></table>'):'<div class="empty">No accounts carry a renewal date in HubSpot yet. Renewals appear here once a renewal date is set.</div>')+'</div></div>';
+  // Organised by urgency: OVERDUE line items (end date already passed, not churned) first and
+  // flagged, then genuinely upcoming renewals in date order. In this book most dated renewals
+  // are already in the past, so plain date-ascending buried the actionable overdue set and
+  // mislabelled past-due accounts as "on track".
+  const _ccAsOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+  const _ccDays=d=>d?Math.round((new Date(d+(String(d).length<=10?'T00:00:00':''))-_ccAsOf)/86400000):null;
+  const dated=accts.filter(a=>a.renewal_date);
+  const overdueRen=dated.filter(a=>{const dd=_ccDays(a.renewal_date);return dd!=null&&dd<0&&!a.churned;})
+    .sort((x,y)=>String(y.renewal_date).localeCompare(String(x.renewal_date))); // most-overdue context: newest-past first
+  const upcomingRen=dated.filter(a=>{const dd=_ccDays(a.renewal_date);return dd==null||dd>=0;})
+    .sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const renOverdueArr=overdueRen.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const renRowHtml=(a,isOverdue)=>{
+    const fc=a.renewal_forecast;const label=(fc&&fc.applicable&&fc.label)?fc.label:null;
+    const forecast=label?'<span class="fc '+(label==='Churn Risk'?'fc-churn':label==='Expansion'?'fc-expansion':'fc-renewal')+'">'+escapeHtml(label)+'</span>':'<span class="muted">not classified</span>';
+    const fcArr=label==='Churn Risk'?'0':(a.arr_usd!=null?fmt(a.arr_usd):'no data');
+    const dd=_ccDays(a.renewal_date);
+    // Honest end-date cell: overdue items show how far past due; never present a past date as "on track".
+    const endCell=isOverdue
+      ? '<td><span class="mono muted" title="'+escapeHtml(a.renewal_date)+'">'+escapeHtml(a.renewal_date)+'</span> <span class="pill r" style="font-size:.72em">'+Math.abs(dd)+'d overdue</span></td>'
+      : '<td class="muted">'+escapeHtml(a.renewal_date)+(dd!=null?' <span class="muted" style="font-size:.8em">('+dd+'d)</span>':'')+'</td>';
+    const rationale=(fc&&fc.rationale)?escapeHtml(fc.rationale):(isOverdue?'Overdue — confirm commercial owner and renewal status':'Awaiting live renewal signals');
+    return '<tr class="click'+(isOverdue?' ren-overdue':'')+'" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml((a.name||a.account_id)+' subscription')+'</strong></td><td>'+escapeHtml(a.name||a.account_id)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'no data')+'</td>'+endCell+'<td class="mono">'+fcArr+'</td><td>'+forecast+'</td><td class="muted">'+rationale+'</td></tr>';
+  };
+  let renBody='';
+  if(overdueRen.length){
+    renBody+='<tr class="mtg-group g-qbr"><td colspan="7"><span class="mtg-gico">⚠</span>Overdue<span class="mtg-count">'+overdueRen.length+'</span> · '+fmt(renOverdueArr)+' ARR past due</td></tr>';
+    renBody+=overdueRen.map(a=>renRowHtml(a,true)).join('');
+  }
+  if(upcomingRen.length){
+    renBody+='<tr class="mtg-group g-onboard"><td colspan="7"><span class="mtg-gico">◷</span>Upcoming<span class="mtg-count">'+upcomingRen.length+'</span></td></tr>';
+    renBody+=upcomingRen.map(a=>renRowHtml(a,false)).join('');
+  }
+  const renNote=overdueRen.length?(overdueRen.length+' overdue · '+fmt(renOverdueArr)+' ARR past due'):'Deterministic forecast, evidence grounded';
+  const renewalsPanel='<div class="panel"><div class="head"><h2>Upcoming Renewals</h2><span class="note'+(overdueRen.length?' warn':'')+'">'+renNote+'</span></div>'+
+    '<div class="body">'+((overdueRen.length||upcomingRen.length)?('<table class="acct-list"><thead><tr><th>Name</th><th>Company</th><th>ARR</th><th>End Date</th><th>AI Forecast ARR</th><th>AI Forecast</th><th>AI Forecast Summary</th></tr></thead><tbody>'+renBody+'</tbody></table>'):'<div class="empty">No accounts carry a renewal date in HubSpot yet. Renewals appear here once a renewal date is set.</div>')+'</div></div>';
   host.innerHTML=
     '<div class="cc-grid">'+
       '<div class="cc-left">'+headline+'<div class="cc-charts">'+dist+growth+'</div></div>'+
