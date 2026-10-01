@@ -433,6 +433,27 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .cc-distn{font-weight:800;font-size:.82em;color:var(--ink);margin-bottom:6px}
 .cc-distlbl{margin-top:10px;font-size:.82em;color:var(--ink2);font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
 .cc-distsub{font-size:.82em;color:var(--muted);font-weight:500}
+/* Renewals-by-month: a compact 13-column strip (Overdue + 12 months). Thin bars, muted
+   empty months, value shown only where there is ARR, so it reads cleanly at panel width. */
+.cc-months{display:flex;align-items:flex-end;gap:5px;height:132px;width:100%}
+.cc-mo{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;min-width:0}
+.cc-mo-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:100%}
+.cc-mo-v{font-size:.66em;font-weight:700;color:var(--ink2);margin-bottom:4px;white-space:nowrap}
+.cc-mo-bar{width:72%;max-width:26px;border-radius:5px 5px 0 0;background:var(--brand);transition:height .2s}
+.cc-mo-bar.zero{background:#e9edf4}
+.cc-mo-bar.over{background:var(--red)}
+.cc-mo-lbl{margin-top:7px;font-size:.72em;color:var(--ink2);font-weight:600}
+.cc-mo.is-over .cc-mo-lbl{color:var(--red);font-weight:800}
+.cc-mo.is-now .cc-mo-lbl{color:var(--brand);font-weight:800}
+/* Forecast mix: a horizontal proportion bar + legend (reuses stack-bar look, taller). */
+.cc-mixbar{display:flex;height:28px;border-radius:8px;overflow:hidden;background:#edf0f6;margin:6px 0 2px}
+.cc-mixbar span{display:flex;align-items:center;justify-content:center;height:100%;color:#fff;font-size:.72em;font-weight:800;min-width:0;overflow:hidden}
+.cc-mixleg{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.cc-mixrow{display:flex;align-items:center;gap:10px;font-size:.86em}
+.cc-mixrow i{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
+.cc-mixrow .cc-mixname{font-weight:700;color:var(--ink)}
+.cc-mixrow .cc-mixval{margin-left:auto;font-weight:800;color:var(--ink)}
+.cc-mixrow .cc-mixn{color:var(--muted);font-weight:600;font-size:.9em}
 /* Meetings grouped rows + contacts */
 tr.mtg-group td{padding:7px 16px;font-size:.74em;font-weight:800;letter-spacing:.02em;text-transform:none}
 tr.mtg-group .mtg-gico{margin-right:7px;font-size:1.05em;vertical-align:-1px}
@@ -2520,41 +2541,62 @@ async function renderCommandCenter(){
   const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
   const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+growthBars+'</div></div></div>';
   // Renewals by Month — live ARR up for renewal across the next 12 months (from HubSpot
-  // renewal_date + ARR). Fills the lower-left space with something a CSM acts on, and the
-  // overdue bucket is called out so past-due revenue is not hidden.
+  // renewal_date + ARR), laid out as a compact month strip starting at the current month
+  // so it reads chronologically. An Overdue column leads so past-due revenue is not hidden.
   const _rbmAsOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
   const _rbmDays=d=>d?Math.round((new Date(d+(String(d).length<=10?'T00:00:00':''))-_rbmAsOf)/86400000):null;
-  const moLabels=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const moArr=new Array(12).fill(0); let overdueArr12=0;
+  const moShort=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const nowM=_rbmAsOf.getMonth(), nowY=_rbmAsOf.getFullYear();
+  // 12 forward buckets keyed by year-month from the current month.
+  const fwd=new Array(12).fill(0); let overdueArr12=0;
   accts.forEach(a=>{
     if(!a.renewal_date) return;
     const dd=_rbmDays(a.renewal_date); const arr=a.arr_usd||0;
     if(dd==null) return;
     if(dd<0){ overdueArr12+=arr; return; }
-    if(dd<=365){ const m=new Date(a.renewal_date+(String(a.renewal_date).length<=10?'T00:00:00':'')).getMonth(); if(!isNaN(m)) moArr[m]+=arr; }
+    const d=new Date(a.renewal_date+(String(a.renewal_date).length<=10?'T00:00:00':''));
+    if(isNaN(d)) return;
+    const idx=(d.getFullYear()-nowY)*12+(d.getMonth()-nowM);
+    if(idx>=0 && idx<12) fwd[idx]+=arr;
   });
-  const maxMo=Math.max(1,overdueArr12,...moArr);
-  let rbmCols=overdueArr12>0?('<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(overdueArr12)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((overdueArr12/maxMo)*100))+'%;background:var(--red)"></div></div><div class="cc-distlbl">Overdue</div></div>'):'';
-  rbmCols+=moArr.map((v,i)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+(v>0?mfmt(v):'')+'</span><div class="cc-distbar" style="height:'+Math.max(2,Math.round((v/maxMo)*100))+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+moLabels[i]+'</div></div>').join('');
-  const anyRen=overdueArr12>0||moArr.some(v=>v>0);
-  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">ARR up for renewal, next 12 months</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+
-    (anyRen?rbmCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
-  // Renewal Forecast — the deterministic forecast split across dated accounts, so the
-  // headline risk/expansion mix is visible next to the raw renewal table below. Live only.
-  let fcRen=0,fcChurn=0,fcExp=0,fcNone=0, fcRenArr=0,fcChurnArr=0,fcExpArr=0;
+  const maxMo=Math.max(1,overdueArr12,...fwd);
+  const barH=v=>v<=0?6:Math.max(10,Math.round((v/maxMo)*100));
+  let moCols=overdueArr12>0?('<div class="cc-mo is-over"><div class="cc-mo-wrap"><span class="cc-mo-v">'+mfmt(overdueArr12)+'</span><div class="cc-mo-bar over" style="height:'+barH(overdueArr12)+'%"></div></div><div class="cc-mo-lbl">Overdue</div></div>'):'';
+  moCols+=fwd.map((v,i)=>{
+    const m=(nowM+i)%12; const isNow=i===0;
+    return '<div class="cc-mo'+(isNow?' is-now':'')+'"><div class="cc-mo-wrap">'+
+      (v>0?'<span class="cc-mo-v">'+mfmt(v)+'</span>':'')+
+      '<div class="cc-mo-bar'+(v>0?'':' zero')+'" style="height:'+barH(v)+'%"></div></div>'+
+      '<div class="cc-mo-lbl">'+moShort[m]+'</div></div>';
+  }).join('');
+  const anyRen=overdueArr12>0||fwd.some(v=>v>0);
+  const renTotal=overdueArr12+fwd.reduce((s,v)=>s+v,0);
+  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+(anyRen?(mfmt(renTotal)+' up for renewal, next 12 months'):'Next 12 months')+'</span></div><div class="body pad"><div class="cc-months">'+
+    (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
+  // Renewal Forecast — the deterministic outcome mix across dated accounts, drawn as a
+  // horizontal proportion bar + legend. A stacked bar reads a MIX far better than four
+  // separate columns, and categories with no accounts simply drop out (no empty "0" bar).
+  let fcRen=0,fcChurn=0,fcExp=0,fcNone=0, fcRenArr=0,fcChurnArr=0,fcExpArr=0,fcNoneArr=0;
   accts.forEach(a=>{
     if(!a.renewal_date) return;
     const fc=a.renewal_forecast; const lbl=(fc&&fc.applicable&&fc.label)?fc.label:null; const arr=a.arr_usd||0;
     if(lbl==='Churn Risk'){fcChurn++;fcChurnArr+=arr;}
     else if(lbl==='Expansion'){fcExp++;fcExpArr+=arr;}
     else if(lbl==='Renewal'){fcRen++;fcRenArr+=arr;}
-    else fcNone++;
+    else {fcNone++;fcNoneArr+=arr;}
   });
-  const maxFc=Math.max(1,fcRen,fcChurn,fcExp,fcNone);
-  const fcCol=(lbl,n,arr,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+(arr>0?mfmt(arr):n)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((n/maxFc)*100))+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n.toLocaleString()+' accts</span></div></div>';
-  const anyFc=(fcRen+fcChurn+fcExp+fcNone)>0;
-  const forecastMix='<div class="panel"><div class="head"><h2>Renewal Forecast</h2><span class="note">Deterministic outcome mix</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+
-    (anyFc?(fcCol('Renewal',fcRen,fcRenArr,'var(--green)')+fcCol('Churn Risk',fcChurn,fcChurnArr,'var(--red)')+fcCol('Expansion',fcExp,fcExpArr,'var(--brand)')+(fcNone>0?fcCol('Unclassified',fcNone,0,'var(--muted,#8aa)'):'')):'<div class="empty" style="width:100%">No dated renewals to forecast yet.</div>')+'</div></div></div>';
+  const fcTotal=fcRen+fcChurn+fcExp+fcNone;
+  const fcSegs=[
+    {name:'Renewal',n:fcRen,arr:fcRenArr,col:'var(--green)'},
+    {name:'Churn Risk',n:fcChurn,arr:fcChurnArr,col:'var(--red)'},
+    {name:'Expansion',n:fcExp,arr:fcExpArr,col:'var(--brand)'},
+    {name:'Unclassified',n:fcNone,arr:fcNoneArr,col:'#9aa6b8'},
+  ].filter(s=>s.n>0);
+  const fcPct=n=>fcTotal?Math.round((n/fcTotal)*100):0;
+  const mixBar='<div class="cc-mixbar">'+fcSegs.map(s=>{const p=fcPct(s.n);return '<span style="width:'+p+'%;background:'+s.col+'" title="'+escapeHtml(s.name)+' '+p+'%">'+(p>=12?p+'%':'')+'</span>';}).join('')+'</div>';
+  const mixLeg='<div class="cc-mixleg">'+fcSegs.map(s=>'<div class="cc-mixrow"><i style="background:'+s.col+'"></i><span class="cc-mixname">'+escapeHtml(s.name)+'</span><span class="cc-mixn">'+s.n+' acct'+(s.n===1?'':'s')+'</span><span class="cc-mixval">'+mfmt(s.arr)+'</span></div>').join('')+'</div>';
+  const forecastMix='<div class="panel"><div class="head"><h2>Renewal Forecast</h2><span class="note">'+(fcTotal?(fcTotal+' dated '+(fcTotal===1?'account':'accounts')):'Deterministic outcome mix')+'</span></div><div class="body pad">'+
+    (fcTotal?(mixBar+mixLeg):'<div class="empty" style="width:100%">No dated renewals to forecast yet.</div>')+'</div></div>';
   // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
   // Organised by urgency: OVERDUE line items (end date already passed, not churned) first and
   // flagged, then genuinely upcoming renewals in date order. In this book most dated renewals
