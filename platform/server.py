@@ -120,10 +120,10 @@ h1{font-size:1.25em;margin:0 0 10px}p{color:#9ab;line-height:1.5;font-size:.9em}
 a{color:#8ab4ff}</style></head>
 <body><div class=card>
 <h1>You don't have access to the CS Platform</h1>
-<p>Your JobAdder sign-in worked, but your account isn't a member of a Customer Success
-access group. If you believe you should have access, ask your CS lead or platform
-admin to add you to the CS Platform group.</p>
-<p><a href="https://observe.jobadder.cloud/portal">Back to applications</a></p>
+<p>Your JobAdder sign-in worked, but your account isn't yet a member of a Customer
+Success access group. Ask your CS lead or platform admin to add you to the
+<b>CS-Platform-Admins</b> group in Identity Center.</p>
+<p><a href="/login?logged_out=1">Sign in as a different user</a></p>
 </div></body></html>"""
 
 # Production SSO landing page. Shown at /login when Cognito is configured, instead of
@@ -139,7 +139,7 @@ _SSO_LOGIN_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;min-height:100vh;background:#0a0e18;color:#eaf0f8;display:flex}
 .wrap{display:flex;width:100%;min-height:100vh}
 /* ---------- Hero ---------- */
-.hero{flex:1.25;position:relative;overflow:hidden;padding:52px 58px;display:flex;flex-direction:column;justify-content:space-between;
+.hero{flex:1.3;position:relative;overflow:hidden;padding:44px 56px;display:flex;flex-direction:column;justify-content:center;gap:26px;
 background:radial-gradient(1100px 620px at 12% -8%,#1f2d4e 0,#111a30 48%,#0a0e18 100%)}
 .grid{position:absolute;inset:0;opacity:.5;background:
 linear-gradient(transparent 95%,rgba(96,130,195,.07) 95%) 0 0/100% 36px,
@@ -147,51 +147,52 @@ linear-gradient(90deg,transparent 95%,rgba(96,130,195,.07) 95%) 0 0/36px 100%;po
 .glow{position:absolute;width:520px;height:520px;border-radius:50%;filter:blur(90px);opacity:.22;pointer-events:none}
 .glow.b{background:#3b82f6;top:-180px;left:-120px}.glow.p{background:#8b5cf6;bottom:-220px;right:-80px;opacity:.18}
 .z{position:relative;z-index:2}
+.hinner{position:relative;z-index:2;width:100%;max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
 .hbrand{display:flex;align-items:center;gap:13px}
 .logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;box-shadow:0 10px 28px rgba(59,130,246,.4)}
 .hbrand h1{font-size:1.12em;margin:0}.hbrand .t{color:#93a9cc;font-size:.78em;margin-top:2px}
-.htag{max-width:560px;margin:36px 0 8px}
-.htag h2{font-size:2.1em;line-height:1.14;margin:0 0 14px;font-weight:720;letter-spacing:-.6px}
+.htag{max-width:600px}
+.htag h2{font-size:2.05em;line-height:1.14;margin:0 0 12px;font-weight:720;letter-spacing:-.6px}
 .htag h2 span{background:linear-gradient(120deg,#60a5fa,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.htag p{color:#a6b8d6;font-size:1.02em;line-height:1.6;margin:0}
+.htag p{color:#a6b8d6;font-size:1em;line-height:1.6;margin:0}
 /* metrics strip */
-.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:30px 0 22px;max-width:560px}
-.m{background:rgba(24,34,56,.75);border:1px solid #27375a;border-radius:14px;padding:15px 16px}
-.m .k{color:#93a9cc;font-size:.68em;text-transform:uppercase;letter-spacing:.7px}
-.m .v{font-size:1.55em;font-weight:720;margin-top:6px;letter-spacing:-.5px}
-.m .d{font-size:.74em;margin-top:4px;display:flex;align-items:center;gap:4px}.up{color:#34d399}.down{color:#fb7185}.flat{color:#93a9cc}
-/* dashboard row: trend + gauge + bars */
-.dash{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;max-width:560px}
-.panelcard{background:rgba(24,34,56,.62);border:1px solid #27375a;border-radius:16px;padding:16px 18px 12px}
-.pt{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
-.pt b{font-size:.9em}.pt span{color:#93a9cc;font-size:.72em}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;max-width:600px}
+.m{background:rgba(24,34,56,.75);border:1px solid #27375a;border-radius:14px;padding:14px 15px}
+.m .k{color:#93a9cc;font-size:.67em;text-transform:uppercase;letter-spacing:.7px}
+.m .v{font-size:1.5em;font-weight:720;margin-top:5px;letter-spacing:-.5px}
+.m .d{font-size:.73em;margin-top:4px;display:flex;align-items:center;gap:4px}.up{color:#34d399}.down{color:#fb7185}.flat{color:#93a9cc}
+/* dashboard grid */
+.dash{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;max-width:600px}
+.panelcard{background:rgba(24,34,56,.62);border:1px solid #27375a;border-radius:16px;padding:15px 17px 11px}
+.pt{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.pt b{font-size:.88em}.pt span{color:#93a9cc;font-size:.71em}
 .axis{fill:#6f84a6;font-size:9px;font-family:system-ui}
 .legend{display:flex;gap:14px;margin-top:8px;font-size:.72em;color:#a6b8d6}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .span2{grid-column:1 / -1}
-.foot{color:#6f84a6;font-size:.76em;display:flex;align-items:center;gap:8px}
+.foot{color:#6f84a6;font-size:.76em;display:flex;align-items:center;gap:8px;max-width:600px}
 .foot b{color:#8fa6c9;font-weight:600}
 /* ---------- Sign-in panel ---------- */
-.side{flex:.9;display:flex;align-items:center;justify-content:center;padding:40px;background:#0c1120;border-left:1px solid #1a2238}
-.card{width:368px}
-.pb{display:flex;align-items:center;gap:11px;margin-bottom:34px}
+.side{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;background:#0c1120;border-left:1px solid #1a2238}
+.card{width:100%;max-width:380px}
+.pb{display:flex;align-items:center;gap:11px;margin-bottom:30px}
 .pb .lg{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
 .pb .nm{font-size:.82em;color:#93a9cc}
-.card h3{font-size:1.55em;margin:0 0 8px;letter-spacing:-.3px}
-.sub{color:#a6b8d6;font-size:.92em;line-height:1.55;margin-bottom:28px}
+.card h3{font-size:1.5em;margin:0 0 8px;letter-spacing:-.3px}
+.sub{color:#a6b8d6;font-size:.9em;line-height:1.55;margin-bottom:26px}
 a.sso{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-weight:650;font-size:1.02em;text-decoration:none;transition:filter .15s,transform .08s,box-shadow .15s;box-shadow:0 10px 26px rgba(79,110,220,.35)}
 a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}a.sso:active{transform:translateY(1px)}
 .sso svg{width:18px;height:18px}
-.feat{margin-top:26px;display:flex;flex-direction:column;gap:12px}
-.feat .f{display:flex;gap:11px;align-items:flex-start;font-size:.86em;color:#b7c6e0}
+.feat{margin-top:24px;display:flex;flex-direction:column;gap:11px}
+.feat .f{display:flex;gap:11px;align-items:flex-start;font-size:.85em;color:#b7c6e0}
 .feat .f svg{width:17px;height:17px;color:#60a5fa;flex:none;margin-top:1px}
-.note{margin-top:26px;padding-top:20px;border-top:1px solid #1a2238;color:#6f84a6;font-size:.78em;line-height:1.5;text-align:center}
 .err{background:#3a1420;border:1px solid #7f1d2e;color:#fecdd6;border-radius:10px;padding:10px 12px;font-size:.82em;margin-bottom:20px}
 @media(max-width:900px){.hero{display:none}.side{flex:1;border-left:0}}
 </style></head>
 <body><div class=wrap>
   <section class=hero>
     <div class=grid></div><div class="glow b"></div><div class="glow p"></div>
+    <div class=hinner>
     <div class="hbrand z"><div class=logo>CS</div><div><h1>CS Platform</h1><div class=t>Customer Success at JobAdder</div></div></div>
     <div class="htag z">
       <h2>Your whole book,<br><span>one prioritised view</span></h2>
@@ -258,6 +259,7 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
       </div>
     </div>
     <div class="foot z"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.4"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> <b>Secure access.</b> Single sign-on via Okta. JobAdder internal.</div>
+    </div>
   </section>
 
   <section class=side>
@@ -627,6 +629,13 @@ class Handler(BaseHTTPRequestHandler):
         if allowed is None:  # dev-login path builds a minimal core
             allowed = rbac.has_cs_access(email, principal_core.get("groups", ""))
         if not allowed:
+            # Diagnostic: log exactly what the IdP delivered so we can tell a missing
+            # group assignment from a name-vs-id mismatch. No secrets, groups only.
+            import sys as _sys
+            print(f"[cs-auth] access denied email={email!r} "
+                  f"groups={principal_core.get('groups','')!r} "
+                  f"admin_groups={rbac._admin_groups()!r} user_groups={rbac._user_groups()!r} "
+                  f"admin_emails_set={bool(rbac._admin_emails())}", file=_sys.stderr, flush=True)
             self._send(403, _NOT_AUTHORISED_HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
         owner_id = None
