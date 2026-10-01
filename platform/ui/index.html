@@ -142,8 +142,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .src.sample{background:var(--amberbg);color:var(--amber)}
 .nc{display:inline-block;font-size:.9em;font-weight:600;color:var(--muted);background:#f1f3f8;border:1px dashed #cbd2df;border-radius:6px;padding:1px 8px}
 /* Whole-book roster row: data loads on open. Honest, calm styling (not the dashed "not connected"). */
-.roster-cell{display:inline-block;font-size:.82em;color:var(--ink2,#8aa);font-style:italic}
-.roster-badge{display:inline-block;font-size:.6em;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--brand,#3b82f6);background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);border-radius:5px;padding:1px 5px;vertical-align:middle;margin-left:4px}
+.roster-cell{display:inline-block;font-size:.82em;color:var(--ink2);font-style:italic}
+.roster-badge{display:inline-block;font-size:.6em;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--brand);background:var(--brandsoft);border:1px solid var(--line);border-radius:5px;padding:1px 5px;vertical-align:middle;margin-left:4px}
 tr.row-roster td{opacity:.82}
 tr.row-roster:hover td{opacity:1}
 .cov{display:inline-flex;gap:4px}
@@ -224,17 +224,19 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 .csmdots i.on.low{background:var(--red)}
 /* Planhat-style filter pill bar */
 .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
-.gfbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:12px 14px;margin-bottom:14px;background:var(--card,#141c2b);border:1px solid var(--line,#243149);border-radius:12px}
-.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:8px;padding:7px 10px;min-width:220px;height:34px;box-sizing:border-box}
-.gf-find input{background:transparent;border:0;color:inherit;outline:none;width:100%;font-size:.88em}
-.gf-ico{opacity:.6}
-.gf-l{display:flex;flex-direction:column;font-size:.62em;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--ink2,#8aa);gap:4px}
-.gf-s{background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);color:var(--ink,#e8edf5);border-radius:8px;padding:0 26px 0 10px;height:34px;font-size:.9em;line-height:34px;cursor:pointer;min-width:132px;max-width:200px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238aa' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
-.gf-s:focus{outline:0;border-color:var(--brand,#3b82f6);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
-.gf-count{margin-left:auto;align-self:center;color:var(--ink,#e8edf5);font-size:.82em;font-weight:600;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:999px;padding:6px 12px;white-space:nowrap}
-.gf-count em{color:var(--ink2,#8aa);font-style:normal;font-weight:500}
-.gf-clear{align-self:center;background:transparent;border:1px solid var(--line,#2c3854);color:var(--ink2,#8aa);border-radius:8px;padding:7px 13px;font-size:.82em;cursor:pointer;height:34px}
-.gf-clear:hover{color:var(--ink,#fff);border-color:var(--brand,#3b82f6)}
+.gfbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:12px 14px;margin-bottom:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:220px;height:34px;box-sizing:border-box}
+.gf-find input{background:transparent;border:0;color:var(--ink);outline:none;width:100%;font-size:.88em}
+.gf-find input::placeholder{color:var(--muted)}
+.gf-ico{opacity:.55;color:var(--ink2)}
+.gf-l{display:flex;flex-direction:column;font-size:.62em;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--ink2);gap:4px}
+.gf-s{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:0 26px 0 10px;height:34px;font-size:.9em;line-height:34px;cursor:pointer;min-width:132px;max-width:200px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%2398a2b3' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+.gf-s:hover{border-color:var(--brand)}
+.gf-s:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
+.gf-count{margin-left:auto;align-self:center;color:var(--ink);font-size:.82em;font-weight:600;background:var(--brandsoft);border:1px solid var(--line);border-radius:999px;padding:6px 12px;white-space:nowrap}
+.gf-count em{color:var(--ink2);font-style:normal;font-weight:500}
+.gf-clear{align-self:center;background:transparent;border:1px solid var(--line);color:var(--ink2);border-radius:8px;padding:7px 13px;font-size:.82em;cursor:pointer;height:34px}
+.gf-clear:hover{color:var(--ink);border-color:var(--brand);background:var(--brandsoft)}
 .filterbar .fb-find{position:relative;margin-right:4px}
 .filterbar .fb-find input{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px 6px 28px;font:inherit;font-size:.82em;min-width:210px}
 .filterbar .fb-find input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.1)}
@@ -1293,9 +1295,11 @@ function renderMyDashboard(){
   const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowPct=totalArr?Math.round((lowArr/totalArr)*100):0;
-  let low=0,med=0,high=0;accts.forEach(a=>{const b=a.health&&a.health.band;if(b==='red')low++;else if(b==='amber')med++;else if(b==='green')high++;});
-  const maxD=Math.max(1,low,med,high);
-  const distBars=[['Low',low,'var(--red)'],['Medium',med,'var(--amber)'],['High',high,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxD)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('');
+  let low=0,med=0,high=0,ns=0;accts.forEach(a=>{const h=a.health,comp=h&&h.computable,b=h&&h.band;if(!comp)ns++;else if(b==='red')low++;else if(b==='amber')med++;else if(b==='green')high++;});
+  const maxD=Math.max(1,low,med,high,ns);
+  const distCols=[['Low',low,'var(--red)'],['Medium',med,'var(--amber)'],['High',high,'var(--green)']];
+  if(ns>0)distCols.push(['Not scored',ns,'var(--muted)']);
+  const distBars=distCols.map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1].toLocaleString()+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxD)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('');
   const atRisk=low;
   const p1=tasks.filter(t=>t.priority===1).length;
   const avgHealth=accts.filter(a=>a.health&&a.health.computable).length?Math.round(accts.filter(a=>a.health&&a.health.computable).reduce((s,a)=>s+a.health.score,0)/accts.filter(a=>a.health&&a.health.computable).length):0;
@@ -1316,11 +1320,16 @@ function renderMyDashboard(){
   // ── New live widgets (all from existing per-account signals; honest when absent) ──
   const _days=d=>d?((new Date(d)-today)/86400000):null;
   const withArr=a=>typeof a.arr_usd==='number'?a.arr_usd:0;
-  // (A) % ARR renewing in the next 60 days (HubSpot renewal_date + ARR).
-  const arrAll=accts.reduce((s,a)=>s+withArr(a),0);
-  const arr60=accts.filter(a=>{const d=_days(a.renewal_date);return d!=null&&d>=0&&d<=60;}).reduce((s,a)=>s+withArr(a),0);
-  const pct60=arrAll?Math.round((arr60/arrAll)*100):0;
-  const wArrRenew='<div class="mdw-big '+(pct60>0?'':'')+'">'+pct60+'%</div><div class="muted" style="font-size:.78em;margin-top:4px">'+fmt(arr60)+' of '+fmt(arrAll)+' ARR renews within 60 days</div>';
+  // (A) % ARR renewing in the next 60 days (HubSpot renewal_date + ARR). Denominator is the
+  // ARR of accounts that actually CARRY a renewal date — including the ~1.3k roster rows with
+  // no date would make the % meaningless. Honest "no data" when no dates are present.
+  const datedAccts=accts.filter(a=>a.renewal_date);
+  const arrBase=datedAccts.reduce((s,a)=>s+withArr(a),0);
+  const arr60=datedAccts.filter(a=>{const d=_days(a.renewal_date);return d!=null&&d>=0&&d<=60;}).reduce((s,a)=>s+withArr(a),0);
+  const pct60=arrBase?Math.round((arr60/arrBase)*100):null;
+  const wArrRenew=(pct60==null)
+    ? '<div class="nc">no data</div><div class="muted" style="font-size:.78em;margin-top:4px">No renewal dates in HubSpot for this selection.</div>'
+    : '<div class="mdw-big">'+pct60+'%</div><div class="muted" style="font-size:.78em;margin-top:4px">'+fmt(arr60)+' of '+fmt(arrBase)+' dated-renewal ARR renews within 60 days</div>';
   // (B) Overdue tasks (task_metrics-style: due date passed, not completed). Client mirror.
   const _todayISO=today.toISOString().slice(0,10);
   const overdue=(tasks||[]).filter(t=>{const due=t.due_on||t.due;return due&&String(due).length>=10&&_todayISO>String(due).slice(0,10);});
@@ -1383,7 +1392,7 @@ function renderMyDashboard(){
     '</div>'+
     '<div class="sec-title"><h2>Account Insights and Actions</h2></div>'+
     '<div class="md-insights">'+
-      '<div class="panel"><div class="head"><h2>Portfolio Distribution by Health</h2></div><div class="body pad"><div class="cc-dist" style="height:140px">'+distBars+'</div></div></div>'+
+      '<div class="panel"><div class="head"><h2>Portfolio Distribution by Health</h2>'+(ns>0?'<span class="note">'+ns.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist" style="height:140px">'+distBars+'</div></div></div>'+
       '<div class="panel"><div class="head"><h2>Active Users (recency)</h2><span class="note">live Pendo</span></div><div class="body pad">'+auBars+'</div></div>'+
       '<div class="panel"><div class="head"><h2>Top Customers by Usage</h2><span class="note">most active</span></div><div class="body pad">'+(topRows||'<div class="empty">No usage-connected accounts.</div>')+'</div></div>'+
       '<div class="panel"><div class="head"><h2>% ARR Renewing next 60 Days</h2><span class="note">live HubSpot</span></div><div class="body pad">'+wArrRenew+'</div></div>'+
