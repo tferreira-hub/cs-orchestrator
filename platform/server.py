@@ -127,93 +127,156 @@ admin to add you to the CS Platform group.</p>
 </div></body></html>"""
 
 # Production SSO landing page. Shown at /login when Cognito is configured, instead of
-# bouncing straight to the Cognito hosted UI. SSO-only: there is no password or email
-# form here — the single action starts the Okta-via-Cognito OIDC flow (/login?sso=1).
-# Two-panel layout: a CS-themed hero (portfolio health, trend graph, metric cards) and
-# the sign-in panel. Pure inline SVG/CSS — no external assets, CSP-friendly.
+# bouncing straight to the Cognito hosted UI. SSO-only: the single action starts the
+# Okta-via-Cognito OIDC flow (/login?sso=1). Two-panel layout with a data-rich CS hero
+# (labelled trend line, renewal-stage bars, health gauge) and the sign-in panel. Pure
+# inline SVG/CSS, no external assets, CSP-friendly. Figures are illustrative mock data.
 _SSO_LOGIN_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
-<title>CS Platform — Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>CS Platform, Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;min-height:100vh;background:#0b0f1a;color:#e8edf5;display:flex}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;min-height:100vh;background:#0a0e18;color:#eaf0f8;display:flex}
 .wrap{display:flex;width:100%;min-height:100vh}
-/* ---------- Hero panel ---------- */
-.hero{flex:1.15;position:relative;overflow:hidden;padding:56px 60px;display:flex;flex-direction:column;justify-content:space-between;
-background:radial-gradient(900px 500px at 15% -5%,#1d2b4a 0,#0e1526 55%,#0b0f1a 100%)}
-.hero::after{content:"";position:absolute;inset:0;background:
-linear-gradient(transparent 95%,rgba(90,120,180,.06) 95%) 0 0/100% 34px,
-linear-gradient(90deg,transparent 95%,rgba(90,120,180,.06) 95%) 0 0/34px 100%;pointer-events:none}
-.hbrand{display:flex;align-items:center;gap:13px;position:relative;z-index:2}
-.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#7c3aed);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;box-shadow:0 8px 24px rgba(59,130,246,.35)}
-.hbrand h1{font-size:1.15em;margin:0}.hbrand .t{color:#8fa6c9;font-size:.8em;margin-top:2px}
-.htag{position:relative;z-index:2;max-width:460px}
-.htag h2{font-size:2.05em;line-height:1.15;margin:0 0 14px;font-weight:700;letter-spacing:-.5px}
-.htag h2 span{background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.htag p{color:#9fb3d1;font-size:1.02em;line-height:1.6;margin:0}
-/* metric cards */
-.metrics{position:relative;z-index:2;display:flex;gap:14px;margin-top:30px;flex-wrap:wrap}
-.m{background:rgba(23,33,52,.72);border:1px solid #253453;border-radius:13px;padding:15px 17px;min-width:132px;backdrop-filter:blur(4px)}
-.m .k{color:#8fa6c9;font-size:.72em;text-transform:uppercase;letter-spacing:.6px}
-.m .v{font-size:1.5em;font-weight:700;margin-top:5px}
-.m .d{font-size:.74em;margin-top:3px}.up{color:#4ade80}.down{color:#fb7185}
-/* trend chart card */
-.chart{position:relative;z-index:2;margin-top:26px;background:rgba(23,33,52,.6);border:1px solid #253453;border-radius:15px;padding:18px 20px 10px;max-width:520px}
-.chart .ct{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.chart .ct b{font-size:.9em}.chart .ct span{color:#8fa6c9;font-size:.75em}
-.foot{position:relative;z-index:2;color:#6b7f9e;font-size:.76em}
+/* ---------- Hero ---------- */
+.hero{flex:1.25;position:relative;overflow:hidden;padding:52px 58px;display:flex;flex-direction:column;justify-content:space-between;
+background:radial-gradient(1100px 620px at 12% -8%,#1f2d4e 0,#111a30 48%,#0a0e18 100%)}
+.grid{position:absolute;inset:0;opacity:.5;background:
+linear-gradient(transparent 95%,rgba(96,130,195,.07) 95%) 0 0/100% 36px,
+linear-gradient(90deg,transparent 95%,rgba(96,130,195,.07) 95%) 0 0/36px 100%;pointer-events:none}
+.glow{position:absolute;width:520px;height:520px;border-radius:50%;filter:blur(90px);opacity:.22;pointer-events:none}
+.glow.b{background:#3b82f6;top:-180px;left:-120px}.glow.p{background:#8b5cf6;bottom:-220px;right:-80px;opacity:.18}
+.z{position:relative;z-index:2}
+.hbrand{display:flex;align-items:center;gap:13px}
+.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;box-shadow:0 10px 28px rgba(59,130,246,.4)}
+.hbrand h1{font-size:1.12em;margin:0}.hbrand .t{color:#93a9cc;font-size:.78em;margin-top:2px}
+.htag{max-width:560px;margin:36px 0 8px}
+.htag h2{font-size:2.1em;line-height:1.14;margin:0 0 14px;font-weight:720;letter-spacing:-.6px}
+.htag h2 span{background:linear-gradient(120deg,#60a5fa,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.htag p{color:#a6b8d6;font-size:1.02em;line-height:1.6;margin:0}
+/* metrics strip */
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:30px 0 22px;max-width:560px}
+.m{background:rgba(24,34,56,.75);border:1px solid #27375a;border-radius:14px;padding:15px 16px}
+.m .k{color:#93a9cc;font-size:.68em;text-transform:uppercase;letter-spacing:.7px}
+.m .v{font-size:1.55em;font-weight:720;margin-top:6px;letter-spacing:-.5px}
+.m .d{font-size:.74em;margin-top:4px;display:flex;align-items:center;gap:4px}.up{color:#34d399}.down{color:#fb7185}.flat{color:#93a9cc}
+/* dashboard row: trend + gauge + bars */
+.dash{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;max-width:560px}
+.panelcard{background:rgba(24,34,56,.62);border:1px solid #27375a;border-radius:16px;padding:16px 18px 12px}
+.pt{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.pt b{font-size:.9em}.pt span{color:#93a9cc;font-size:.72em}
+.axis{fill:#6f84a6;font-size:9px;font-family:system-ui}
+.legend{display:flex;gap:14px;margin-top:8px;font-size:.72em;color:#a6b8d6}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.span2{grid-column:1 / -1}
+.foot{color:#6f84a6;font-size:.76em;display:flex;align-items:center;gap:8px}
+.foot b{color:#8fa6c9;font-weight:600}
 /* ---------- Sign-in panel ---------- */
-.panel{flex:.85;display:flex;align-items:center;justify-content:center;padding:40px;background:#0d1322;border-left:1px solid #1b2740}
-.card{width:360px}
-.card .pb{display:flex;align-items:center;gap:11px;margin-bottom:30px}
-.card .pb .lg{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#7c3aed);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
-.card h3{font-size:1.5em;margin:0 0 8px}
-.sub{color:#9fb3d1;font-size:.92em;line-height:1.55;margin-bottom:28px}
-a.sso{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:14px;border-radius:11px;background:linear-gradient(135deg,#3b82f6,#7c3aed);color:#fff;font-weight:600;font-size:1.02em;text-decoration:none;transition:filter .15s,transform .1s}
-a.sso:hover{filter:brightness(1.08)}a.sso:active{transform:translateY(1px)}
+.side{flex:.9;display:flex;align-items:center;justify-content:center;padding:40px;background:#0c1120;border-left:1px solid #1a2238}
+.card{width:368px}
+.pb{display:flex;align-items:center;gap:11px;margin-bottom:34px}
+.pb .lg{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
+.pb .nm{font-size:.82em;color:#93a9cc}
+.card h3{font-size:1.55em;margin:0 0 8px;letter-spacing:-.3px}
+.sub{color:#a6b8d6;font-size:.92em;line-height:1.55;margin-bottom:28px}
+a.sso{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-weight:650;font-size:1.02em;text-decoration:none;transition:filter .15s,transform .08s,box-shadow .15s;box-shadow:0 10px 26px rgba(79,110,220,.35)}
+a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}a.sso:active{transform:translateY(1px)}
 .sso svg{width:18px;height:18px}
-.note{margin-top:22px;padding-top:20px;border-top:1px solid #1b2740;color:#6b7f9e;font-size:.78em;line-height:1.5;text-align:center}
-.err{background:#3a1420;border:1px solid #7f1d2e;color:#fecdd6;border-radius:9px;padding:10px 12px;font-size:.82em;margin-bottom:20px}
-@media(max-width:860px){.hero{display:none}.panel{flex:1;border-left:0}}
+.feat{margin-top:26px;display:flex;flex-direction:column;gap:12px}
+.feat .f{display:flex;gap:11px;align-items:flex-start;font-size:.86em;color:#b7c6e0}
+.feat .f svg{width:17px;height:17px;color:#60a5fa;flex:none;margin-top:1px}
+.note{margin-top:26px;padding-top:20px;border-top:1px solid #1a2238;color:#6f84a6;font-size:.78em;line-height:1.5;text-align:center}
+.err{background:#3a1420;border:1px solid #7f1d2e;color:#fecdd6;border-radius:10px;padding:10px 12px;font-size:.82em;margin-bottom:20px}
+@media(max-width:900px){.hero{display:none}.side{flex:1;border-left:0}}
 </style></head>
 <body><div class=wrap>
   <section class=hero>
-    <div class=hbrand><div class=logo>CS</div><div><h1>CS Platform</h1><div class=t>Customer Success · JobAdder</div></div></div>
-    <div class=htag>
-      <h2>Your whole book, <span>one prioritised view</span></h2>
-      <p>Portfolio health, renewal cadence, churn risk and expansion signals — pulled together and ranked, so you act on what matters first.</p>
+    <div class=grid></div><div class="glow b"></div><div class="glow p"></div>
+    <div class="hbrand z"><div class=logo>CS</div><div><h1>CS Platform</h1><div class=t>Customer Success at JobAdder</div></div></div>
+    <div class="htag z">
+      <h2>Your whole book,<br><span>one prioritised view</span></h2>
+      <p>Portfolio health, renewal cadence, churn risk and expansion signals, pulled together and ranked so you act on what matters first.</p>
+
       <div class=metrics>
-        <div class=m><div class=k>Net Revenue Retention</div><div class=v>112%</div><div class="d up">&#9650; 4.2% vs last qtr</div></div>
-        <div class=m><div class=k>Accounts at risk</div><div class=v>7</div><div class="d down">&#9650; 2 this week</div></div>
-        <div class=m><div class=k>Open renewals</div><div class=v>23</div><div class=d>within 120 days</div></div>
+        <div class=m><div class=k>Net Revenue Retention</div><div class=v>112%</div><div class="d up">&#9650; 4.2 pts vs last quarter</div></div>
+        <div class=m><div class=k>Accounts at risk</div><div class=v>7</div><div class="d down">&#9650; 2 new this week</div></div>
+        <div class=m><div class=k>Renewals in 120 days</div><div class=v>23</div><div class="d flat">&#8226; $4.8M ARR</div></div>
       </div>
-      <div class=chart>
-        <div class=ct><b>Portfolio health trend</b><span>last 6 months</span></div>
-        <svg viewBox="0 0 480 120" width="100%" height="110" preserveAspectRatio="none" aria-hidden=true>
-          <defs>
-            <linearGradient id=g x1=0 y1=0 x2=0 y2=1>
-              <stop offset=0% stop-color=#3b82f6 stop-opacity=.45/><stop offset=100% stop-color=#3b82f6 stop-opacity=0/>
-            </linearGradient>
-          </defs>
-          <line x1=0 y1=30 x2=480 y2=30 stroke=#1e2b45/><line x1=0 y1=60 x2=480 y2=60 stroke=#1e2b45/><line x1=0 y1=90 x2=480 y2=90 stroke=#1e2b45/>
-          <path d="M0,86 L80,74 L160,80 L240,56 L320,44 L400,34 L480,22 L480,120 L0,120 Z" fill=url(#g)/>
-          <path d="M0,86 L80,74 L160,80 L240,56 L320,44 L400,34 L480,22" fill=none stroke=#60a5fa stroke-width=2.5 stroke-linecap=round stroke-linejoin=round/>
-          <circle cx=240 cy=56 r=3.5 fill=#a78bfa/><circle cx=400 cy=34 r=3.5 fill=#a78bfa/><circle cx=480 cy=22 r=4 fill=#60a5fa/>
-        </svg>
+
+      <div class=dash>
+        <!-- NRR trend line with axes + value labels -->
+        <div class=panelcard>
+          <div class=pt><b>Net revenue retention</b><span>Apr&ndash;Sep</span></div>
+          <svg viewBox="0 0 300 150" width="100%" height="132" role=img aria-label="NRR trend from 103% to 112%">
+            <defs><linearGradient id=ln x1=0 y1=0 x2=0 y2=1><stop offset=0% stop-color=#60a5fa stop-opacity=.4/><stop offset=100% stop-color=#60a5fa stop-opacity=0/></linearGradient></defs>
+            <!-- gridlines + y labels -->
+            <g>
+              <line x1=34 y1=16 x2=292 y2=16 stroke=#223150/><text x=28 y=20 text-anchor=end class=axis>115</text>
+              <line x1=34 y1=56 x2=292 y2=56 stroke=#223150/><text x=28 y=60 text-anchor=end class=axis>110</text>
+              <line x1=34 y1=96 x2=292 y2=96 stroke=#223150/><text x=28 y=100 text-anchor=end class=axis>105</text>
+              <line x1=34 y1=120 x2=292 y2=120 stroke=#223150/><text x=28 y=124 text-anchor=end class=axis>100</text>
+            </g>
+            <!-- data: 103,105,104,108,110,112 -> y = 120-(v-100)*8 -->
+            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24 L288,128 L46,128 Z" fill=url(#ln)/>
+            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24" fill=none stroke=#60a5fa stroke-width=2.5 stroke-linecap=round stroke-linejoin=round/>
+            <g fill=#a78bfa><circle cx=46 cy=96 r=3/><circle cx=96 cy=80 r=3/><circle cx=146 cy=88 r=3/><circle cx=196 cy=56 r=3/><circle cx=246 cy=40 r=3/><circle cx=288 cy=24 r=3.6 fill=#60a5fa/></g>
+            <text x=288 y=16 text-anchor=end fill=#cfe0ff font-size=10 font-weight=700>112%</text>
+            <!-- x labels -->
+            <g class=axis text-anchor=middle>
+              <text x=46 y=146>Apr</text><text x=96 y=146>May</text><text x=146 y=146>Jun</text><text x=196 y=146>Jul</text><text x=246 y=146>Aug</text><text x=288 y=146>Sep</text>
+            </g>
+          </svg>
+        </div>
+        <!-- health gauge donut -->
+        <div class=panelcard>
+          <div class=pt><b>Health mix</b></div>
+          <svg viewBox="0 0 120 132" width="100%" height="132" role=img aria-label="Health mix: 68% healthy, 22% watch, 10% at risk">
+            <g transform="translate(60,58)">
+              <circle r=42 fill=none stroke=#1b2742 stroke-width=15/>
+              <!-- 68% green, 22% amber, 10% red; circumference ~264 -->
+              <circle r=42 fill=none stroke=#34d399 stroke-width=15 stroke-dasharray="179 85" transform="rotate(-90)" stroke-linecap=round/>
+              <circle r=42 fill=none stroke=#fbbf24 stroke-width=15 stroke-dasharray="58 206" stroke-dashoffset="-181" transform="rotate(-90)" stroke-linecap=round/>
+              <circle r=42 fill=none stroke=#fb7185 stroke-width=15 stroke-dasharray="26 238" stroke-dashoffset="-241" transform="rotate(-90)" stroke-linecap=round/>
+              <text y=-2 text-anchor=middle fill=#eaf0f8 font-size=18 font-weight=750>68%</text>
+              <text y=14 text-anchor=middle fill=#93a9cc font-size=8.5>healthy</text>
+            </g>
+          </svg>
+          <div class=legend style="justify-content:center;flex-wrap:wrap;gap:9px"><span><i style="background:#34d399"></i>Healthy</span><span><i style="background:#fbbf24"></i>Watch</span><span><i style="background:#fb7185"></i>Risk</span></div>
+        </div>
+        <!-- renewal-stage bars -->
+        <div class="panelcard span2">
+          <div class=pt><b>Open renewals by stage</b><span>next 120 days</span></div>
+          <svg viewBox="0 0 520 92" width="100%" height="82" role=img aria-label="Renewals: T-120 nine, T-90 six, T-60 five, T-30 three">
+            <g class=axis text-anchor=middle>
+              <!-- bars: values 9,6,5,3 (max 10 -> scale 6px/unit, baseline y=66) -->
+              <rect x=40 y=12 width=70 height=54 rx=5 fill=#3b82f6/><text x=75 y=8 fill=#cfe0ff font-size=11 font-weight=700>9</text><text x=75 y=82>T-120</text>
+              <rect x=170 y=30 width=70 height=36 rx=5 fill=#6366f1/><text x=205 y=26 fill=#cfe0ff font-size=11 font-weight=700>6</text><text x=205 y=82>T-90</text>
+              <rect x=300 y=36 width=70 height=30 rx=5 fill=#8b5cf6/><text x=335 y=32 fill=#cfe0ff font-size=11 font-weight=700>5</text><text x=335 y=82>T-60</text>
+              <rect x=430 y=48 width=70 height=18 rx=5 fill=#a78bfa/><text x=465 y=44 fill=#cfe0ff font-size=11 font-weight=700>3</text><text x=465 y=82>T-30</text>
+              <line x1=24 y1=66 x2=510 y2=66 stroke=#223150/>
+            </g>
+          </svg>
+        </div>
       </div>
     </div>
-    <div class=foot>Secure access · Single sign-on via Okta · JobAdder internal</div>
+    <div class="foot z"><svg width=14 height=14 viewBox="0 0 24 24" fill=none stroke=#34d399 stroke-width=2.4><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> <b>Secure access.</b> Single sign-on via Okta. JobAdder internal.</div>
   </section>
-  <section class=panel>
+
+  <section class=side>
     <div class=card>
-      <div class=pb><div class=lg>CS</div><div style="font-size:.82em;color:#8fa6c9">Customer Success Platform</div></div>
+      <div class=pb><div class=lg>CS</div><div class=nm>Customer Success Platform</div></div>
       __ERROR__
-      <h3>Sign in</h3>
-      <div class=sub>Access is restricted to JobAdder staff. Sign in with your company account to reach your Customer Success workspace.</div>
+      <h3>Welcome back</h3>
+      <div class=sub>Access is restricted to JobAdder staff. Sign in with your company account to open your Customer Success workspace.</div>
       <a class=sso href="/login?sso=1">
         <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1=15 y1=12 x2=3 y2=12/></svg>
         Sign in with JobAdder SSO</a>
-      <div class=note>Single sign-on via Okta. You'll be redirected to your company login, then back to CS Platform.</div>
+      <div class=feat>
+        <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg><div>One prioritised queue across your whole portfolio.</div></div>
+        <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg><div>Churn risk and renewal cadence, surfaced early.</div></div>
+        <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=12 cy=12 r=9/><path d="M12 7v5l3 2"/></svg><div>Drafted outreach ready, grounded in real signals.</div></div>
+      </div>
+      <div class=note>You will be redirected to your company login, then straight back to CS Platform.</div>
     </div>
   </section>
 </div></body></html>"""
