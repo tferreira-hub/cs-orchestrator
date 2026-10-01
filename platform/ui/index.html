@@ -1291,6 +1291,13 @@ function _widget(title,inner,cls){return '<div class="mdw '+(cls||'')+'"><div cl
 function _widgetBig(title,value,cls){return _widget(title,'<div class="mdw-big '+(cls||'')+'">'+value+'</div>');}
 function renderMyDashboard(){
   const host=document.getElementById('md-pane-dashboard'); if(!host||!DATA)return;
+  // Open Expansion ARR reads the revenue-motion cache, which is normally warmed by the
+  // main Dashboard. If a user lands on My Dashboard first it is null, so lazily fetch it
+  // once and re-render — the data exists (Command Center shows it), it just was not loaded here.
+  if(_rmCache===null && !window._mdRmLoading){
+    window._mdRmLoading=true;
+    api('/api/revenue-motion').then(r=>r.json()).then(j=>{_rmCache=j;}).catch(()=>{}).finally(()=>{window._mdRmLoading=false; if(_myDashTab==='dashboard') renderMyDashboard();});
+  }
   const accts=filteredAccounts(), tasks=DATA.tasks||[];
   const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
@@ -2382,13 +2389,13 @@ async function renderCommandCenter(){
   const maxArr=Math.max(1,arrLow,arrMed,arrHigh,arrNS);
   const mfmt=n=>n>=1e6?('$'+(n/1e6).toFixed(2)+'M'):n>=1e3?('$'+Math.round(n/1e3)+'k'):('$'+n);
   const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.round((arr/maxArr)*100)+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n+' accts</span></div></div>';
-  const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2>'+(nNS>0?'<span class="note">'+nNS.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist">'+
+  const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2>'+(nNS>0?'<span class="note">'+nNS.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist" style="height:150px">'+
     distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+(nNS>0?distBar('Not scored',arrNS,nNS,'var(--muted,#8aa)'):'')+'</div></div></div>';
   // Portfolio Growth — ARR by segment (real live breakdown, largest first).
   const segs=(exec.by_segment||[]).filter(s=>s.arr_usd>0).sort((a,b)=>b.arr_usd-a.arr_usd);
   const maxSeg=Math.max(1,...segs.map(s=>s.arr_usd));
   const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
-  const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist">'+growthBars+'</div></div></div>';
+  const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+growthBars+'</div></div></div>';
   // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
   const renRows=accts.filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
   const renewalsPanel='<div class="panel"><div class="head"><h2>Upcoming Renewals</h2><span class="note">Deterministic forecast, evidence grounded</span></div>'+

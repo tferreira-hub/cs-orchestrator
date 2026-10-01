@@ -140,6 +140,31 @@ def health_trend(account_id: str, window_days: int = 45) -> dict | None:
     }
 
 
+def portfolio_trajectory(max_points: int = 30) -> dict:
+    """Portfolio-wide health trajectory: average computed-health per day across all
+    account snapshots, oldest -> newest. Powers the dashboard 'Portfolio Development'
+    widget from the real .cs-health-history snapshots (no fabrication). Returns
+    {"points": [{"date","avg_health","accounts"}...]} with at most max_points days."""
+    rows = [r for r in _all_rows() if r.get("health") is not None]
+    by_day: dict[str, list[int]] = {}
+    for r in rows:
+        d = r.get("date")
+        if not d:
+            continue
+        by_day.setdefault(d, []).append(r["health"])
+    points = []
+    for day in sorted(by_day):
+        vals = by_day[day]
+        points.append({
+            "date": day,
+            "avg_health": round(sum(vals) / len(vals)),
+            "accounts": len(vals),
+        })
+    if max_points and len(points) > max_points:
+        points = points[-max_points:]
+    return {"points": points}
+
+
 def timeline_for(account_id: str, extra_events: list | None = None) -> list[dict]:
     """Build a chronological customer timeline (Customer 360 §11) for one account.
 

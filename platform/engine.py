@@ -659,6 +659,10 @@ def portfolio() -> dict:
             # Live usage-recency signal (Pendo). Powers the "Usage Trend" column; None when
             # the usage source is not connected, so the UI shows "no data" (never fabricated).
             "usage_days_since_visit": _usage.get("days_since_last_visit") if _connected(a).get("usage") else None,
+            # Live CSAT (Zendesk) carried onto the row from the already-fetched signal, so
+            # the dashboard CSAT distribution works without a second fan-out. None when the
+            # Zendesk source has no CSAT for this account (honest no-data).
+            "csat_30d": (live.get("zendesk", {}) or {}).get("csat_30d") if _connected(a).get("zendesk") else None,
             "open_task_count": len(tasks_by_account.get(aid, [])),
         })
     rows.sort(key=lambda r: r["health"]["score"])  # worst health first
@@ -751,6 +755,10 @@ def portfolio() -> dict:
         "tasks": result["tasks"],
         "suppressed": result["suppressed"],
             "automations": result.get("automations", []),
+        # Portfolio-wide health trajectory (avg computed-health per day) from the real
+        # snapshot history, so the dashboard 'Portfolio Development' widget is live, not
+        # a fabricated line. Empty points until enough daily snapshots accumulate.
+        "health_history": _portfolio_trajectory(),
     }
 
 
@@ -886,6 +894,16 @@ def _health_trend_for(account_id: str):
         return history.health_trend(account_id, window_days=45)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _portfolio_trajectory():
+    """Portfolio-wide health trajectory for the dashboard; guarded so a history read
+    failure never breaks the main payload. Returns {"points": [...]}, possibly empty."""
+    try:
+        import history
+        return history.portfolio_trajectory()
+    except Exception:  # noqa: BLE001
+        return {"points": []}
 
 
 def _health_history_for(account_id: str):
