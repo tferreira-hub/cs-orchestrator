@@ -1,0 +1,184 @@
+# ---------------------------------------------------------------------------
+# Core
+# ---------------------------------------------------------------------------
+variable "account_id" {
+  description = "Target AWS account (Tooling). Enforced via provider allowed_account_ids."
+  type        = string
+  default     = "350067031910"
+}
+
+variable "region" {
+  description = "AWS region."
+  type        = string
+  default     = "ap-southeast-2"
+}
+
+variable "environment" {
+  description = "Environment tag/name suffix."
+  type        = string
+  default     = "prod"
+}
+
+variable "name_prefix" {
+  description = "Prefix for all resource names. CS Platform is standalone (NOT ja-observe-*)."
+  type        = string
+  default     = "cs-platform"
+}
+
+# ---------------------------------------------------------------------------
+# Networking (existing Tooling VPC — discovered, not created here)
+# ---------------------------------------------------------------------------
+variable "vpc_id" {
+  description = "Existing Tooling VPC id."
+  type        = string
+  default     = "vpc-0868ddde5e0399b31"
+}
+
+variable "public_subnet_ids" {
+  description = "Public subnets for the internet-facing ALB (one per AZ)."
+  type        = list(string)
+  default = [
+    "subnet-0b524de7f2881fb36", # public0 / ap-southeast-2a
+    "subnet-0887ba91876db097a", # public1 / ap-southeast-2b
+    "subnet-0928925b3f81d554a", # public2 / ap-southeast-2c
+  ]
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnets for the Fargate tasks (egress via NAT to ECR/vendors)."
+  type        = list(string)
+  default = [
+    "subnet-0ef572ff2a7997da8", # private0 / ap-southeast-2a
+    "subnet-0d7029627ea5a09ee", # private1 / ap-southeast-2b
+    "subnet-00a7ace2fc6978ae8", # private2 / ap-southeast-2c
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# DNS / TLS
+# ---------------------------------------------------------------------------
+variable "domain_name" {
+  description = "Public hostname served by the ALB (DNS record created in Cloudflare, not here)."
+  type        = string
+  default     = "csplatform.jobadder.tools"
+}
+
+variable "acm_certificate_arn" {
+  description = "ACM cert for the ALB HTTPS listener. The existing *.jobadder.tools ISSUED cert."
+  type        = string
+  default     = "arn:aws:acm:ap-southeast-2:350067031910:certificate/6ec15a57-af0d-40cd-8082-8eb6761467bc"
+}
+
+# The domain is Cloudflare-proxied (orange cloud). The ALB must only accept traffic
+# from Cloudflare's edge, NOT the whole internet — otherwise the ALB is directly
+# reachable and Cloudflare's WAF/DDoS/TLS layer can be bypassed. Source of truth:
+# https://www.cloudflare.com/ips/ (keep in sync; Cloudflare publishes changes rarely).
+variable "cloudflare_ipv4_cidrs" {
+  description = "Cloudflare edge IPv4 ranges allowed to reach the ALB."
+  type        = list(string)
+  default = [
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+    "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+    "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+  ]
+}
+
+variable "cloudflare_ipv6_cidrs" {
+  description = "Cloudflare edge IPv6 ranges allowed to reach the ALB."
+  type        = list(string)
+  default = [
+    "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+    "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Container / service sizing
+# ---------------------------------------------------------------------------
+variable "container_image" {
+  description = "Full image ref deployed by Terraform on first apply. The CI pipeline swaps the image on later revisions (task_definition is ignored on the service)."
+  type        = string
+  default     = ""
+}
+
+variable "container_port" {
+  description = "App listen port."
+  type        = number
+  default     = 8787
+}
+
+variable "task_cpu" {
+  description = "Fargate task CPU units."
+  type        = number
+  default     = 512
+}
+
+variable "task_memory" {
+  description = "Fargate task memory (MiB)."
+  type        = number
+  default     = 1024
+}
+
+variable "desired_count" {
+  description = "Number of running tasks."
+  type        = number
+  default     = 1
+}
+
+# ---------------------------------------------------------------------------
+# Cognito / SSO — DEDICATED pool (not the ja-observe shared pool)
+# ---------------------------------------------------------------------------
+variable "cognito_domain_prefix" {
+  description = "Hosted-UI domain prefix: https://<prefix>.auth.<region>.amazoncognito.com"
+  type        = string
+  default     = "csplatform-jobadder"
+}
+
+variable "saml_metadata_url" {
+  description = "AWS Identity Center SAML app metadata URL for the dedicated CS Platform SAML app. Leave empty to provision the pool without federation (dev/email login only) until the Identity Center app exists."
+  type        = string
+  default     = ""
+}
+
+variable "admin_group_name" {
+  description = "SSO group (in custom:groups) granted CS Platform admin. Also set as CS_ADMIN_GROUPS on the task."
+  type        = string
+  default     = "CS-Platform-Admins"
+}
+
+# ---------------------------------------------------------------------------
+# Application configuration (non-secret env). Secrets come from SSM (see ssm.tf).
+# ---------------------------------------------------------------------------
+variable "app_environment" {
+  description = "Non-secret environment variables injected into the task definition."
+  type        = map(string)
+  default = {
+    AWS_REGION                   = "ap-southeast-2"
+    CS_SECURE_COOKIE             = "1"
+    CS_PENDO_ACTIVITY            = "1"
+    CS_STALE_REVALIDATE          = "1"
+    CS_CACHE_TTL                 = "600"
+    CS_BEDROCK_REGION            = "ap-southeast-2"
+    CS_BEDROCK_MODEL             = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    ZENDESK_SUBDOMAIN            = "jobadder"
+    ZENDESK_EMAIL                = "integrations@jobadder.com"
+    REDSHIFT_DATABASE            = "dwh"
+    REDSHIFT_WORKGROUP           = "data-platform-redshift-warehouse-wg-prod"
+    REDSHIFT_CHURN_TABLE         = "marts.int_ds_account_churn_scoring"
+    REDSHIFT_CHURN_ID_COLUMN     = "nk_ja_account"
+    REDSHIFT_CHURN_MODE          = "status"
+    REDSHIFT_CHURN_STATUS_COLUMN = "calculated_churn_status"
+    REDSHIFT_METRICS_TABLE       = "rpt.rpt_account_ndr_monthly"
+    REDSHIFT_METRICS_ID_COLUMN   = "ja_account"
+    # Rocket Lane onboarding connector (non-secret config; key is an SSM secret).
+    # Confirm the exact base URL for the JobAdder Rocket Lane tenant before go-live.
+    ROCKET_LANE_API_URL = "https://api.rocketlane.com/api/1.0"
+  }
+}
+
+variable "redshift_assume_role_arn" {
+  description = "Cross-account role in the Data Platform account the task assumes for the Redshift Data API (churn). Empty => churn adapter reports not-live and the platform falls back to the computed score."
+  type        = string
+  default     = "arn:aws:iam::503561421603:role/cs-platform-churn-reader"
+}

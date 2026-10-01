@@ -1,0 +1,99 @@
+# =============================================================================
+# cs-platform-churn-reader  —  APPLY IN THE DATA PLATFORM ACCOUNT (503561421603)
+# =============================================================================
+# This is a SEPARATE Terraform stack from infra/ (different account/provider). It
+# creates the cross-account role the CS Platform ECS task assumes to read the churn
+# model via the Redshift Data API. Rename to cs-platform-churn-reader.tf and apply
+# it with Data Platform credentials (e.g. AWS_PROFILE=DataPlatform).
+#
+# Verified live: the role does NOT yet exist in 503561421603, and the target
+# workgroup `data-platform-redshift-warehouse-wg-prod` DOES exist. Until this role
+# and its trust are in place, the CS Platform churn adapter reports not-live and the
+# platform falls back to the transparent computed-risk score (no code change needed).
+#
+# The CS Platform task role ARN comes from the infra/ stack:
+#   terraform -chdir=infra output -raw task_role_arn
+#   => arn:aws:iam::350067031910:role/cs-platform-task
+# =============================================================================
+
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.60"
+    }
+  }
+}
+
+provider "aws" {
+  region              = "ap-southeast-2"
+  allowed_account_ids = ["503561421603"] # Data Platform
+}
+
+variable "cs_platform_task_role_arn" {
+  description = "The CS Platform ECS task role allowed to assume this reader role."
+  type        = string
+  default     = "arn:aws:iam::350067031910:role/cs-platform-task"
+}
+
+variable "redshift_workgroup_arn" {
+  description = "ARN of the churn Redshift Serverless workgroup."
+  type        = string
+  # data-platform-redshift-warehouse-wg-prod (confirmed to exist). Replace <id> with
+  # the real workgroup id: aws redshift-serverless get-workgroup \
+  #   --workgroup-name data-platform-redshift-warehouse-wg-prod --query workgroup.workgroupArn
+  default = "arn:aws:redshift-serverless:ap-southeast-2:503561421603:workgroup/<workgroup-id>"
+}
+
+# Trust policy: only the CS Platform task role may assume this reader.
+data "aws_iam_policy_document" "assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = [var.cs_platform_task_role_arn]
+    }
+  }
+}
+
+resource "aws_iam_role" "churn_reader" {
+  name               = "cs-platform-churn-reader"
+  assume_role_policy = data.aws_iam_policy_document.assume.json
+
+  tags = {
+    Application = "cs-platform"
+    ManagedBy   = "terraform"
+    Purpose     = "cross-account-redshift-churn-read"
+  }
+}
+
+# Least-privilege Redshift Data API read for the churn model.
+data "aws_iam_policy_document" "churn_read" {
+  statement {
+    sid = "RedshiftDataApiRead"
+    actions = [
+      "redshift-data:ExecuteStatement",
+      "redshift-data:DescribeStatement",
+      "redshift-data:GetStatementResult",
+    ]
+    resources = ["*"] # Data API actions are not resource-scopable
+  }
+
+  statement {
+    sid       = "ServerlessGetCredentials"
+    actions   = ["redshift-serverless:GetCredentials"]
+    resources = [var.redshift_workgroup_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "churn_read" {
+  name   = "cs-platform-churn-read"
+  role   = aws_iam_role.churn_reader.id
+  policy = data.aws_iam_policy_document.churn_read.json
+}
+
+output "churn_reader_role_arn" {
+  description = "Set this as REDSHIFT_ASSUME_ROLE_ARN on the CS Platform (already the default in infra/variables.tf)."
+  value       = aws_iam_role.churn_reader.arn
+}

@@ -1,10 +1,12 @@
 name: build-and-deploy
 
-# Builds the CS Platform image, pushes it to the DevOps ECR (880082283556), then
-# deploys it by registering a new ECS task-definition revision with the new image
-# and updating the service. Mirrors ja-observe-api's deploy.yml. Terraform owns the
-# task definition's shape (env, secrets, roles) via ignore_changes=[task_definition];
-# this pipeline owns the running IMAGE. Auth via GitHub OIDC (no long-lived keys).
+# Builds the CS Platform image, pushes it to the dedicated CS Platform ECR in the
+# Tooling account (350067031910), then deploys it by registering a new ECS
+# task-definition revision with the new image and updating the service. CS Platform
+# is a standalone tool — its own account, ECR, cluster, and service (NOT ja-observe).
+# Terraform owns the task definition's shape (env, secrets, roles) via
+# ignore_changes=[task_definition]; this pipeline owns the running IMAGE.
+# Auth via GitHub OIDC (no long-lived keys).
 
 on:
   push:
@@ -23,10 +25,10 @@ permissions:
 
 env:
   AWS_REGION: ap-southeast-2
-  ECR_ACCOUNT: "880082283556" # DevOps account
+  ECR_ACCOUNT: "350067031910" # Tooling account (dedicated CS Platform)
   IMAGE_NAME: cs-platform
-  CLUSTER: ja-observe-devops
-  SERVICE: ja-observe-devops-cs-platform
+  CLUSTER: cs-platform
+  SERVICE: cs-platform
 
 jobs:
   build-deploy:
@@ -38,7 +40,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
         with:
-          role-to-assume: ${{ secrets.ECR_PUSH_ROLE_ARN_DEVOPS }}
+          role-to-assume: ${{ secrets.ECR_PUSH_ROLE_ARN_TOOLING }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR

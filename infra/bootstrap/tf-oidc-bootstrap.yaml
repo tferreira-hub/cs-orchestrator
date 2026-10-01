@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CS Platform IaC bootstrap. Creates the GitHub-OIDC role that the Terraform `infra`
+  pipeline assumes to manage everything else. This solves the chicken-and-egg (the
+  Terraform cannot create the role it authenticates with) WITHOUT any imperative
+  `terraform apply` from a laptop: this is a declarative, version-controlled stack.
+
+  Deploy ONCE (all-IaC, no manual role clicking):
+    aws cloudformation deploy \
+      --template-file infra/bootstrap/tf-oidc-bootstrap.yaml \
+      --stack-name cs-platform-tf-bootstrap \
+      --capabilities CAPABILITY_NAMED_IAM \
+      --region ap-southeast-2 \
+      --profile Tooling.JA-Admin
+
+  Then set the role ARN (stack output) as the GitHub secret TF_DEPLOY_ROLE_ARN_TOOLING,
+  and the Terraform pipeline manages the rest (including importing/owning this role's
+  equivalent going forward). The GitHub OIDC provider already exists in the account.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: "JobAdder/cs-orchestrator"
+    Description: org/repo allowed to assume the Terraform deploy role.
+  NamePrefix:
+    Type: String
+    Default: "cs-platform"
+  StateBucket:
+    Type: String
+    Default: "au.terraform-state.tooling.jobadder"
+
+Resources:
+  TfDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${NamePrefix}-tf-deploy"
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+              StringLike:
+                # JobAdder's GitHub OIDC tokens use the immutable-ID subject format
+                # (repo:ORG@<orgid>/REPO@<repoid>:...), so BOTH patterns are needed.
+                # Confirmed against the working ja-observe-devops-github-actions role.
+                "token.actions.githubusercontent.com:sub":
+                  - !Sub "repo:${GitHubRepo}:*"
+                  - "repo:JobAdder@*/cs-orchestrator@*:*"
+      Tags:
+        - { Key: Application, Value: cs-platform }
+        - { Key: ManagedBy, Value: cloudformation-bootstrap }
+
+  TfDeployPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref TfDeployRole
+      PolicyName: !Sub "${NamePrefix}-tf-deploy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ManageCsPlatformServices
+            Effect: Allow
+            Action:
+              - "ecs:*"
+              - "ecr:*"
+              - "cognito-idp:*"
+              - "elasticloadbalancing:*"
+              - "logs:*"
+              - "ec2:Describe*"
+              - "ec2:*SecurityGroup*"
+              - "application-autoscaling:*"
+            Resource: "*"
+          - Sid: ManageCsPlatformIam
+            Effect: Allow
+            Action:
+              - "iam:*Role"
+              - "iam:*RolePolicy"
+              - "iam:*RolePolicies"
+              - "iam:Get*"
+              - "iam:List*"
+              - "iam:TagRole"
+              - "iam:UntagRole"
+              - "iam:PassRole"
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${NamePrefix}-*"
+          - Sid: ManageCsPlatformSsm
+            Effect: Allow
+            Action:
+              - "ssm:*Parameter*"
+              - "ssm:AddTagsToResource"
+              - "ssm:RemoveTagsFromResource"
+              - "ssm:ListTagsForResource"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/*"
+          - Sid: TerraformState
+            Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:ListBucket"
+            Resource:
+              - !Sub "arn:aws:s3:::${StateBucket}"
+              - !Sub "arn:aws:s3:::${StateBucket}/cs-platform/*"
+
+Outputs:
+  TfDeployRoleArn:
+    Description: Set this as the GitHub repo secret TF_DEPLOY_ROLE_ARN_TOOLING.
+    Value: !GetAtt TfDeployRole.Arn
