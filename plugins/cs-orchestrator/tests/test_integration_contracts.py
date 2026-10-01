@@ -133,26 +133,34 @@ def test_jiminny_adapter_maps_latest_call(monkeypatch):
     from adapters import config, sources
 
     monkeypatch.setenv("JIMINNY_KEY", "test-key")
+    monkeypatch.setenv("JIMINNY_REGION", "eu")
+    monkeypatch.delenv("JIMINNY_API_URL", raising=False)
     captured = {}
 
     def fake_get(url, headers, timeout=12):
         captured["url"] = url
         captured["headers"] = headers
-        return {"calls": [{
-            "date": "2026-09-22",
-            "sentiment": "negative",
-            "summary": "Customer raised adoption concerns.",
-            "talkRatioCustomer": 0.42,
-        }]}
+        # Real Jiminny getActivities response shape (key: results).
+        return {"results": [{
+            "id": "abc",
+            "title": "Catchup call with Procurement",
+            "activityType": "Web Demo",
+            "actualStartTime": "2026-09-22T10:00:00+00:00",
+            "durationForHumans": "13m 50s",
+            "averageScore": 3.5,
+        }], "metadata": {}}
 
     monkeypatch.setattr(config, "http_get", fake_get)
-    result = sources.JIMINNY.calls("AU1_5005")
+    result = sources.JIMINNY.calls("AU1_5005", crm_account_id="12345")
 
-    assert result["last_call_date"] == "2026-09-22"
-    assert result["sentiment"] == "negative"
-    assert result["summary"] == "Customer raised adoption concerns."
-    assert result["talk_ratio_customer"] == 0.42
-    assert "/accounts/au1-5005/calls" in captured["url"]
+    assert result["last_call_date"] == "2026-09-22T10:00:00+00:00"
+    assert result["title"] == "Catchup call with Procurement"
+    assert result["activity_type"] == "Web Demo"
+    assert result["average_score"] == 3.5
+    # Hits the EU customer API getActivities with Bearer auth and the CRM accountId.
+    assert "app.jiminny.eu/customer/api/v1/getActivities" in captured["url"]
+    assert "accountId=12345" in captured["url"]
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
 
 
 def test_pendo_configured_expansion_metrics_are_live(monkeypatch):
@@ -499,20 +507,32 @@ def test_sequence_enrolment_rejects_unknown_sequence():
 def test_rocket_lane_adapter_maps_onboarding(monkeypatch):
     from adapters import config, sources
 
-    monkeypatch.setenv("ROCKET_LANE_API_URL", "https://rocket.example")
     monkeypatch.setenv("ROCKET_LANE_KEY", "test-key")
-    captured = {}
+    monkeypatch.delenv("ROCKET_LANE_API_URL", raising=False)
+    calls = []
 
     def fake_get(url, headers, timeout=12):
-        captured["url"] = url
-        return {"data": {"status": "at_risk", "timeToValueDays": 42, "health": "red"}}
+        calls.append((url, headers))
+        # Verify the real auth header and host are used.
+        assert headers.get("api-key") == "test-key"
+        if "/companies" in url:
+            return {"data": [{"companyId": 121094, "companyName": "Acme"}]}
+        if "/projects" in url:
+            return {"data": [{"projectId": 9, "projectName": "Acme Onboarding",
+                              "status": {"label": "At Risk"}, "startDate": "2026-01-01",
+                              "dueDate": "2026-03-01",
+                              "fields": [{"fieldLabel": "Onboarding Health", "fieldValueLabel": "red"}]}]}
+        return {"data": []}
 
     monkeypatch.setattr(config, "http_get", fake_get)
-    result = sources.ROCKET_LANE.status("AU1_5005")
-    assert result["status"] == "at_risk"
-    assert result["time_to_value_days"] == 42
+    result = sources.ROCKET_LANE.status("AU1_5005", company_name="Acme")
+    assert result["status"] == "At Risk"
+    assert result["project_name"] == "Acme Onboarding"
     assert result["health"] == "red"
-    assert captured["url"].endswith("/accounts/au1-5005")
+    assert result["_matched"] is True
+    # Base host defaults to the real Rocket Lane API, companies looked up first.
+    assert any("api.rocketlane.com/api/1.0/companies" in u for u, _ in calls)
+    assert any("/1.0/projects" in u for u, _ in calls)
 
 
 def test_live_roster_enriches_instance_family(monkeypatch):

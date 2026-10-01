@@ -267,33 +267,71 @@ class Pendo:
 
 # ----------------------------------------------------------- Rocket Lane ---
 class RocketLane:
-    """Optional onboarding source with an explicit, configurable API contract.
+    """Onboarding source, verified against the Rocket Lane public API
+    (developer.rocketlane.com). Base https://api.rocketlane.com/api, auth header
+    `api-key: <key>`. Onboarding lives in PROJECTS; we match a JobAdder account to a
+    Rocket Lane company by name, then read its latest project's status/health/dates.
+    Only ROCKET_LANE_KEY is required (base URL defaults to the real host); nothing is
+    fabricated when the key is absent or the account cannot be matched."""
 
-    The endpoint and field names are configurable because Rocket Lane tenant
-    deployments expose different account routes. No onboarding data is fabricated
-    when the connector is not configured or the account is not mapped.
-    """
+    def _base(self) -> str:
+        return (config.env("ROCKET_LANE_API_URL") or "https://api.rocketlane.com/api").rstrip("/")
+
+    def _headers(self) -> dict[str, str]:
+        return {"api-key": config.env("ROCKET_LANE_KEY"), "Accept": "application/json"}
 
     def live(self) -> bool:
-        return config.live_enabled() and bool(
-            config.env("ROCKET_LANE_API_URL") and config.env("ROCKET_LANE_KEY")
-        )
+        return config.live_enabled() and bool(config.env("ROCKET_LANE_KEY"))
 
-    def status(self, account_ref: str) -> dict[str, Any]:
+    def status(self, account_ref: str, company_name: str | None = None) -> dict[str, Any]:
+        """Onboarding status for an account. Matches a Rocket Lane company by name
+        (company_name preferred; else the AUx-yyyy ref), then reads its newest project."""
         import urllib.parse
-        base = config.env("ROCKET_LANE_API_URL").rstrip("/")
-        route = config.env("ROCKET_LANE_ACCOUNT_PATH") or "/accounts/{account_ref}"
-        route = route.format(account_ref=urllib.parse.quote(identity.normalise(account_ref), safe=""))
-        headers = {"Authorization": f"Bearer {config.env('ROCKET_LANE_KEY')}", "Accept": "application/json"}
-        payload = config.http_get(f"{base}/{route.lstrip('/')}", headers)
-        data = payload.get("data", payload) if isinstance(payload, dict) else {}
-        return {
-            "status": data.get("status") or data.get("onboarding_status"),
-            "time_to_value_days": data.get("time_to_value_days") or data.get("timeToValueDays"),
-            "target_time_to_value_days": data.get("target_time_to_value_days") or data.get("targetTimeToValueDays"),
-            "health": data.get("health") or data.get("onboarding_health"),
-            "_source": "rocket-lane-live",
-        }
+        base = self._base()
+        headers = self._headers()
+        name = company_name or identity.normalise(account_ref)
+        try:
+            # Find the company by name (native companyName filter).
+            cq = urllib.parse.urlencode({"companyName.eq": name, "pageSize": 1})
+            cres = config.http_get(f"{base}/1.0/companies?{cq}", headers)
+            companies = cres.get("data") or [] if isinstance(cres, dict) else []
+            if not companies:
+                return {"status": None, "_source": "rocket-lane-live", "_matched": False}
+            company_id = companies[0].get("companyId")
+            # Newest project for that company.
+            pq = urllib.parse.urlencode({"companyId.eq": company_id, "pageSize": 1, "sortBy": "createdAt", "sortOrder": "DESC"})
+            pres = config.http_get(f"{base}/1.0/projects?{pq}", headers)
+            projects = pres.get("data") or [] if isinstance(pres, dict) else []
+            if not projects:
+                return {"status": None, "_source": "rocket-lane-live", "_matched": True}
+            p = projects[0]
+            # Rocket Lane exposes status/health via the project's status object + fields.
+            status_obj = p.get("status") or {}
+            status_label = status_obj.get("label") if isinstance(status_obj, dict) else status_obj
+            return {
+                "status": status_label,
+                "project_name": p.get("projectName"),
+                "start_date": p.get("startDate"),
+                "due_date": p.get("dueDate"),
+                "archived": p.get("archived"),
+                "health": self._field(p, ("health", "onboarding health", "status health")),
+                "_source": "rocket-lane-live",
+                "_matched": True,
+            }
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[rocket-lane] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {"status": None, "_source": "rocket-lane-live", "_error": True}
+
+    @staticmethod
+    def _field(project: dict, label_contains: tuple) -> Any:
+        """Pull a custom field value from a Rocket Lane project by fuzzy label match."""
+        for f in project.get("fields", []) or []:
+            lbl = str(f.get("fieldLabel") or "").lower()
+            if any(k in lbl for k in label_contains):
+                return f.get("fieldValueLabel") or f.get("fieldValue")
+        return None
+
 
 
 # ------------------------------------------------------------- Entitlements ---
@@ -651,20 +689,51 @@ class AccountMetrics:
 
 # ------------------------------------------------------------------ Jiminny ---
 class Jiminny:
+    """Jiminny Customer API (verified against the official OpenAPI spec at
+    jiminny.github.io/customer-api-docs). Base is app.jiminny.com (US) or
+    app.jiminny.eu (EU) + /customer/api/v1; auth is Bearer <80-char token>.
+    Calls are modelled as "activities"; getActivities filters by `accountId` =
+    the CRM (HubSpot) external account id, so we pass the HubSpot company id when
+    we have it, falling back to the AUx-yyyy ref."""
+
+    def _base(self) -> str:
+        # Region: US by default; set JIMINNY_REGION=eu or JIMINNY_API_URL to override.
+        explicit = config.env("JIMINNY_API_URL")
+        if explicit:
+            return explicit.rstrip("/")
+        region = (config.env("JIMINNY_REGION") or "us").strip().lower()
+        host = "app.jiminny.eu" if region == "eu" else "app.jiminny.com"
+        return f"https://{host}/customer/api/v1"
+
     def live(self) -> bool:
         return config.live_enabled() and bool(config.env("JIMINNY_KEY"))
 
-    def calls(self, account_ref: str) -> dict[str, Any]:
+    def calls(self, account_ref: str, crm_account_id: str | None = None) -> dict[str, Any]:
+        """Latest call activity for an account. `crm_account_id` is the HubSpot company
+        id (preferred Jiminny accountId); falls back to the AUx-yyyy external ref."""
+        import urllib.parse, datetime as _dt
         headers = {"Authorization": f"Bearer {config.env('JIMINNY_KEY')}", "Accept": "application/json"}
-        ref = identity.normalise(account_ref)
-        data = config.http_get(f"https://api.jiminny.com/v1/accounts/{ref}/calls?limit=1", headers)
-        calls = data.get("calls", []) if isinstance(data, dict) else []
-        last = calls[0] if calls else {}
+        base = self._base()
+        acct = crm_account_id or identity.normalise(account_ref).upper()
+        # Required: a <6-month window. Use the last ~180 days up to now (UTC).
+        to = _dt.datetime.utcnow()
+        frm = to - _dt.timedelta(days=180)
+        q = urllib.parse.urlencode({
+            "accountId": acct,
+            "fromDate": frm.strftime("%Y-%m-%d %H:%M:%S"),
+            "toDate": to.strftime("%Y-%m-%d %H:%M:%S"),
+            "pageSize": 1,
+        })
+        data = config.http_get(f"{base}/getActivities?{q}", headers)
+        # Response is a paged list; accept common shapes.
+        items = (data.get("data") or data.get("activities") or data.get("results") or []) if isinstance(data, dict) else []
+        last = items[0] if items else {}
         return {
-            "last_call_date": last.get("date"),
-            "sentiment": last.get("sentiment"),
-            "summary": last.get("summary"),
-            "talk_ratio_customer": last.get("talkRatioCustomer"),
+            "last_call_date": last.get("actualStartTime") or last.get("createdAt") or last.get("scheduledStartTime"),
+            "title": last.get("title"),
+            "activity_type": last.get("activityType") or last.get("type"),
+            "duration_for_humans": last.get("durationForHumans"),
+            "average_score": last.get("averageScore"),
             "_source": "jiminny-live",
         }
 

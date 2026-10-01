@@ -66,9 +66,13 @@ def account(account_id: str) -> dict:
     usage, sources["usage"] = _pull(
         _ADAPTERS and _src.PENDO.live(), lambda: _src.PENDO.metrics(account_id), "pendo")
     jiminny, sources["jiminny"] = _pull(
-        _ADAPTERS and _src.JIMINNY.live(), lambda: _src.JIMINNY.calls(account_id), "jiminny")
+        _ADAPTERS and _src.JIMINNY.live(),
+        lambda: _src.JIMINNY.calls(account_id, crm_account_id=(hubspot or {}).get("company_id")),
+        "jiminny")
     onboarding, sources["onboarding"] = _pull(
-        _ADAPTERS and _src.ROCKET_LANE.live(), lambda: _src.ROCKET_LANE.status(account_id), "rocket_lane")
+        _ADAPTERS and _src.ROCKET_LANE.live(),
+        lambda: _src.ROCKET_LANE.status(account_id, company_name=(hubspot or {}).get("name")),
+        "rocket_lane")
     stripe, sources["stripe"] = _pull(
         _ADAPTERS and _src.STRIPE.live(), lambda: _src.STRIPE.payment(account_id), "stripe")
 

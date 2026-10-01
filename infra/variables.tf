@@ -220,6 +220,7 @@ variable "app_environment" {
     CS_BEDROCK_MODEL             = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
     ZENDESK_SUBDOMAIN            = "jobadder"
     ZENDESK_EMAIL                = "integrations@jobadder.com"
+    JIMINNY_REGION               = "eu"
     REDSHIFT_DATABASE            = "dwh"
     REDSHIFT_WORKGROUP           = "data-platform-redshift-warehouse-wg-prod"
     REDSHIFT_CHURN_TABLE         = "marts.int_ds_account_churn_scoring"
@@ -230,7 +231,7 @@ variable "app_environment" {
     REDSHIFT_METRICS_ID_COLUMN   = "ja_account"
     # Rocket Lane onboarding connector (non-secret config; key is an SSM secret).
     # Confirm the exact base URL for the JobAdder Rocket Lane tenant before go-live.
-    ROCKET_LANE_API_URL = "https://api.rocketlane.com/api/1.0"
+    ROCKET_LANE_API_URL = "https://api.rocketlane.com/api"
   }
 }
 
