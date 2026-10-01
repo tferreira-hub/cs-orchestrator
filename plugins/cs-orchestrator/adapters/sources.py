@@ -891,7 +891,7 @@ class HubSpot:
                 break
         return ids[:limit]
 
-    def list_all_companies(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def list_all_companies(self, limit: int | None = None, cached_only: bool = False) -> list[dict[str, Any]]:
         """Tier-1 lightweight full-book roster: ALL customer companies, cheap fields only.
 
         Unlike roster()/account() this does NOT fan out to the other vendors or fetch
@@ -921,6 +921,21 @@ class HubSpot:
         cache = getattr(HubSpot, "_full_roster_cache", None)
         if cache and (_t.time() - cache[0] < ttl) and cache[2] >= limit:
             return cache[1][:limit]
+
+        # Non-blocking mode: if the cache is cold, return nothing NOW and warm it in a
+        # background thread, so a page load that calls this never pays the ~40s scan.
+        # The next load (after warm) gets the full book. Used by portfolio().
+        if cached_only:
+            if not getattr(HubSpot, "_roster_warming", False):
+                HubSpot._roster_warming = True
+                import threading
+                def _warm():
+                    try:
+                        self.list_all_companies(limit=limit)
+                    finally:
+                        HubSpot._roster_warming = False
+                threading.Thread(target=_warm, daemon=True).start()
+            return cache[1][:limit] if cache else []
 
         props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",

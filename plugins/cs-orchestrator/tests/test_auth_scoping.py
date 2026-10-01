@@ -188,6 +188,9 @@ def test_admin_can_view_any_account(monkeypatch):
 def test_portfolio_summary_reports_scope(monkeypatch):
     import engine, dataaccess
     monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    # portfolio() reads accounts through the installed provider; use the scoping wrapper
+    # so the CSM principal is actually applied (conftest pins the raw loader by default).
+    engine.orchestrate.set_account_provider(engine._scoped_accounts)
     engine.set_principal({"email": "a@x.com", "name": "Alpha CSM", "role": "csm", "owner_id": "owner-A"})
     summary = engine.portfolio()["summary"]
     assert summary["account_scope"] == "csm"

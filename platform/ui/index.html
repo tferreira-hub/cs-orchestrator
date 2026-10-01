@@ -219,6 +219,15 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 .csmdots i.on.low{background:var(--red)}
 /* Planhat-style filter pill bar */
 .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.gfbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;background:var(--card,#141c2b);border:1px solid var(--line,#243149);border-radius:12px}
+.gf-find{display:flex;align-items:center;gap:6px;background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);border-radius:8px;padding:5px 10px;min-width:200px}
+.gf-find input{background:transparent;border:0;color:inherit;outline:none;width:100%;font-size:.9em}
+.gf-ico{opacity:.6}
+.gf-l{display:flex;flex-direction:column;font-size:.64em;text-transform:uppercase;letter-spacing:.5px;color:var(--ink2,#8aa);gap:3px}
+.gf-s{background:var(--bg,#0f1626);border:1px solid var(--line,#2c3854);color:var(--ink,#e8edf5);border-radius:8px;padding:5px 8px;font-size:1.25em;cursor:pointer}
+.gf-count{margin-left:auto;color:var(--ink2,#8aa);font-size:.85em;font-weight:600}
+.gf-clear{background:transparent;border:1px solid var(--line,#2c3854);color:var(--ink2,#8aa);border-radius:8px;padding:5px 11px;font-size:.82em;cursor:pointer}
+.gf-clear:hover{color:var(--ink,#fff);border-color:var(--brand,#3b82f6)}
 .filterbar .fb-find{position:relative;margin-right:4px}
 .filterbar .fb-find input{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px 6px 28px;font:inherit;font-size:.82em;min-width:210px}
 .filterbar .fb-find input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,91,240,.1)}
@@ -867,6 +876,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       </div>
       <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span> <button class="topbar-jane" onclick="toggleAgentDock(true)"><span>✦</span> Ask Jane</button> <span id="principalBox" style="display:none;margin-left:10px"><span id="principalName" class="src live"></span> <a id="logoutLink" href="/logout" class="src" style="text-decoration:none">Sign out</a></span></div>
     </div>
+    <div id="globalFilterMount" style="display:none;padding:0 0 2px"></div>
     <div class="content">
       <section class="view on" id="v-dash">
         <div class="cc-tabs" id="cc-tabs">
@@ -1023,6 +1033,59 @@ const meta={
 };
 let DATA=null;
 
+// ── Global portfolio filter ──────────────────────────────────────────────────
+// A single filter state that EVERY view reads via filteredAccounts(), so changing
+// it once reflects across the whole platform (dashboard, risk, renewals, etc.).
+const FILTER={cohort:'all',segment:'all',owner:'all',health:'all',lifecycle:'active',search:''};
+let _currentView='dash';
+function filteredAccounts(){
+  const all=(DATA&&DATA.accounts)||[];
+  return all.filter(a=>{
+    if(FILTER.cohort!=='all' && (a.cohort||(a.pooled?'pooled':'managed'))!==FILTER.cohort) return false;
+    if(FILTER.segment!=='all' && (a.segment||'Unknown')!==FILTER.segment) return false;
+    if(FILTER.owner!=='all' && (a.csm_owner||a.csm_owner_id||'Unassigned')!==FILTER.owner) return false;
+    if(FILTER.health!=='all'){const b=a.health&&a.health.band; if(b!==FILTER.health) return false;}
+    if(FILTER.lifecycle==='active' && a.churned) return false;
+    if(FILTER.lifecycle==='churned' && !a.churned) return false;
+    if(FILTER.search){const q=FILTER.search.toLowerCase(); if(!((a.name||'').toLowerCase().includes(q)||(a.account_id||'').toLowerCase().includes(q))) return false;}
+    return true;
+  });
+}
+function _facetValues(key){
+  const s=new Set();(DATA&&DATA.accounts||[]).forEach(a=>{
+    let v;
+    if(key==='segment') v=a.segment||'Unknown';
+    else if(key==='owner') v=a.csm_owner||a.csm_owner_id||'Unassigned';
+    if(v) s.add(v);
+  });
+  return [...s].sort();
+}
+function globalFilterBar(){
+  const n=filteredAccounts().length, total=(DATA&&DATA.accounts||[]).length;
+  const sel=(id,label,opts,val)=>`<label class="gf-l">${label}<select class="gf-s" onchange="setFilter('${id}',this.value)">${
+    opts.map(o=>`<option value="${o[0]}"${o[0]===val?' selected':''}>${o[1]}</option>`).join('')}</select></label>`;
+  const segOpts=[['all','All segments']].concat(_facetValues('segment').map(s=>[s,s]));
+  const ownOpts=[['all','All owners']].concat(_facetValues('owner').map(s=>[s,s]));
+  return '<div class="gfbar">'+
+    '<span class="gf-find"><span class="gf-ico">⌕</span><input type="text" placeholder="Search companies..." value="'+(FILTER.search.replace(/"/g,'&quot;'))+'" oninput="setSearchFilter(this.value)"></span>'+
+    sel('cohort','Cohort',[['all','All'],['managed','Managed'],['pooled','Scaled / Pooled']],FILTER.cohort)+
+    sel('segment','Segment',segOpts,FILTER.segment)+
+    sel('owner','Owner',ownOpts,FILTER.owner)+
+    sel('health','Health',[['all','All'],['red','At risk'],['amber','Watch'],['green','Healthy']],FILTER.health)+
+    sel('lifecycle','Lifecycle',[['active','Active'],['churned','Churned'],['all','All']],FILTER.lifecycle)+
+    '<span class="gf-count">'+n+' of '+total+'</span>'+
+    (FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||FILTER.search?'<button class="gf-clear" onclick="clearFilter()">Clear</button>':'')+
+  '</div>';
+}
+function _refreshFilterMount(){const gfm=document.getElementById('globalFilterMount');if(gfm&&gfm.style.display!=='none')gfm.innerHTML=globalFilterBar();}
+function setSearchFilter(v){FILTER.search=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}
+  // Re-render the view body only (not the mount) so the search box keeps focus; update the count label in place.
+  render(_currentView);
+  const c=document.querySelector('#globalFilterMount .gf-count');if(c)c.textContent=filteredAccounts().length+' of '+((DATA&&DATA.accounts||[]).length);}
+function setFilter(k,v){FILTER[k]=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
+function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
+try{const _sf=JSON.parse(sessionStorage.getItem('cs_filter')||'null');if(_sf)Object.assign(FILTER,_sf);}catch(e){}
+
 function go(v){
   // Agent Automation page is retired in favour of the docked Ask CS Agent.
   if(v==='agent'){toggleAgentDock(true);return;}
@@ -1033,6 +1096,15 @@ function go(v){
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   document.getElementById('title').textContent=meta[v][0];
   document.getElementById('crumb').textContent=meta[v][1];
+  _currentView=v;
+  // Global filter bar: show it (into the persistent mount) only on data views that
+  // read the portfolio; hide on structural pages (integrations, audit, data model...).
+  const filterViews=['dash','mydash','accounts','queue','protect','expand','use','scaled','pooled','leading','lagging','reviews','riskesc','expansions','objadopt','kpi','life'];
+  const gfm=document.getElementById('globalFilterMount');
+  if(gfm){
+    if(filterViews.includes(v)&&DATA&&DATA.accounts){ gfm.style.display=''; gfm.innerHTML=globalFilterBar(); }
+    else { gfm.style.display='none'; gfm.innerHTML=''; }
+  }
   // Persist the active view so a reload or shared link restores the same place.
   try{sessionStorage.setItem('cs_view',v);}catch(e){}
   if(('#'+v)!==location.hash) history.replaceState(null,'',('#'+v));
@@ -1077,14 +1149,14 @@ function ccTab(tab){
   document.querySelectorAll('#v-dash .cc-pane').forEach(p=>p.classList.remove('on'));
   const pane=document.getElementById('cc-pane-'+tab); if(pane)pane.classList.add('on');
   try{sessionStorage.setItem('cs_cc_tab',tab);}catch(e){}
-  if(tab==='companies'){ const host=document.getElementById('accounts-body-cc'); if(host&&DATA&&DATA.accounts) host.innerHTML=acctTable(DATA.accounts); }
+  if(tab==='companies'){ const host=document.getElementById('accounts-body-cc'); if(host&&DATA&&DATA.accounts) host.innerHTML=acctTable(filteredAccounts()); }
   else if(tab==='renewals'){ renderCcRenewals(); }
   window.scrollTo({top:0,behavior:'instant'});
 }
 // My Renewals tab — built from live accounts that carry a renewal date/forecast.
 function renderCcRenewals(){
   const host=document.getElementById('cc-pane-renewals'); if(!host||!DATA)return;
-  const rows=(DATA.accounts||[]).filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const rows=filteredAccounts().filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
   if(!rows.length){ host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">Upcoming renewals with the deterministic forecast</span></div><div class="body"><div class="empty">No accounts carry a renewal date in HubSpot yet.</div></div></div>'; return; }
   const body=rows.map(a=>{
     const fc=a.renewal_forecast;
@@ -1112,7 +1184,7 @@ function scaledTab(tab){
 // The Pool — scaled/low-touch accounts (low ARR), with a Growth Potential column (Planhat).
 function renderThePool(){
   const host=document.getElementById('sc-pane-pool'); if(!host||!DATA)return;
-  const pool=(DATA.accounts||[]).filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
+  const pool=filteredAccounts().filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
   const growth=a=>{
     const worth=(a.arr_usd||0)>=2000?'High Worth':'Low Worth';
     const pot=(a.health&&a.health.computable&&a.health.score>=70)?'High Potential':'Low Potential';
@@ -1142,7 +1214,7 @@ function renderThePool(){
 // Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
 function renderPooledDashboard(){
   const host=document.getElementById('sc-pane-dashboard'); if(!host||!DATA)return;
-  const pool=(DATA.accounts||[]).filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
+  const pool=filteredAccounts().filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
   const totalArr=pool.reduce((s,a)=>s+(a.arr_usd||0),0);
   const phases={};pool.forEach(a=>{const p=a.lifecycle_stage||'Unknown';phases[p]=(phases[p]||0)+1;});
   const maxP=Math.max(1,...Object.values(phases));
@@ -1166,15 +1238,15 @@ function myDashTab(tab){
   window.scrollTo({top:0,behavior:'instant'});
 }
 function _mdFilterBar(count){
-  return '<div class="filterbar"><span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Find in view..."></span>'+
-    '<span class="fpill ghost">Company</span><span class="fpill ghost">Company Owner</span><span class="fpill ghost">+ Filter</span>'+
-    (count!=null?'<span class="fb-count">'+count+'</span>':'')+'</div>';
+  // The global filter now lives in the persistent #globalFilterMount (rendered by
+  // go()), so per-page bars return empty to avoid duplicate bars.
+  return '';
 }
 function _widget(title,inner,cls){return '<div class="mdw '+(cls||'')+'"><div class="mdw-h">'+title+'</div><div class="mdw-b">'+inner+'</div></div>';}
 function _widgetBig(title,value,cls){return _widget(title,'<div class="mdw-big '+(cls||'')+'">'+value+'</div>');}
 function renderMyDashboard(){
   const host=document.getElementById('md-pane-dashboard'); if(!host||!DATA)return;
-  const accts=DATA.accounts||[], tasks=DATA.tasks||[];
+  const accts=filteredAccounts(), tasks=DATA.tasks||[];
   const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowPct=totalArr?Math.round((lowArr/totalArr)*100):0;
@@ -1221,7 +1293,7 @@ function renderMyDashboard(){
 }
 function renderMyPortfolio(){
   const host=document.getElementById('md-pane-portfolio'); if(!host||!DATA)return;
-  const accts=DATA.accounts||[];
+  const accts=filteredAccounts();
   const body=accts.map(a=>{
     const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
     const lastSeen=(a.usage_days_since_visit!=null)?(a.usage_days_since_visit===0?'today':a.usage_days_since_visit+'d ago'):'<span class="muted">no data</span>';
@@ -1258,10 +1330,10 @@ function renderMyWorkflows(){
 function renderMyRenewals(){
   const host=document.getElementById('md-pane-renewals'); if(!host||!DATA)return;
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const counts={};(DATA.accounts||[]).forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
+  const counts={};filteredAccounts().forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
   const maxM=Math.max(1,...Object.values(counts),1);
   const cal=months.map((m,i)=>'<div class="ren-mo"><div class="ren-bar-wrap"><div class="ren-bar" style="height:'+Math.round(((counts[i]||0)/maxM)*100)+'%"></div></div><div class="ren-n">'+(counts[i]||0)+'</div><div class="ren-m">'+m+'</div></div>').join('');
-  const withDates=(DATA.accounts||[]).filter(a=>a.renewal_date);
+  const withDates=filteredAccounts().filter(a=>a.renewal_date);
   const rows=withDates.length?withDates.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
     const fc=a.renewal_forecast,label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set in HubSpot.</td></tr>';
@@ -1282,7 +1354,7 @@ function leadingTab(tab){
   window.scrollTo({top:0,behavior:'instant'});
 }
 function _healthBuckets(){
-  const accts=DATA.accounts||[]; let atRisk=0,unc=0,healthy=0,arrRisk=0,arrUnc=0,arrHealthy=0;
+  const accts=filteredAccounts(); let atRisk=0,unc=0,healthy=0,arrRisk=0,arrUnc=0,arrHealthy=0;
   accts.forEach(a=>{const b=a.health&&a.health.band,arr=a.arr_usd||0;
     if(b==='red'){atRisk++;arrRisk+=arr;}else if(b==='amber'){unc++;arrUnc+=arr;}else if(b==='green'){healthy++;arrHealthy+=arr;}});
   return {atRisk,unc,healthy,arrRisk,arrUnc,arrHealthy};
@@ -1306,7 +1378,7 @@ function renderPortfolioHealth(){
   const maxC=Math.max(1,b.atRisk,b.unc,b.healthy);
   const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   // Average health by segment — computed live.
-  const segMap={};(DATA.accounts||[]).forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
+  const segMap={};filteredAccounts().forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
   const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=70?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
   const grid='<div class="mdw-grid">'+
     _widget('% ARR by health',pctBar)+
@@ -1318,10 +1390,10 @@ function renderPortfolioHealth(){
 function renderLeadUpsale(){
   const host=document.getElementById('li-pane-upsale'); if(!host||!DATA)return;
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const counts={};(DATA.accounts||[]).forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
+  const counts={};filteredAccounts().forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
   const maxM=Math.max(1,...Object.values(counts),1);
   const cal=months.map((m,i)=>'<div class="ren-mo"><div class="ren-bar-wrap"><div class="ren-bar" style="height:'+Math.round(((counts[i]||0)/maxM)*100)+'%"></div></div><div class="ren-n">'+(counts[i]||0)+'</div><div class="ren-m">'+m+'</div></div>').join('');
-  const withDates=(DATA.accounts||[]).filter(a=>a.renewal_date);
+  const withDates=filteredAccounts().filter(a=>a.renewal_date);
   const rows=withDates.length?withDates.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
     const fc=a.renewal_forecast,label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set.</td></tr>';
@@ -1333,7 +1405,7 @@ function renderLagging(){
   host.innerHTML='<div class="panel"><div class="head"><h2>Lagging Indicators</h2><span class="note">Realised retention and revenue outcomes · loading</span></div><div class="body pad"><span class="muted">Loading…</span></div></div>';
   (async()=>{
     let e={}; try{e=await (await api('/api/executive')).json();}catch(_){}
-    const accts=DATA.accounts||[];
+    const accts=filteredAccounts();
     const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
     const atRiskArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
     const churned=(e.churned_customers!=null)?e.churned_customers:accts.filter(a=>(a.lifecycle_stage||'').indexOf('Churn')>=0).length;
@@ -1358,7 +1430,7 @@ function renderLagging(){
 }
 function renderReviews(){
   const host=document.getElementById('reviews-body'); if(!host||!DATA)return;
-  const accts=(DATA.accounts||[]).slice().sort((x,y)=>((x.health&&x.health.score)||999)-((y.health&&y.health.score)||999));
+  const accts=filteredAccounts().slice().sort((x,y)=>((x.health&&x.health.score)||999)-((y.health&&y.health.score)||999));
   const body=accts.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td><td><span class="pill pln">Not scheduled</span></td></tr>';}).join('');
   host.innerHTML='<div class="panel"><div class="head"><h2>Portfolio Reviews</h2><span class="note">Structured review cadence · worst health first</span></div>'+_mdFilterBar(accts.length+' companies')+
@@ -1389,7 +1461,7 @@ function renderCalendar(){
     return '<div class="cal-col'+(i===todayIdx?' cal-today':'')+'"><div class="cal-dh"><span class="cal-dow">'+d+'</span><span class="cal-date">'+dt.getDate()+(i===todayIdx?' · Today':'')+'</span><span class="cal-n">'+byDay[k].length+'</span></div><div class="cal-body">'+(items||'<div class="cal-empty">No tasks</div>')+'</div></div>';
   }).join('');
   const monthLabel=now.toLocaleDateString(undefined,{month:'long',year:'numeric'});
-  const companyOpts=(DATA.accounts||[]).map(a=>'<option value="'+escapeHtml(a.name||a.account_id)+'">').join('');
+  const companyOpts=filteredAccounts().map(a=>'<option value="'+escapeHtml(a.name||a.account_id)+'">').join('');
   host.innerHTML='<div class="cal-toolbar">'+
     '<div class="cal-title">'+monthLabel+' <span class="cal-count">'+total+' tasks</span></div>'+
     '<div class="cal-filters"><span class="fpill ghost">Task Owner: Current</span><span class="fpill ghost">Status</span><span class="fpill ghost">Part of Workflow</span>'+
@@ -1477,7 +1549,7 @@ const DATA_MODEL={
 const DM_SRC_KEY={'HubSpot':'hubspot','Zendesk':'zendesk','Pendo':'usage','Stripe':'stripe','Churn Model':'churn','Platform (computed)':'platform'};
 const DM_ORDER=['HubSpot','Zendesk','Pendo','Stripe','Churn Model','Platform (computed)'];
 function _dmSrcCoverage(modelName){
-  const key=DM_SRC_KEY[modelName]; const a=(DATA&&DATA.accounts)||[];
+  const key=DM_SRC_KEY[modelName]; const a=filteredAccounts();
   if(key==='platform')return {live:a.length,total:a.length};
   return {live:a.filter(x=>x.connected&&x.connected[key]).length,total:a.length};
 }
@@ -1520,7 +1592,7 @@ let _deQuery='';
 function _deAllFields(){const m={};Object.values(DE_FIELDS).forEach(g=>g.forEach(f=>m[f[0]]=f[1]));return m;}
 function renderDataExplorer(){
   const host=document.getElementById('dataexplorer-body'); if(!host)return;
-  const accts=(DATA&&DATA.accounts)||[];
+  const accts=filteredAccounts();
   const groups=Object.keys(DE_FIELDS);
   const list='<div class="de-fields"><div class="de-fh"><span class="fb-ico">⌕</span><input type="text" placeholder="Search fields..." value="'+escapeHtml(_deQuery)+'" oninput="deFieldFilter(this.value)"></div>'+
     groups.map(function(g){return '<div class="de-fgroup">'+escapeHtml(g)+'</div>'+DE_FIELDS[g].filter(function(f){return !_deQuery||f[0].toLowerCase().includes(_deQuery);}).map(function(f){const on=_deCols.includes(f[0]);return '<label class="de-field'+(on?' on':'')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="deToggleCol(\''+f[0].replace(/'/g,"")+'\')"> '+escapeHtml(f[0])+'</label>';}).join('')}).join('')+'</div>';
@@ -1551,7 +1623,7 @@ function renderRiskHealth(){
   // Reuse the Portfolio Health layout so risk leaders see the same health cohorts.
   const host=document.getElementById('re-pane-health'); if(!host||!DATA)return;
   const b=_healthBuckets();
-  const churnFc=(DATA.accounts||[]).filter(a=>{const fc=a.renewal_forecast;return fc&&fc.applicable&&fc.label==='Churn Risk';}).length;
+  const churnFc=filteredAccounts().filter(a=>{const fc=a.renewal_forecast;return fc&&fc.applicable&&fc.label==='Churn Risk';}).length;
   const tiles='<div class="mdw-grid" style="margin-bottom:16px">'+
     _widgetBig('At Risk',b.atRisk,b.atRisk>0?'warn':'')+_widgetBig('Uncertain',b.unc)+_widgetBig('Healthy',b.healthy,'good')+
     _widgetBig('At Risk ARR',fmt(b.arrRisk),b.arrRisk>0?'warn':'')+_widgetBig('Healthy ARR',fmt(b.arrHealthy),'good')+_widgetBig('Forecast to churn',churnFc,churnFc>0?'warn':'good')+'</div>';
@@ -1562,7 +1634,7 @@ function renderRiskHealth(){
 // Risk Mitigation Strategy — companies with Health under 6 (score < 60), worst first.
 function renderRiskMitigation(){
   const host=document.getElementById('re-pane-mitigation'); if(!host||!DATA)return;
-  const at=(DATA.accounts||[]).filter(a=>a.health&&a.health.computable&&a.health.score<60).sort((x,y)=>x.health.score-y.health.score);
+  const at=filteredAccounts().filter(a=>a.health&&a.health.computable&&a.health.score<60).sort((x,y)=>x.health.score-y.health.score);
   const body=at.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
     const drivers=(a.health.reasons||[]).slice(0,2).join('; ');
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted" style="font-size:.85em">'+escapeHtml(drivers||'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td></tr>';}).join('');
@@ -1582,7 +1654,7 @@ function expTab(tab){
 function renderExpWhitespace(){
   const host=document.getElementById('ex-pane-whitespace'); if(!host||!DATA)return;
   // Whitespace = healthy accounts with headroom (real: green band, ARR > 0).
-  const ws=(DATA.accounts||[]).filter(a=>a.health&&a.health.band==='green'&&(a.arr_usd||0)>0).sort((x,y)=>(y.arr_usd||0)-(x.arr_usd||0));
+  const ws=filteredAccounts().filter(a=>a.health&&a.health.band==='green'&&(a.arr_usd||0)>0).sort((x,y)=>(y.arr_usd||0)-(x.arr_usd||0));
   const body=ws.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+fmt(a.arr_usd)+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td><span class="gp gp-high">Expansion candidate</span></td></tr>';}).join('');
   host.innerHTML='<div class="panel"><div class="head"><h2>White Spacing</h2><span class="note">'+ws.length+' healthy companies with expansion headroom</span></div>'+
@@ -1603,7 +1675,7 @@ function objAdoptTab(tab){
 // Product Adoption — REAL: this is data we have per account.
 function renderProdAdoption(){
   const host=document.getElementById('oa-pane-adoption'); if(!host||!DATA)return;
-  const accts=DATA.accounts||[];
+  const accts=filteredAccounts();
   // Adoption proxy from health + usage recency (live). Rank best/worst.
   const withUsage=accts.filter(a=>a.connected&&a.connected.usage);
   const scored=withUsage.map(a=>{const dsv=a.usage_days_since_visit;const score=(a.health&&a.health.computable)?a.health.score:null;return {a,dsv,score};});
@@ -1646,7 +1718,7 @@ function pooledSub(tab){
   window.scrollTo({top:0,behavior:'instant'});
 }
 function _pooledAccts(){
-  const accts=DATA.accounts||[];
+  const accts=filteredAccounts();
   if(accts.some(a=>a.pooled!==undefined)) return accts.filter(a=>a.pooled);
   const POOL=['Agency 1-2 Users','Agency 3-20 Users','Corporate'];
   return accts.filter(a=>POOL.includes(a.segment));
@@ -1754,7 +1826,7 @@ function renderPooledNrrQuarter(){
 }
 function renderAdoptInsights(){
   const host=document.getElementById('oa-pane-insights'); if(!host||!DATA)return;
-  const accts=(DATA.accounts||[]).filter(a=>a.connected&&a.connected.usage&&a.usage_days_since_visit!=null);
+  const accts=filteredAccounts().filter(a=>a.connected&&a.connected.usage&&a.usage_days_since_visit!=null);
   let a0=0,a1=0,a2=0;accts.forEach(a=>{const d=a.usage_days_since_visit;if(d<=14)a0++;else if(d<=28)a1++;else a2++;});
   const maxU=Math.max(1,a0,a1,a2);
   const bars='<div class="cc-dist" style="height:130px">'+[['Active (\u226414d)',a0,'var(--green)'],['Cooling (15-28d)',a1,'var(--amber)'],['Idle (>28d)',a2,'var(--red)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxU)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
@@ -1904,13 +1976,10 @@ function sparkline(values){
     +'<circle cx="'+lastPt[0]+'" cy="'+lastPt[1]+'" r="3" fill="'+col+'"/></svg>';
 }
 function renderScopeBar(sm){
+  // Scope banner removed per request. Keep the element hidden so layout is unaffected.
   const el=document.getElementById('scopebar'); if(!el)return;
-  const csm=sm.account_scope==='csm';
-  const owner=sm.scope_owner||(window.CS_PRINCIPAL&&(window.CS_PRINCIPAL.name||window.CS_PRINCIPAL.email))||'you';
-  el.style.display='';
-  el.innerHTML=csm
-    ? '<span class="sc-ico">CS</span><span class="sc-txt"><b>Your book · '+sm.accounts+' account'+(sm.accounts===1?'':'s')+'</b><span>Scoped to accounts you own ('+owner+'). Health, tasks and revenue below reflect your portfolio only.</span></span><span class="sc-tag csm">CSM view</span>'
-    : '<span class="sc-ico">CS</span><span class="sc-txt"><b>All accounts · '+sm.accounts+' in portfolio</b><span>Full-portfolio view across every CSM book. You are seeing organisation-wide health, tasks and revenue.</span></span><span class="sc-tag">Admin view</span>';
+  el.style.display='none';
+  el.innerHTML='';
 }
 function renderCharts(portfolio,kpis,rm){
   const wrap=document.getElementById('dash-charts'); if(!wrap)return;
@@ -2128,7 +2197,7 @@ function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.t
 // and Upcoming Renewals — all from live signals; honest "not connected" otherwise.
 async function renderCommandCenter(){
   const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
-  const tasks=DATA.tasks||[], accts=DATA.accounts||[];
+  const tasks=DATA.tasks||[], accts=filteredAccounts();
   const openRisks=tasks.filter(t=>t.mandate==='MUST_PROTECT').length;
   let exec={}; try{exec=await (await api('/api/executive')).json();}catch(_){}
   // Upcoming QBRs: Strategic accounts in the proactive renewal cadence window.
@@ -2239,7 +2308,7 @@ function render(v){
     loadExpansionOpportunities();
   }
   if(v==='use'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
-  if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+  if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
   if(v==='scaled') scaledTab(_scaledTab||'pool');
   if(v==='mydash') myDashTab(_myDashTab||'dashboard');
   if(v==='leading') leadingTab(_leadingTab||'health');
@@ -2299,13 +2368,13 @@ let _acctFilter={q:'',band:null};
 function acctSetSort(key){
   if(_acctSort.key===key){_acctSort.dir=_acctSort.dir==='asc'?'desc':'asc';}
   else{_acctSort.key=key;_acctSort.dir=(key==='name'||key==='segment'||key==='owner'||key==='phase')?'asc':'desc';}
-  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
 }
 function acctSetFilter(q){_acctFilter.q=q;_acctRefreshTable();}
 function acctToggleBand(b){_acctFilter.band=(_acctFilter.band===b)?null:b;_acctRefreshTable();}
 function _acctRefreshTable(){
   const host=document.getElementById('acct-table-host');
-  if(host){host.innerHTML=_acctTableInner(DATA.accounts);}
+  if(host){host.innerHTML=_acctTableInner(filteredAccounts());}
 }
 // CSM score as a Planhat 5-dot rating, derived transparently from the live health band/score.
 function csmDots(a){
@@ -2347,7 +2416,7 @@ function globalSearchInput(q){
   const box=document.getElementById('globalSearchResults');
   q=(q||'').trim().toLowerCase();
   if(!q){box.classList.remove('on');box.innerHTML='';_gsMatches=[];_gsSel=-1;return;}
-  const accts=(DATA&&DATA.accounts)||[];
+  const accts=filteredAccounts();
   _gsMatches=accts.filter(a=>{
     const n=(a.name||'').toLowerCase(),id=(a.account_id||'').toLowerCase(),seg=(a.segment||'').toLowerCase(),own=(a.csm_owner||'').toLowerCase();
     return n.includes(q)||id.includes(q)||seg.includes(q)||own.includes(q);
@@ -2410,7 +2479,7 @@ function acctSetView(v){
   else if(v==='healthy')_acctFilter.band='green';
   else _acctFilter.band=null;
   if(v==='renew'){_acctSort={key:'renews',dir:'asc'};}
-  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(DATA.accounts)+acctTable(DATA.accounts);
+  document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
 }
 function _acctTableInner(rows){
   const NC='<span class="nc">not connected</span>';
