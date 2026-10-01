@@ -1406,7 +1406,7 @@ function renderMyDashboard(){
     const cmax=Math.max(1,...Object.values(cb)),cols={'Promoters (≥90)':'var(--green)','Passives (75-89)':'var(--amber)','Detractors (<75)':'var(--red)'};
     wCsat='<div class="cc-dist" style="height:130px">'+Object.entries(cb).map(([k,v])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+v+'</span><div class="cc-distbar" style="height:'+Math.round((v/cmax)*100)+'%;background:'+cols[k]+'"></div></div><div class="cc-distlbl">'+k+'</div></div>').join('')+'</div>';
   }else{
-    wCsat='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">CSAT (Zendesk) stands in for NPS — there is no NPS survey source connected.</div>';
+    wCsat='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">CSAT (Zendesk) stands in for NPS. There is no NPS survey source connected.</div>';
   }
   // (G) QBRs due — Strategic accounts entering the renewal cadence window (honest substitute
   // for "Overdue QBRs"; there is no QBR scheduling source, so we cannot show "overdue").
@@ -1871,7 +1871,7 @@ function renderRiskMitigation(){
     const stage=a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-';
     const churnMark=a.churned?' <span class="pill r" style="font-size:.72em">churned</span>':'';
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+' '+bandPill(a.health.band)+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong>'+churnMark+'</td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+stage+'</td><td class="muted" style="font-size:.85em">'+drivers+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td></tr>';}).join('');
-  const emptyMsg=_rmChurned?'No at-risk companies in this view.':'No saveable at-risk companies — your live book is healthy.';
+  const emptyMsg=_rmChurned?'No at-risk companies in this view.':'No saveable at-risk companies. Your live book is healthy.';
   const subtitle=shown.length+' '+(_rmChurned?'at-risk companies (incl. churned)':'saveable at-risk companies')+' · '+(_rmBand==='risk'?'red band only':'red + amber bands');
   host.innerHTML='<div class="panel"><div class="head"><h2>Risk Mitigation Strategy</h2><span class="note">'+subtitle+'</span></div>'+
     tiles+controls+
@@ -2311,10 +2311,10 @@ function renderRevChange(rm){
   const win=rc.window_days?(' Last '+Math.round(rc.window_days/30)+' months.'):'';
   const upsell=rc.upsell_computable
     ? card('Upsells (booked)',(rc.upsell_count||0)+' deals',(rc.upsell_partial?'Top deals total ':'Total ')+fmt(rc.upsell_arr_usd)+' expansion ARR.'+win,'ok','openRevDetail(\'upsell\')')
-    : card('Upsells (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
+    : card('Upsells (booked)','-','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
   const downgrade=rc.downgrade_computable
     ? card('Churn (booked)',(rc.churn_count||0)+' deals',(rc.churn_partial?'Top deals total ':'Total ')+fmt(rc.churn_deal_arr_usd)+' churned ARR.'+win,'warn','openRevDetail(\'churn\')')
-    : card('Churn (booked)','—','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
+    : card('Churn (booked)','-','Awaiting '+escapeHtml(rc.needs)+'. No figure is invented.','await');
   const churnedCount=(rm.churned_detail||[]).length;
   const churnedCard=churnedCount
     ? card('Churned accounts',churnedCount+' accounts',fmt((rm.churned_detail||[]).reduce((s,r)=>s+(r.arr_usd||0),0))+' last-known ARR. Click to review each.','warn','openRevDetail(\'churned\')')
@@ -2350,17 +2350,17 @@ function openRevDetail(kind){
   d.scrollTop=0;
   d.classList.add('on');document.getElementById('scrim').classList.add('on');
 }
-function fmtDate(s){if(!s)return '<span class="muted">—</span>';return escapeHtml(String(s).slice(0,10));}
+function fmtDate(s){if(!s)return '<span class="muted">-</span>';return escapeHtml(String(s).slice(0,10));}
 function dealsTable(deals){
   if(!deals||!deals.length) return '<div class="empty">No deals in this window.</div>';
   return '<div class="deal-cards">'+deals.map(d=>
     '<div class="deal-card">'
     +'<div class="dc-top"><span class="dc-name">'+escapeHtml(d.name||'Unnamed')+'</span>'
-    +'<span class="dc-arr">'+(d.arr_usd?fmt(d.arr_usd):'—')+'</span></div>'
+    +'<span class="dc-arr">'+(d.arr_usd?fmt(d.arr_usd):'-')+'</span></div>'
     +'<div class="dc-grid">'
-    +'<div><span>MRR</span><b>'+(d.mrr_usd?fmt(d.mrr_usd):'—')+'</b></div>'
-    +'<div><span>Term</span><b>'+(d.term_months?escapeHtml(d.term_months)+' mo':'—')+'</b></div>'
-    +'<div><span>Type</span><b>'+(d.signup_type?escapeHtml(d.signup_type):'—')+'</b></div>'
+    +'<div><span>MRR</span><b>'+(d.mrr_usd?fmt(d.mrr_usd):'-')+'</b></div>'
+    +'<div><span>Term</span><b>'+(d.term_months?escapeHtml(d.term_months)+' mo':'-')+'</b></div>'
+    +'<div><span>Type</span><b>'+(d.signup_type?escapeHtml(d.signup_type):'-')+'</b></div>'
     +'<div><span>Created</span><b>'+fmtDate(d.created)+'</b></div>'
     +'<div><span>Start</span><b>'+fmtDate(d.start)+'</b></div>'
     +'</div></div>').join('')+'</div>';
@@ -2381,8 +2381,8 @@ function churnedListHtml(rm){
       +'<div class="cc2-grid">'
       +'<div><span>ARR</span><b>'+arr+'</b></div>'
       +'<div><span>Lifecycle</span><b>'+escapeHtml(r.lifecycle_stage||'unknown')+'</b></div>'
-      +'<div><span>Last visit</span><b>'+(r.days_since_visit!=null?r.days_since_visit+'d ago':'—')+'</b></div>'
-      +'<div><span>Renewal</span><b>'+(r.renewal_date?escapeHtml(r.renewal_date):'—')+'</b></div>'
+      +'<div><span>Last visit</span><b>'+(r.days_since_visit!=null?r.days_since_visit+'d ago':'-')+'</b></div>'
+      +'<div><span>Renewal</span><b>'+(r.renewal_date?escapeHtml(r.renewal_date):'-')+'</b></div>'
       +'</div>'+(r.account_id?'<div class="cc2-open">Open full account ›</div>':'')+'</div>';
   }).join('')+'</div>';
 }
@@ -2494,7 +2494,7 @@ async function renderCommandCenter(){
     });
   });
   if(!meetingsBody) meetingsBody='<tr><td colspan="4" class="empty" style="padding:20px">No meetings to prepare right now.</td></tr>';
-  const meetingsPanel='<div class="panel"><div class="head"><h2>Upcoming Meetings - Preparation</h2></div>'+
+  const meetingsPanel='<div class="panel"><div class="head"><h2>Meeting Preparation</h2><span class="note">Upcoming calls and reviews to prepare for</span></div>'+
     '<div class="body"><table class="mtg-table"><thead><tr><th>Company</th><th>Due Date</th><th>Action</th><th>Involved Contacts</th></tr></thead><tbody>'+meetingsBody+'</tbody></table></div></div>';
   // Company Distribution by Health — bars sized by ARR in each band (Low/Medium/High),
   // PLUS an honest "Not scored" bucket for whole-book roster accounts that have no live
@@ -2519,6 +2519,42 @@ async function renderCommandCenter(){
   const maxSeg=Math.max(1,...segs.map(s=>s.arr_usd));
   const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
   const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+growthBars+'</div></div></div>';
+  // Renewals by Month — live ARR up for renewal across the next 12 months (from HubSpot
+  // renewal_date + ARR). Fills the lower-left space with something a CSM acts on, and the
+  // overdue bucket is called out so past-due revenue is not hidden.
+  const _rbmAsOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+  const _rbmDays=d=>d?Math.round((new Date(d+(String(d).length<=10?'T00:00:00':''))-_rbmAsOf)/86400000):null;
+  const moLabels=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const moArr=new Array(12).fill(0); let overdueArr12=0;
+  accts.forEach(a=>{
+    if(!a.renewal_date) return;
+    const dd=_rbmDays(a.renewal_date); const arr=a.arr_usd||0;
+    if(dd==null) return;
+    if(dd<0){ overdueArr12+=arr; return; }
+    if(dd<=365){ const m=new Date(a.renewal_date+(String(a.renewal_date).length<=10?'T00:00:00':'')).getMonth(); if(!isNaN(m)) moArr[m]+=arr; }
+  });
+  const maxMo=Math.max(1,overdueArr12,...moArr);
+  let rbmCols=overdueArr12>0?('<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(overdueArr12)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((overdueArr12/maxMo)*100))+'%;background:var(--red)"></div></div><div class="cc-distlbl">Overdue</div></div>'):'';
+  rbmCols+=moArr.map((v,i)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+(v>0?mfmt(v):'')+'</span><div class="cc-distbar" style="height:'+Math.max(2,Math.round((v/maxMo)*100))+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+moLabels[i]+'</div></div>').join('');
+  const anyRen=overdueArr12>0||moArr.some(v=>v>0);
+  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">ARR up for renewal, next 12 months</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+
+    (anyRen?rbmCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
+  // Renewal Forecast — the deterministic forecast split across dated accounts, so the
+  // headline risk/expansion mix is visible next to the raw renewal table below. Live only.
+  let fcRen=0,fcChurn=0,fcExp=0,fcNone=0, fcRenArr=0,fcChurnArr=0,fcExpArr=0;
+  accts.forEach(a=>{
+    if(!a.renewal_date) return;
+    const fc=a.renewal_forecast; const lbl=(fc&&fc.applicable&&fc.label)?fc.label:null; const arr=a.arr_usd||0;
+    if(lbl==='Churn Risk'){fcChurn++;fcChurnArr+=arr;}
+    else if(lbl==='Expansion'){fcExp++;fcExpArr+=arr;}
+    else if(lbl==='Renewal'){fcRen++;fcRenArr+=arr;}
+    else fcNone++;
+  });
+  const maxFc=Math.max(1,fcRen,fcChurn,fcExp,fcNone);
+  const fcCol=(lbl,n,arr,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+(arr>0?mfmt(arr):n)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((n/maxFc)*100))+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n.toLocaleString()+' accts</span></div></div>';
+  const anyFc=(fcRen+fcChurn+fcExp+fcNone)>0;
+  const forecastMix='<div class="panel"><div class="head"><h2>Renewal Forecast</h2><span class="note">Deterministic outcome mix</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+
+    (anyFc?(fcCol('Renewal',fcRen,fcRenArr,'var(--green)')+fcCol('Churn Risk',fcChurn,fcChurnArr,'var(--red)')+fcCol('Expansion',fcExp,fcExpArr,'var(--brand)')+(fcNone>0?fcCol('Unclassified',fcNone,0,'var(--muted,#8aa)'):'')):'<div class="empty" style="width:100%">No dated renewals to forecast yet.</div>')+'</div></div></div>';
   // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
   // Organised by urgency: OVERDUE line items (end date already passed, not churned) first and
   // flagged, then genuinely upcoming renewals in date order. In this book most dated renewals
@@ -2541,7 +2577,7 @@ async function renderCommandCenter(){
     const endCell=isOverdue
       ? '<td><span class="mono muted" title="'+escapeHtml(a.renewal_date)+'">'+escapeHtml(a.renewal_date)+'</span> <span class="pill r" style="font-size:.72em">'+Math.abs(dd)+'d overdue</span></td>'
       : '<td class="muted">'+escapeHtml(a.renewal_date)+(dd!=null?' <span class="muted" style="font-size:.8em">('+dd+'d)</span>':'')+'</td>';
-    const rationale=(fc&&fc.rationale)?escapeHtml(fc.rationale):(isOverdue?'Overdue — confirm commercial owner and renewal status':'Awaiting live renewal signals');
+    const rationale=(fc&&fc.rationale)?escapeHtml(fc.rationale):(isOverdue?'Overdue. Confirm the commercial owner and renewal status.':'Awaiting live renewal signals');
     return '<tr class="click'+(isOverdue?' ren-overdue':'')+'" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml((a.name||a.account_id)+' subscription')+'</strong></td><td>'+escapeHtml(a.name||a.account_id)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'no data')+'</td>'+endCell+'<td class="mono">'+fcArr+'</td><td>'+forecast+'</td><td class="muted">'+rationale+'</td></tr>';
   };
   let renBody='';
@@ -2558,7 +2594,7 @@ async function renderCommandCenter(){
     '<div class="body">'+((overdueRen.length||upcomingRen.length)?('<table class="acct-list"><thead><tr><th>Name</th><th>Company</th><th>ARR</th><th>End Date</th><th>AI Forecast ARR</th><th>AI Forecast</th><th>AI Forecast Summary</th></tr></thead><tbody>'+renBody+'</tbody></table>'):'<div class="empty">No accounts carry a renewal date in HubSpot yet. Renewals appear here once a renewal date is set.</div>')+'</div></div>';
   host.innerHTML=
     '<div class="cc-grid">'+
-      '<div class="cc-left">'+headline+'<div class="cc-charts">'+dist+growth+'</div></div>'+
+      '<div class="cc-left">'+headline+'<div class="cc-charts">'+dist+growth+renByMonth+forecastMix+'</div></div>'+
       '<div class="cc-right">'+meetingsPanel+'</div>'+
     '</div>'+
     renewalsPanel;
@@ -2915,7 +2951,7 @@ function _acctTableInner(rows){
     const haveHs=hc||roster;
     const name=escapeHtml(a.name||a.account_id);
     const h=a.health;
-    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none" title="'+(roster?'Not scored yet — open to load live signals':'No computable health')+'">–</span>';
+    const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none" title="'+(roster?'Not scored yet. Open to load live signals.':'No computable health')+'">–</span>';
     const owner=haveHs?(a.csm_owner?escapeHtml(a.csm_owner):(roster&&a.csm_owner_id?ND:ND)):NC;
     const arr=haveHs?(a.arr_usd!=null?fmt(a.arr_usd):ND):NC;
     const phase=haveHs?(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):ND):NC;
@@ -2932,7 +2968,7 @@ function _acctTableInner(rows){
       '<td class="col-check"><input type="checkbox" onclick="event.stopPropagation()" aria-label="Select row"></td>'+
       '<td class="col-play"><span class="rowplay" title="Open">▷</span></td>'+
       '<td>'+circle+'</td>'+
-      '<td><strong>'+name+'</strong>'+(roster?' <span class="roster-badge" title="Whole-book roster row — open to load full live signals">roster</span>':'')+'<div class="sub">'+escapeHtml(a.segment||'')+'</div></td>'+
+      '<td><strong>'+name+'</strong>'+(roster?' <span class="roster-badge" title="Whole-book roster row. Open to load full live signals.">roster</span>':'')+'<div class="sub">'+escapeHtml(a.segment||'')+'</div></td>'+
       '<td class="muted">'+owner+'</td>'+
       '<td class="mono">'+arr+'</td>'+
       '<td>'+phase+'</td>'+
@@ -3125,8 +3161,8 @@ async function loadAudit(){
       return '<tr><td class="muted" style="white-space:nowrap">'+escapeHtml(String(e.ts||'').slice(0,19).replace('T',' '))+'</td>'
         +'<td><span class="pill '+(e.event==='agent_answer'?'expand':e.event==='hubspot_writeback'?'a':'g')+'">'+escapeHtml(evLabel[e.event]||e.event)+'</span></td>'
         +'<td>'+escapeHtml(a.name||a.email||a.role||'system')+'</td>'
-        +'<td>'+(detailStr||'<span class="muted">—</span>')+'</td>'
-        +'<td class="muted">'+(src||'—')+'</td></tr>';
+        +'<td>'+(detailStr||'<span class="muted">-</span>')+'</td>'
+        +'<td class="muted">'+(src||'-')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 async function loadPlaybook(){
@@ -3186,7 +3222,7 @@ function adSyncScope(){
   scope.textContent=roleTxt;
   const acctName=window.ACTIVE_ACCOUNT_NAME;
   if(window.ACTIVE_ACCOUNT_ID&&acctName){
-    ctx.style.display='';ctx.innerHTML='<span>◈</span> Context: '+escapeHtml(acctName)+' — answers focus on this account';
+    ctx.style.display='';ctx.innerHTML='<span>◈</span> Context: '+escapeHtml(acctName)+'. Answers focus on this account.';
   }else{ctx.style.display='none';}
 }
 function adGreet(){
