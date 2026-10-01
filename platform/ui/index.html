@@ -1214,9 +1214,12 @@ function go(v){
 // Restore the last view on load and keep back/forward in sync, without a page reload.
 function initialView(){
   const h=(location.hash||'').replace('#','');
-  if(h==='agent') return 'dash';
-  if(h&&meta[h]) return h;
-  try{const s=sessionStorage.getItem('cs_view'); if(s&&meta[s]&&s!=='agent') return s;}catch(e){}
+  // Deep links (shared URLs, a specific company) are always honoured.
+  if(h.indexOf('company/')===0) return 'dash'; // company deep-link handled after DATA loads
+  if(h&&meta[h]&&h!=='agent') return h;
+  // Otherwise - including every fresh login, which the SSO callback returns to "/" with no
+  // hash - everyone starts on the Command Center (My Command Center), per product decision.
+  // We intentionally do NOT restore the last-visited view from sessionStorage here.
   return 'dash';
 }
 window.addEventListener('hashchange',()=>{const h=(location.hash||'').replace('#','');if(h.indexOf('company/')===0&&DATA){openAccount(h.slice('company/'.length));return;}if(h&&meta[h]&&DATA) go(h);});
