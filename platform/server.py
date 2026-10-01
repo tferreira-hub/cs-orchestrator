@@ -186,6 +186,11 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
 .feat{margin-top:24px;display:flex;flex-direction:column;gap:11px}
 .feat .f{display:flex;gap:11px;align-items:flex-start;font-size:.85em;color:#b7c6e0}
 .feat .f svg{width:17px;height:17px;color:#60a5fa;flex:none;margin-top:1px}
+.jane{margin-top:22px;display:flex;gap:12px;align-items:flex-start;padding:14px 15px;border-radius:14px;background:linear-gradient(135deg,rgba(59,130,246,.14),rgba(139,92,246,.14));border:1px solid #2d3f66}
+.jane .av{width:38px;height:38px;border-radius:50%;flex:none;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.95em;box-shadow:0 6px 16px rgba(79,110,220,.4)}
+.jane .jt{font-size:.9em;color:#eaf0f8}.jane .jt b{color:#fff}
+.jane .jt .r{display:block;color:#9fb3d1;font-size:.86em;margin-top:3px;line-height:1.45}
+.jane .chip{display:inline-block;font-size:.64em;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#c7b8ff;background:rgba(139,92,246,.2);border:1px solid #4c3f80;border-radius:999px;padding:2px 7px;margin-left:6px;vertical-align:middle}
 .err{background:#3a1420;border:1px solid #7f1d2e;color:#fecdd6;border-radius:10px;padding:10px 12px;font-size:.82em;margin-bottom:20px}
 @media(max-width:900px){.hero{display:none}.side{flex:1;border-left:0}}
 </style></head>
@@ -275,6 +280,12 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
         <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg><div>One prioritised queue across your whole portfolio.</div></div>
         <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg><div>Churn risk and renewal cadence, surfaced early.</div></div>
         <div class=f><svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=12 cy=12 r=9/><path d="M12 7v5l3 2"/></svg><div>Drafted outreach ready, grounded in real signals.</div></div>
+      </div>
+      <div class=jane>
+        <div class=av>J</div>
+        <div class=jt><b>Meet Jane</b><span class=chip>AI</span>
+          <span class=r>Your Customer Success specialist. Ask her what the signals mean and the smartest next move, always grounded in real evidence.</span>
+        </div>
       </div>
     </div>
   </section>
