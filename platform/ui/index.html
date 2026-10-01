@@ -2733,21 +2733,28 @@ async function renderCommandCenter(){
 // short-lived Connected App "direct trust" JWT minted server-side for the signed-in CSM
 // (so no second Tableau login), and render <tableau-viz>. Honest, actionable empty-state
 // when the connected app has not been configured yet.
-const TABLEAU_EMBED_LIB='https://embedding.tableau.com/tableau.embedding.3.latest.min.js';
+const TABLEAU_EMBED_LIB='https://prod-apsoutheast-a.online.tableau.com/javascripts/api/tableau.embedding.3.latest.min.js';
 let _tableauLibPromise=null, _tableauState={views:[],active:0,cfg:null}, _tableauRefresh=null;
+// The Embedding API v3 library is served by the Tableau server/site host itself
+// (…/javascripts/api/tableau.embedding.3.latest.min.js), NOT a generic CDN domain.
+// Build it from the configured server_url so it works for Cloud and Server alike.
+function _tableauLibUrl(){
+  const base=((_tableauState.cfg&&_tableauState.cfg.server_url)||'').replace(/\/$/,'');
+  return base?base+'/javascripts/api/tableau.embedding.3.latest.min.js':TABLEAU_EMBED_LIB;
+}
 function _loadTableauLib(){
   // Load the ES-module web component once; resolve when <tableau-viz> is registered.
   if(_tableauLibPromise) return _tableauLibPromise;
   _tableauLibPromise=new Promise((resolve,reject)=>{
     if(window.customElements&&customElements.get('tableau-viz')) return resolve();
     const s=document.createElement('script');
-    s.type='module'; s.src=TABLEAU_EMBED_LIB;
+    s.type='module'; s.src=_tableauLibUrl();
     s.onload=()=>{
       // The component may register a tick after onload; wait for the definition.
       if(customElements.get('tableau-viz')) return resolve();
       customElements.whenDefined('tableau-viz').then(resolve).catch(resolve);
     };
-    s.onerror=()=>reject(new Error('Failed to load the Tableau Embedding library.'));
+    s.onerror=()=>{ _tableauLibPromise=null; reject(new Error('Failed to load the Tableau Embedding library from '+_tableauLibUrl()+'.')); };
     document.head.appendChild(s);
   });
   return _tableauLibPromise;
@@ -3261,7 +3268,7 @@ async function loadIntegrations(){
     const detail=c.detail?'<div class="intdetail '+(state==='config'?'cfg':'pend')+'">'+escapeHtml(c.detail)+'</div>':'';
     return '<div class="intcard"><div class="top"><div><h3>'+escapeHtml(c.system)+'</h3><div class="cat">'+escapeHtml(c.category)+'</div></div><span class="pill '+cls+'">'+escapeHtml(c.status)+'</span></div>'+
       '<div class="dirbadge">'+escapeHtml(access)+'</div>'+detail+
-      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+'<br><span class="muted">'+c.accounts_synced+' accounts synced</span></div></div>';
+      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+(c.accounts_synced!=null?'<br><span class="muted">'+c.accounts_synced+' accounts synced</span>':'')+'</div></div>';
   }).join('');
 }
 async function loadAudit(){

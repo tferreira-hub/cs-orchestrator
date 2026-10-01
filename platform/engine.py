@@ -1629,6 +1629,14 @@ def integrations() -> dict:
     Fixture mode reports 'connected (sample)'; swap adapters for live to flip to 'live'."""
     accounts = orchestrate.load_accounts()
     liveset = set(dataaccess.live_sources())
+    # Tableau is not a per-account data source; it is "connected (live)" when the
+    # embedding connected app is configured (server url + client id + secret id/value).
+    try:
+        import tableau as _tableau
+        if _tableau.is_configured():
+            liveset.add("Tableau")
+    except Exception:  # noqa: BLE001
+        pass
     # Count accounts actually carrying live data for each source.
     def synced(src_key):
         return sum(1 for a in accounts.values() if a.get("sources", {}).get(src_key) == "live")
@@ -1695,6 +1703,10 @@ def integrations() -> dict:
              "direction": "read-only", "access": "read-only",
              **status_for("Entitlements"), "accounts_synced": synced("entitlements"),
              "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
+            {"system": "Tableau", "category": "Analytics / Reporting", "direction": "embed (SSO)",
+             "access": "read-only", **status_for("Tableau"), "accounts_synced": None,
+             "pulls": ["embedded dashboards (Revenue, NDR, Billing, Stripe)"],
+             "pushes": ["signed-in CSM identity (Connected App JWT)"]},
         ]
     }
 
