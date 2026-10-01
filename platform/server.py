@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engine  # noqa: E402
 import auth  # noqa: E402
 import rbac  # noqa: E402
+import tableau  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"))
 from adapters import sources as _src  # noqa: E402
 
@@ -800,6 +801,34 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._send(200, b"<h1>CS Platform</h1><p>UI not found.</p>", "text/html")
                 return
+            # --- Tableau embedding (Connected App direct-trust SSO) --------- #
+            # Config describes which dashboards to embed and where; it never returns
+            # the connected-app secret. The JWT endpoint mints a short-lived embed
+            # token for the AUTHENTICATED principal only — the Tableau identity is
+            # the signed session's email, so a user cannot request a token for anyone
+            # else. Both sit behind the auth gate above.
+            if path == "/api/tableau/config":
+                self._json(200, tableau.config_status()); return
+            if path == "/api/tableau/jwt":
+                if not tableau.is_configured():
+                    self._json(503, {"error": "tableau_not_configured",
+                                     "missing": tableau.config_status()["missing"]}); return
+                username = (principal or {}).get("email") if principal else None
+                if auth.auth_required() and not username:
+                    self._json(401, {"error": "authentication required"}); return
+                # When auth is disabled (legacy/local open mode) allow an explicit
+                # override so the Reports page is still demonstrable; never a silent
+                # real identity.
+                username = username or os.environ.get("TABLEAU_DEV_USERNAME", "").strip()
+                if not username:
+                    self._json(400, {"error": "no_identity",
+                                     "detail": "No authenticated email to use as the Tableau user."}); return
+                try:
+                    self._json(200, tableau.mint_jwt(username))
+                except (RuntimeError, ValueError) as exc:
+                    self._json(500, {"error": "jwt_mint_failed", "detail": str(exc)})
+                return
+
             if path == "/api/portfolio":
                 self._json(200, engine.portfolio()); return
             if path == "/api/roster":

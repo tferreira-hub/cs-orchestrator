@@ -869,6 +869,13 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       </div>
     </div>
 
+    <div class="navsection collapsed" data-sec="reports">
+      <button class="ns-head" onclick="toggleSection('reports')"><span class="ns-ico ns-reports">▦</span><span>Reports</span><span class="ns-caret">▾</span></button>
+      <div class="nav">
+        <button data-v="reports" onclick="go('reports')" title="Tableau Reports"><span class="ico">▦</span> <span class="label">Tableau Reports</span></button>
+      </div>
+    </div>
+
     <div class="navsection collapsed" data-sec="mgmt">
       <button class="ns-head" onclick="toggleSection('mgmt')"><span class="ns-ico ns-mgmt">⚙</span><span>Management</span><span class="ns-caret">▾</span></button>
       <div class="nav">
@@ -969,6 +976,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="cc-tabs" id="pooled-leaftabs"></div>
         <div id="pooled-leafbody"></div>
       </section>
+      <section class="view" id="v-reports"><div id="reports-body"></div></section>
       <section class="view" id="v-agent">
         <div class="agent-studio"><div class="agent-chrome"><span class="agent-lights"><i></i><i></i><i></i></span><span class="agent-tab">cs-orchestrator</span><span class="agent-path">Agent Automation / live session</span></div><div class="agent-workspace"><div class="agent-editor"><div class="agent-editor-head"><strong>CS Agent</strong> portfolio conversation</div><div class="agent-editor-body"><div id="agentOut" class="agent-thread"><div class="agent-turn assistant"><div class="agent-avatar">CS</div><div class="agent-bubble"><span style="color:#b5c1d9">Ready. Ask about your live portfolio and I will return a judged, evidence-backed answer.</span></div></div></div></div><div class="agent-compose"><div class="agent-compose-box"><span class="agent-prefix">@cs-orchestrator</span><input id="agentQ" placeholder="Ask about your portfolio..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAgent();}"><button onclick="askAgent()">Send</button></div><div class="agent-compose-hint">Enter to send · live sources · human approval required</div></div></div><aside class="agent-rail"><h3>Session context</h3><div class="agent-rail-card"><b><span class="live-dot"></span>Live portfolio</b><span>25 accounts · current book</span></div><div class="agent-rail-card"><b>WoW judge</b><span>PASS · signed rules active</span></div><div class="agent-rail-card"><b>Model + Harness</b><span>Bedrock explains. Rules decide.</span></div><h3 style="margin-top:22px">Start with</h3><div class="agent-shortcuts"><button onclick="agentAsk('What are my top 3 actions today?')">Top actions</button><button onclick="agentAsk('Which account needs protection first?')">Protect first</button><button onclick="agentAsk('Which Strategic accounts are disengaged?')">Disengaged accounts</button><button onclick="agentAsk('Where are the expansion signals?')">Expansion signals</button></div></aside></div></div><div class="panel" style="margin-top:18px"><div class="head"><h2>Harness Feedback</h2><span class="note">Anonymous review signals used to improve rules and prompts</span></div><div class="body pad" id="agent-feedback-summary"><span class="muted">No feedback recorded yet.</span></div></div>
       </section>
@@ -1035,6 +1043,7 @@ const meta={
   expansions:['Expansions','Upsell pipeline and whitespace'],
   objadopt:['Objectives & Adoption','Customer objectives and product adoption'],
   pooled:['Pooled CS','Pooled 1-20 agency and Corporate accounts'],
+  reports:['Reports','Your Tableau dashboards, embedded live'],
   protect:['Must Protect','Defensive risk playbooks'],
   expand:['Must Expand','Renewals and expansion'],
   use:['Must Use','Adoption and hygiene'],
@@ -2560,6 +2569,102 @@ async function renderCommandCenter(){
   const brief=document.getElementById('daily-brief'); if(brief&&brief.closest('.panel')) brief.closest('.panel').style.display='none';
 }
 
+// ===== Reports — embedded Tableau dashboards (Embedding API v3 + Connected App SSO) =====
+// CS keeps Tableau as the source of truth and embeds the existing dashboards here rather
+// than replicating them. We load the official Embedding API v3 web component, fetch a
+// short-lived Connected App "direct trust" JWT minted server-side for the signed-in CSM
+// (so no second Tableau login), and render <tableau-viz>. Honest, actionable empty-state
+// when the connected app has not been configured yet.
+const TABLEAU_EMBED_LIB='https://embedding.tableau.com/tableau.embedding.3.latest.min.js';
+let _tableauLibPromise=null, _tableauState={views:[],active:0,cfg:null}, _tableauRefresh=null;
+function _loadTableauLib(){
+  // Load the ES-module web component once; resolve when <tableau-viz> is registered.
+  if(_tableauLibPromise) return _tableauLibPromise;
+  _tableauLibPromise=new Promise((resolve,reject)=>{
+    if(window.customElements&&customElements.get('tableau-viz')) return resolve();
+    const s=document.createElement('script');
+    s.type='module'; s.src=TABLEAU_EMBED_LIB;
+    s.onload=()=>{
+      // The component may register a tick after onload; wait for the definition.
+      if(customElements.get('tableau-viz')) return resolve();
+      customElements.whenDefined('tableau-viz').then(resolve).catch(resolve);
+    };
+    s.onerror=()=>reject(new Error('Failed to load the Tableau Embedding library.'));
+    document.head.appendChild(s);
+  });
+  return _tableauLibPromise;
+}
+async function _tableauToken(){
+  // Mint a fresh embed JWT for the signed-in principal. Short-lived; re-minted on refresh.
+  const r=await api('/api/tableau/jwt');
+  if(!r.ok){ let e={}; try{e=await r.json();}catch(_){} throw new Error(e.error||('jwt '+r.status)); }
+  return r.json();
+}
+function _tableauVizEl(cfg, view, token){
+  // Build the <tableau-viz> for one dashboard. The src is the full view URL on the
+  // Tableau site; token drives Connected App SSO. toolbar/hide-tabs kept conservative.
+  const base=cfg.server_url.replace(/\/$/,'');
+  const sitePart=cfg.site?('/t/'+encodeURIComponent(cfg.site)):'';
+  const src=base+sitePart+'/views/'+view.path;
+  const viz=document.createElement('tableau-viz');
+  viz.setAttribute('src',src);
+  viz.setAttribute('token',token);
+  viz.setAttribute('toolbar','bottom');
+  viz.setAttribute('hide-tabs','');
+  viz.style.width='100%'; viz.style.minHeight='720px'; viz.style.display='block';
+  return viz;
+}
+async function _tableauMount(){
+  const stage=document.getElementById('tableau-stage'); if(!stage) return;
+  const cfg=_tableauState.cfg, view=_tableauState.views[_tableauState.active];
+  if(!view){ stage.innerHTML='<div class="empty" style="padding:28px">No Tableau views are configured. Set TABLEAU_VIEWS (e.g. "CS Health=Workbook/View").</div>'; return; }
+  stage.innerHTML='<div class="muted" style="padding:20px">Loading '+escapeHtml(view.label)+'…</div>';
+  try{
+    await _loadTableauLib();
+    const tok=await _tableauToken();
+    stage.innerHTML='';
+    stage.appendChild(_tableauVizEl(cfg, view, tok.token));
+    // Re-mint and swap the token shortly before it expires so long sessions never drop.
+    if(_tableauRefresh) clearTimeout(_tableauRefresh);
+    const ttlMs=Math.max(30, (tok.exp - Math.floor(Date.now()/1000)) - 60)*1000;
+    _tableauRefresh=setTimeout(()=>{ if(_currentView==='reports') _tableauMount(); }, ttlMs);
+  }catch(err){
+    stage.innerHTML='<div class="empty" style="padding:28px">Could not load this dashboard: '+escapeHtml(err.message||String(err))+
+      '<div class="muted" style="margin-top:8px;font-size:.85em">Confirm the Connected App is enabled and this app\'s domain is on its allowlist.</div></div>';
+  }
+}
+function _tableauSelect(i){ _tableauState.active=i; _renderTableauChrome(); _tableauMount(); }
+function _renderTableauChrome(){
+  const host=document.getElementById('reports-body'); if(!host) return;
+  const cfg=_tableauState.cfg, views=_tableauState.views;
+  const tabs=views.length>1?('<div class="cc-tabs" style="margin-bottom:12px">'+
+    views.map((v,i)=>'<button class="cc-tab'+(i===_tableauState.active?' active':'')+'" onclick="_tableauSelect('+i+')">'+escapeHtml(v.label)+'</button>').join('')+'</div>'):'';
+  const siteNote=cfg.site?(' · site '+escapeHtml(cfg.site)):'';
+  host.innerHTML='<div class="panel"><div class="head"><h2>Tableau Reports</h2><span class="note">Embedded live from '+escapeHtml((cfg.server_url||'').replace(/^https?:\/\//,''))+siteNote+'</span></div>'+
+    '<div class="body pad">'+tabs+'<div id="tableau-stage"></div></div></div>';
+}
+function _tableauNotConfigured(cfg){
+  const host=document.getElementById('reports-body'); if(!host) return;
+  const missing=(cfg&&cfg.missing)||[];
+  const rows=missing.length?('<ul class="muted" style="margin:10px 0 0 18px;line-height:1.7">'+missing.map(m=>'<li><code>'+escapeHtml(m)+'</code></li>').join('')+'</ul>'):'';
+  host.innerHTML='<div class="panel"><div class="head"><h2>Tableau Reports</h2><span class="note">Not connected yet</span></div>'+
+    '<div class="body pad"><div class="callout">Tableau embedding is ready in the platform but needs the Connected App details from your Tableau admin to go live. '+
+    'Keep using your existing Tableau dashboards — once connected, they appear here with single sign-on (no second login).'+rows+
+    '<div class="muted" style="margin-top:14px;font-size:.86em">Create a <strong>Direct Trust Connected App</strong> in Tableau (Settings → Connected Apps), add this platform\'s domain to its allowlist, then set the variables above plus <code>TABLEAU_SERVER_URL</code>, <code>TABLEAU_SITE</code> and <code>TABLEAU_VIEWS</code>.</div>'+
+    '</div></div></div>';
+}
+async function renderTableauReports(){
+  const host=document.getElementById('reports-body'); if(!host) return;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading reports…</span></div></div>';
+  let cfg;
+  try{ cfg=await (await api('/api/tableau/config')).json(); }
+  catch(e){ host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load Tableau configuration.</div></div></div>'; return; }
+  _tableauState={views:(cfg.views||[]), active:0, cfg:cfg};
+  if(!cfg.configured){ _tableauNotConfigured(cfg); return; }
+  _renderTableauChrome();
+  _tableauMount();
+}
+
 function render(v){
   // Defensive: never attempt to render account/task data before the portfolio has
   // loaded. If a view is opened during boot, retry once DATA is ready.
@@ -2601,6 +2706,7 @@ function render(v){
   if(v==='expansions') expTab(_expTab||'whitespace');
   if(v==='objadopt') objAdoptTab(_objAdoptTab||'adoption');
   if(v==='pooled') pooledLeaf(_pooledLeaf||'process');
+  if(v==='reports') renderTableauReports();
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
   if(v==='agent') loadAgentFeedbackSummary();
