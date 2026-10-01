@@ -141,6 +141,8 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .src.live{background:var(--greenbg);color:var(--green)}
 .src.sample{background:var(--amberbg);color:var(--amber)}
 .nc{display:inline-block;font-size:.9em;font-weight:600;color:var(--muted);background:#f1f3f8;border:1px dashed #cbd2df;border-radius:6px;padding:1px 8px}
+/* Connector live, but this account has no record in that source — distinct from 'not connected' (off) and plain 'no data' (field empty). */
+.norec{display:inline-block;font-size:.85em;font-weight:500;color:var(--amber);background:var(--amberbg);border:1px solid #f0dcae;border-radius:6px;padding:1px 8px}
 /* Whole-book roster row: data loads on open. Honest, calm styling (not the dashed "not connected"). */
 .roster-cell{display:inline-block;font-size:.82em;color:var(--ink2);font-style:italic}
 .roster-badge{display:inline-block;font-size:.6em;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--brand);background:var(--brandsoft);border:1px solid var(--line);border-radius:5px;padding:1px 5px;vertical-align:middle;margin-left:4px}
@@ -1352,13 +1354,23 @@ function renderMyDashboard(){
   const ttrMax=Math.max(1,...Object.values(ttrB));
   const ttrHas=Object.values(ttrB).some(v=>v>0);
   const wTtr=ttrHas?'<div class="cc-dist" style="height:130px">'+Object.entries(ttrB).map(([k,v])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+v+'</span><div class="cc-distbar" style="height:'+Math.round((v/ttrMax)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+k+'</div></div>').join('')+'</div>':'<div class="empty">No renewal dates set in HubSpot for this selection.</div>';
-  // (D) Portfolio development — health trajectory from DATA.health_history when present.
+  // (D) Portfolio development — health trajectory from DATA.health_history. With 2+ daily
+  // snapshots we show the real trend; with exactly 1 we show today's baseline honestly
+  // (the data IS connected, there's just one point yet); with none we compute today's avg
+  // from the current scored accounts so the card is never a dead "not connected".
   let wDev;
   const hist=(DATA&&DATA.health_history)||null;
+  const _scored=accts.filter(a=>a.health&&a.health.computable);
+  const _liveAvg=_scored.length?Math.round(_scored.reduce((s,a)=>s+a.health.score,0)/_scored.length):null;
   if(hist&&hist.points&&hist.points.length>=2){
-    wDev=sparkline(hist.points.map(p=>p.avg_health))+'<div class="muted" style="font-size:.78em;margin-top:4px">Avg health '+hist.points[0].avg_health+' → '+hist.points[hist.points.length-1].avg_health+' over '+hist.points.length+' snapshots</div>';
+    const p0=hist.points[0].avg_health,p1=hist.points[hist.points.length-1].avg_health,delta=p1-p0;
+    wDev=sparkline(hist.points.map(p=>p.avg_health))+'<div class="muted" style="font-size:.78em;margin-top:4px">Avg health '+p0+' → '+p1+' ('+(delta>0?'+':'')+delta+') over '+hist.points.length+' snapshots</div>';
+  }else if(hist&&hist.points&&hist.points.length===1){
+    wDev='<div class="mdw-big">'+hist.points[0].avg_health+'</div><div class="muted" style="font-size:.78em;margin-top:4px">Baseline captured '+escapeHtml(hist.points[0].date)+' · trend builds as daily snapshots accumulate.</div>';
+  }else if(_liveAvg!=null){
+    wDev='<div class="mdw-big">'+_liveAvg+'</div><div class="muted" style="font-size:.78em;margin-top:4px">Today\u2019s average health across '+_scored.length+' scored accounts · daily snapshots build the trend line.</div>';
   }else{
-    wDev='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">Health trajectory appears once daily snapshots accumulate (.cs-health-history).</div>';
+    wDev='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">Health trajectory appears once accounts carry a computable health score.</div>';
   }
   // (E) Open expansion ARR — pipeline (computable) + honest not-connected for booked.
   const rc=(_rmCache&&_rmCache.revenue_change)||null;
@@ -3305,6 +3317,20 @@ function renderCompanyPage(id,d){
   const zd=d.signals.zendesk||{},us=d.signals.usage||{},ch=d.signals.churn||{},st=d.signals.stripe||{},jm=d.signals.jiminny||{};
   const NC='<span class="nc">not connected</span>', ND='<span class="muted">no data</span>';
   const nd=v=>v?escapeHtml(String(v)):ND;
+  // Honest empty-state resolver. Three distinct states, driven by the per-source
+  // provenance map (d.sources): 'not connected' (connector off), 'no record in X'
+  // (connector live but this account has no record there), and 'no data' (connector
+  // live, record exists, this field is empty). Never fabricates a value.
+  const _srcLabel={zendesk:'Zendesk',usage:'Pendo',jiminny:'Jiminny',stripe:'Stripe',
+                   churn:'Churn model',onboarding:'Rocket Lane',hubspot:'HubSpot',metrics:'warehouse'};
+  const _norec='<span class="norec" title="This connector is live, but this account has no record in it">no record in ';
+  function cell(block,value){
+    if(value!=null && value!=='' ) return escapeHtml(String(value));
+    const prov=(d.sources||{})[block==='usage'?'usage':block];
+    if(prov===undefined || prov==='not_live') return NC;
+    if(prov==='live_no_record') return _norec+(_srcLabel[block]||block)+'</span>';
+    return ND; // live/computed but this field is empty
+  }
   const title=conn.hubspot?(hs.name||id):id;
   window.ACTIVE_ACCOUNT_ID=id; window.ACTIVE_ACCOUNT_NAME=title;
   if(typeof adSyncScope==='function') adSyncScope();
@@ -3374,22 +3400,22 @@ function renderCompanyPage(id,d){
   const adopt2=d.adoption||{};
   const keyMetrics='<div class="cp-kmgrid">'+
     km('Churn model',churnVal)+
-    km('CSAT (30 days)',conn.zendesk?nd(zd.csat_30d):NC)+
-    km('Support tickets (7d vs prior)',conn.zendesk?((zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-')):NC)+
-    km('Product usage',conn.usage?(us.days_since_last_visit!=null?us.days_since_last_visit+' days since visit':ND):NC)+
-    km('Pendo risk advisor',conn.usage?nd(us.pendo_risk_score):NC)+
-    km('Pendo adoption',conn.usage?nd(us.pendo_adoption):NC)+
-    km('Pendo engagement',conn.usage?nd(us.pendo_adoption_engagement):NC)+
-    km('Usage trend',conn.usage?nd(us.pendo_trend):NC)+
-    km('Plan tier',conn.usage?nd(us.plan_tier):NC)+
+    km('CSAT (30 days)',cell('zendesk',zd.csat_30d))+
+    km('Support tickets (7d vs prior)',(zd.tickets_last_7d!=null||zd.tickets_prev_7d!=null)?((zd.tickets_last_7d!=null?zd.tickets_last_7d:'-')+' vs '+(zd.tickets_prev_7d!=null?zd.tickets_prev_7d:'-')):cell('zendesk',null))+
+    km('Product usage',us.days_since_last_visit!=null?(us.days_since_last_visit+' days since visit'):cell('usage',null))+
+    km('Pendo risk advisor',cell('usage',us.pendo_risk_score))+
+    km('Pendo adoption',cell('usage',us.pendo_adoption))+
+    km('Pendo engagement',cell('usage',us.pendo_adoption_engagement))+
+    km('Usage trend',cell('usage',us.pendo_trend))+
+    km('Plan tier',cell('usage',us.plan_tier))+
     km('Product adoption',(adopt2.adoption_score!=null?adopt2.adoption_score+'/100':(adopt2.score!=null?adopt2.score+'/100':ND)))+
-    km('Latest Jiminny call',conn.jiminny?nd(jm.last_call_date):NC)+
-    km('Call score',conn.jiminny?(jm.average_score!=null?escapeHtml(String(jm.average_score)):(jm.sentiment?escapeHtml(String(jm.sentiment)):ND)):NC)+
+    km('Latest Jiminny call',cell('jiminny',jm.last_call_date))+
+    km('Call score',cell('jiminny',(jm.average_score!=null?jm.average_score:jm.sentiment)))+
     km('Payment',payVal)+
-    km('Primary instances',conn.hubspot?nd((d.primary_instances||[]).join(', ')):NC)+
-    km('Region',conn.hubspot?nd(hs.state||hs.country):NC)+
-    km('Subscription',conn.hubspot?nd(hs.subscription_type):NC)+
-    km('Lifecycle stage',conn.hubspot?nd(hs.lifecycle_stage):NC)+
+    km('Primary instances',cell('hubspot',(d.primary_instances||[]).join(', ')))+
+    km('Region',cell('hubspot',hs.state||hs.country))+
+    km('Subscription',cell('hubspot',hs.subscription_type))+
+    km('Lifecycle stage',cell('hubspot',hs.lifecycle_stage))+
   '</div>';
   // Full contacts list
   const contactsList=(hs.contacts&&hs.contacts.length)?('<div class="cp-contacts">'+hs.contacts.map(c=>'<div class="cp-contact"><span class="cp-cav">'+escapeHtml((c.name||'?').slice(0,1).toUpperCase())+'</span><div><div class="cp-cn">'+escapeHtml(c.name||'(unnamed)')+(c.role?' <span class="cp-crole">'+escapeHtml(c.role)+'</span>':'')+'</div>'+(c.email?'<div class="cp-ce">'+escapeHtml(c.email)+'</div>':'')+'</div></div>').join('')+'</div>'):'<div class="cp-signals">No contacts in HubSpot.</div>';
