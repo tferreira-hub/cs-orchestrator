@@ -3285,8 +3285,20 @@ function renderCompanyPage(id,d){
   const adopt=d.adoption||{};
   const openTasks=(d.tasks||[]).length;
   const convCount=(d.timeline||[]).length;
-  const onbPct=(d.onboarding&&d.onboarding.percent_complete!=null)?d.onboarding.percent_complete+'%':(adopt.onboarding_percent!=null?adopt.onboarding_percent+'%':ND);
-  const usageChange=(us.usage_change_pct!=null)?(us.usage_change_pct>0?'+':'')+us.usage_change_pct+'%':(us.days_since_last_visit!=null?us.days_since_last_visit+'d idle':ND);
+  const onbPct=(function(){
+    const ob=d.onboarding||{};
+    // Rocket Lane exposes a status label / project health, not a percent. Show the real
+    // signal when present; percent_complete is used only if the source ever provides it.
+    if(ob.percent_complete!=null)return ob.percent_complete+'%';
+    if(adopt.onboarding_percent!=null)return adopt.onboarding_percent+'%';
+    if(ob.health)return escapeHtml(String(ob.health));
+    if(ob.status)return escapeHtml(String(ob.status));
+    return ND;
+  })();
+  const usageChange=(us.usage_change_pct!=null)
+    ? (us.usage_change_pct>0?'+':'')+us.usage_change_pct+'%'
+    : (us.pendo_trend?escapeHtml(String(us.pendo_trend))
+      : (us.days_since_last_visit!=null?us.days_since_last_visit+'d idle':ND));
   const plans=(d.success_plans||[]).length;
   const tile=(ico,v,l,cls)=>'<div class="cp-tile '+(cls||'')+'"><div class="cp-tico">'+ico+'</div><div><div class="cp-tv">'+v+'</div><div class="cp-tl">'+l+'</div></div></div>';
   const tiles='<div class="cp-tiles">'+
@@ -3334,7 +3346,7 @@ function renderCompanyPage(id,d){
     km('Plan tier',conn.usage?nd(us.plan_tier):NC)+
     km('Product adoption',(adopt2.adoption_score!=null?adopt2.adoption_score+'/100':(adopt2.score!=null?adopt2.score+'/100':ND)))+
     km('Latest Jiminny call',conn.jiminny?nd(jm.last_call_date):NC)+
-    km('Call sentiment',conn.jiminny?nd(jm.sentiment):NC)+
+    km('Call score',conn.jiminny?(jm.average_score!=null?escapeHtml(String(jm.average_score)):(jm.sentiment?escapeHtml(String(jm.sentiment)):ND)):NC)+
     km('Payment',payVal)+
     km('Primary instances',conn.hubspot?nd((d.primary_instances||[]).join(', ')):NC)+
     km('Region',conn.hubspot?nd(hs.state||hs.country):NC)+
