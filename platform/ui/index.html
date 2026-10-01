@@ -1137,6 +1137,7 @@ function go(v){
   // Agent Automation page is retired in favour of the docked Ask CS Agent.
   if(v==='agent'){toggleAgentDock(true);return;}
   closeDrawer();
+  _resetEnrichBudget(); // fresh progressive-enrichment budget per view visit
   window.scrollTo({top:0,behavior:'instant'});
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   document.getElementById('v-'+v).classList.add('on');
@@ -1257,6 +1258,7 @@ function renderThePool(){
     '<div class="filterbar" style="padding-left:16px;padding-right:16px"><span class="fpill active">Customer Type: Pooled</span><span class="fpill active">ARR under $10k</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+rows.length+' companies</span></div>'+
     '<div class="body"><table class="acct-list"><thead><tr><th class="col-check"><input type="checkbox"></th><th class="col-play"></th><th>Health</th><th>Company</th><th>Owner</th><th>ARR (USD)</th><th>Phase</th><th>CSM Score</th><th>(AI) Growth Potential</th></tr></thead><tbody>'+
     (rows.length?body:'<tr><td colspan="9" class="empty" style="padding:24px">No pooled companies in this book.</td></tr>')+'</tbody></table></div></div>';
+  _enrichAndRerender(rows);
 }
 // Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
 function renderPooledDashboard(){
@@ -1464,6 +1466,7 @@ function renderMyPortfolio(){
   }).join('');
   host.innerHTML='<div class="panel"><div class="head"><h2>My Portfolio</h2><span class="note">'+accts.length+' companies</span></div>'+_mdFilterBar(accts.length+' companies')+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>CSM Score</th><th>Customer To</th><th>Last seen</th><th>Renewal (in days)</th><th>id</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+  _enrichAndRerender(accts);
 }
 function renderMyWorkflows(){
   const host=document.getElementById('md-pane-workflows'); if(!host||!DATA)return;
@@ -1539,7 +1542,7 @@ function renderPortfolioHealth(){
   const countBars='<div class="cc-dist" style="height:130px">'+countCols.map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1].toLocaleString()+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   // Average health by segment — computed live.
   const segMap={};filteredAccounts().forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
-  const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=70?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
+  const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=75?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
   const grid='<div class="mdw-grid">'+
     _widget('% ARR by health',pctBar)+
     _widget('Count of companies by health',countBars,'wide')+
@@ -1595,6 +1598,7 @@ function renderReviews(){
     return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td><td><span class="pill pln">Not scheduled</span></td></tr>';}).join('');
   host.innerHTML='<div class="panel"><div class="head"><h2>Portfolio Reviews</h2><span class="note">Structured review cadence · worst health first</span></div>'+_mdFilterBar(accts.length+' companies')+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Renewal (in days)</th><th>Review Status</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+  _enrichAndRerender(accts);
 }
 
 // ===== Calendar: weekly task/meeting view =====
@@ -1791,16 +1795,77 @@ function renderRiskHealth(){
   const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad"><div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. This risk view slices health by cohort to focus mitigation.</div>'+tiles+'<div class="mdw-grid">'+_widget('Count of companies by health',countBars,'wide')+'</div></div></div>';
 }
-// Risk Mitigation Strategy — companies with Health under 6 (score < 60), worst first.
+// Risk Mitigation Strategy — accounts whose live health is below the healthy band.
+// Health scale is 0–100 (engine.py:257): red = score < 50 ("at risk"), amber = 50–74
+// ("watch"), green = 75+ ("healthy"). This page defaults to the *saveable* book: at-risk
+// and watch accounts that have NOT already churned, worst health first. Controls below
+// let the CSM re-sort and fold in already-churned accounts or hide the watch band.
+// _rmSort: 'health' (worst first) | 'arr' (largest exposure first) | 'renewal' (soonest first)
+// _rmBand: 'risk' (red only) | 'both' (red+amber, default)
+// _rmChurned: include already-churned accounts (default false — focus on saveable)
+let _rmSort='health', _rmBand='both', _rmChurned=false;
+function rmSet(k,v){ if(k==='sort')_rmSort=v; else if(k==='band')_rmBand=v; else if(k==='churned')_rmChurned=!_rmChurned; renderRiskMitigation(); }
 function renderRiskMitigation(){
   const host=document.getElementById('re-pane-mitigation'); if(!host||!DATA)return;
-  const at=filteredAccounts().filter(a=>a.health&&a.health.computable&&a.health.score<60).sort((x,y)=>x.health.score-y.health.score);
-  const body=at.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
-    const drivers=(a.health.reasons||[]).slice(0,2).join('; ');
-    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted" style="font-size:.85em">'+escapeHtml(drivers||'-')+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td></tr>';}).join('');
-  host.innerHTML='<div class="panel"><div class="head"><h2>Risk Mitigation Strategy</h2><span class="note">'+at.length+' companies with Health under 6</span></div>'+
-    '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Health: less than 6</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+at.length+' companies</span></div>'+
-    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Risk Drivers</th><th>Renewal (in days)</th></tr></thead><tbody>'+(at.length?body:'<tr><td colspan="7" class="empty" style="padding:24px">No companies below health 6.</td></tr>')+'</tbody></table></div></div>';
+  const scored=filteredAccounts().filter(a=>a.health&&a.health.computable);
+  // Band selection: red is always included; amber ("watch") included unless the user narrows to risk-only.
+  const inBand=a=>a.health.band==='red'||(_rmBand==='both'&&a.health.band==='amber');
+  const base=scored.filter(inBand);
+  // Split saveable (not churned) vs already-churned so mitigation effort targets live accounts.
+  const saveable=base.filter(a=>!a.churned);
+  const churnedList=base.filter(a=>a.churned);
+  const shown=_rmChurned?base.slice():saveable.slice();
+  // Renewal-days helper scoped to this view (the global _rdays lives inside another fn).
+  const asOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+  const rdays=a=>a.renewal_date?Math.round((new Date(a.renewal_date+(a.renewal_date.length<=10?'T00:00:00':''))-asOf)/86400000):null;
+  const sorters={
+    health:(x,y)=>x.health.score-y.health.score,
+    arr:(x,y)=>(y.arr_usd||0)-(x.arr_usd||0),
+    renewal:(x,y)=>{const dx=rdays(x),dy=rdays(y);return (dx==null?1e9:dx)-(dy==null?1e9:dy);}
+  };
+  shown.sort(sorters[_rmSort]||sorters.health);
+  // ARR exposure rollup: how much live revenue sits in each risk band (saveable only),
+  // plus how much is already gone to churn — the numbers a CSM/leader actually acts on.
+  const arrOf=list=>list.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const redSave=saveable.filter(a=>a.health.band==='red');
+  const amberSave=saveable.filter(a=>a.health.band==='amber');
+  const tiles='<div class="mdw-grid" style="margin:4px 16px 12px">'+
+    _widgetBig('Saveable at risk',saveable.length,saveable.length>0?'warn':'good')+
+    _widgetBig('ARR at risk (saveable)',fmt(arrOf(saveable)),arrOf(saveable)>0?'warn':'')+
+    _widgetBig('Red band',redSave.length,redSave.length>0?'warn':'')+
+    _widgetBig('Watch band (amber)',amberSave.length)+
+    _widgetBig('Already churned',churnedList.length)+
+    _widgetBig('Churned ARR (lost)',fmt(arrOf(churnedList)))+
+  '</div>';
+  // Functional control pills (real sort/filter, not decorative).
+  const pill=(label,active,on)=>'<span class="fpill '+(active?'active':'ghost')+'" style="cursor:pointer" onclick="'+on+'">'+label+'</span>';
+  const controls='<div class="filterbar" style="padding:10px 16px 4px">'+
+    '<span class="muted" style="font-size:.78em;align-self:center;margin-right:4px">Band:</span>'+
+    pill('At risk + Watch',_rmBand==='both',"rmSet('band','both')")+
+    pill('At risk only',_rmBand==='risk',"rmSet('band','risk')")+
+    '<span class="muted" style="font-size:.78em;align-self:center;margin:0 4px 0 10px">Sort:</span>'+
+    pill('Worst health',_rmSort==='health',"rmSet('sort','health')")+
+    pill('ARR exposure',_rmSort==='arr',"rmSet('sort','arr')")+
+    pill('Renewal soonest',_rmSort==='renewal',"rmSet('sort','renewal')")+
+    pill(_rmChurned?'Hide churned':'Include churned',_rmChurned,"rmSet('churned')")+
+    '<span class="fb-count">'+shown.length+' companies</span>'+
+  '</div>';
+  const bandPill=b=>'<span class="pill '+hband(b)+'">'+(b==='red'?'at risk':b==='amber'?'watch':'healthy')+'</span>';
+  const body=shown.map(a=>{const circle='<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>';
+    // Full driver list (no truncation) so the CSM sees every reason the score dropped.
+    const reasons=(a.health.reasons||[]);
+    const drivers=reasons.length?reasons.map(r=>escapeHtml(r)).join('; '):'-';
+    const stage=a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-';
+    const churnMark=a.churned?' <span class="pill r" style="font-size:.72em">churned</span>':'';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+' '+bandPill(a.health.band)+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong>'+churnMark+'</td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+stage+'</td><td class="muted" style="font-size:.85em">'+drivers+'</td><td>'+(a.renewal_date?renewalDays(a.renewal_date):'<span class="muted">no data</span>')+'</td></tr>';}).join('');
+  const emptyMsg=_rmChurned?'No at-risk companies in this view.':'No saveable at-risk companies — your live book is healthy.';
+  const subtitle=shown.length+' '+(_rmChurned?'at-risk companies (incl. churned)':'saveable at-risk companies')+' · '+(_rmBand==='risk'?'red band only':'red + amber bands');
+  host.innerHTML='<div class="panel"><div class="head"><h2>Risk Mitigation Strategy</h2><span class="note">'+subtitle+'</span></div>'+
+    tiles+controls+
+    '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Risk Drivers</th><th>Renewal (in days)</th></tr></thead><tbody>'+(shown.length?body:'<tr><td colspan="7" class="empty" style="padding:24px">'+emptyMsg+'</td></tr>')+'</tbody></table></div></div>';
+  // Enrich from the whole filtered set (not just the at-risk subset): a roster row can only
+  // qualify for this risk view once it has a computable score.
+  _enrichAndRerender(filteredAccounts());
 }
 
 // ===== Expansions (two-level nav) =====
@@ -1820,6 +1885,7 @@ function renderExpWhitespace(){
   host.innerHTML='<div class="panel"><div class="head"><h2>White Spacing</h2><span class="note">'+ws.length+' healthy companies with expansion headroom</span></div>'+
     '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Healthy · ARR more than 0</span><span class="fpill ghost">Company</span><span class="fpill ghost">+ Filter</span><span class="fb-count">'+ws.length+' companies</span></div>'+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Whitespace</th></tr></thead><tbody>'+(ws.length?body:'<tr><td colspan="6" class="empty" style="padding:24px">No healthy companies with expansion headroom right now.</td></tr>')+'</tbody></table></div></div>';
+  _enrichAndRerender(filteredAccounts());
 }
 
 // ===== Objectives & Adoption (two-level nav) =====
@@ -1851,6 +1917,7 @@ function renderProdAdoption(){
     '<div class="mdw-grid" style="margin-bottom:16px">'+_widgetBig('Avg Adoption Health',avgHealth,avgHealth>=70?'good':avgHealth<50?'warn':'')+_widgetBig('Actively Using (≤14d)',active,'good')+_widgetBig('Idle (>28d)',idle,idle>0?'warn':'')+_widgetBig('Tracked Accounts',withUsage.length)+'</div>'+
     '<div class="panel"><div class="head"><h2>Product Adoption</h2><span class="note">Usage recency from live Pendo signals · most active first</span></div>'+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage Trend</th><th>Last seen</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="empty" style="padding:24px">No usage-connected accounts.</td></tr>')+'</tbody></table></div></div>';
+  _enrichAndRerender(accts);
 }
 // ===== Pooled CS — pooled cohort (authoritative from HubSpot tier, segment fallback) =====
 // Pooled CS uses a two-level nav: leaf (Inbox/Process/NRR) -> sub-tab -> page.
@@ -2746,31 +2813,49 @@ function _acctTableInner(rows){
 }
 // Tracks roster ids we've already asked the server to enrich, so we don't re-request.
 const _enrichRequested=new Set();
-function _enrichVisibleRoster(list){
+// Bound the auto-chain: each page visit enriches up to _ENRICH_MAX_BATCHES screenfuls so
+// we fill the relevant/visible set without silently walking the whole ~1.3k book and
+// hammering the vendor APIs. Reset when the user changes view (see go()).
+const _ENRICH_MAX_BATCHES=8;
+let _enrichBatchCount=0;
+function _resetEnrichBudget(){_enrichBatchCount=0;}
+// Core: pick the next screenful of not-yet-enriched roster ids from `list`, POST them to
+// the server, patch the live results into DATA.accounts, then run `onPatched()` to refresh.
+// Shared by every heavy list page so the whole book fills in a screen at a time.
+function _enrichCore(list,onPatched){
+  if(_enrichBatchCount>=_ENRICH_MAX_BATCHES) return; // budget spent for this view
   const ids=[];
-  for(const a of list){
+  for(const a of (list||[])){
     if(a && a.enriched===false && a.account_id && !_enrichRequested.has(a.account_id)){
       ids.push(a.account_id); _enrichRequested.add(a.account_id);
       if(ids.length>=40) break; // one screenful per call
     }
   }
   if(!ids.length) return;
+  _enrichBatchCount++;
   (async()=>{
     try{
       const r=await api('/api/accounts/enrich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
       const j=await r.json(); const got=(j&&j.accounts)||{};
       if(!Object.keys(got).length) return;
-      // Patch the enriched fields into DATA.accounts in place.
       const byId={}; (DATA.accounts||[]).forEach(a=>{byId[a.account_id]=a;});
       let changed=false;
       Object.keys(got).forEach(id=>{const dst=byId[id]; if(dst){Object.assign(dst,got[id]); changed=true;}});
-      // Re-render the current account table host if it's on screen.
-      if(changed){
-        const host=document.getElementById('acct-table-host'); if(host) host.innerHTML=_acctTableInner(filteredAccounts());
-        const hostCc=document.getElementById('accounts-body-cc'); if(hostCc&&hostCc.offsetParent!==null) hostCc.innerHTML=acctTable(filteredAccounts());
-      }
+      if(changed && typeof onPatched==='function') onPatched();
     }catch(e){/* leave as roster on failure */}
   })();
+}
+// Account-table pages: re-render the table host(s) in place (keeps scroll position).
+function _enrichVisibleRoster(list){
+  _enrichCore(list,function(){
+    const host=document.getElementById('acct-table-host'); if(host) host.innerHTML=_acctTableInner(filteredAccounts());
+    const hostCc=document.getElementById('accounts-body-cc'); if(hostCc&&hostCc.offsetParent!==null) hostCc.innerHTML=acctTable(filteredAccounts());
+  });
+}
+// Generic pages (Reviews, Risk, Expansions, Adoption, Pooled, My Portfolio...): re-render
+// the whole current view, which re-reads the now-enriched DATA.accounts.
+function _enrichAndRerender(list){
+  _enrichCore(list,function(){ if(typeof render==='function') render(_currentView); });
 }
 // Planhat shows renewal as a relative "in days" value, not a raw date.
 function renewalDays(dateStr){
