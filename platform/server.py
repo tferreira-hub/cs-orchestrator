@@ -203,63 +203,62 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
         <div class=m><div class=k>Renewals in 120 days</div><div class=v>23</div><div class="d flat">&#8226; $4.8M ARR</div></div>
       </div>
 
-      <div class=dash>
+      <div class="dash">
         <!-- NRR trend line with axes + value labels -->
-        <div class=panelcard>
-          <div class=pt><b>Net revenue retention</b><span>Apr&ndash;Sep</span></div>
-          <svg viewBox="0 0 300 150" width="100%" height="132" role=img aria-label="NRR trend from 103% to 112%">
-            <defs><linearGradient id=ln x1=0 y1=0 x2=0 y2=1><stop offset=0% stop-color=#60a5fa stop-opacity=.4/><stop offset=100% stop-color=#60a5fa stop-opacity=0/></linearGradient></defs>
-            <!-- gridlines + y labels -->
+        <div class="panelcard">
+          <div class="pt"><b>Net revenue retention</b><span>Apr to Sep</span></div>
+          <svg viewBox="0 0 300 150" width="100%" height="134" role="img" aria-label="NRR trend from 103 to 112 percent">
+            <defs><linearGradient id="ln" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#60a5fa" stop-opacity="0.4"/><stop offset="100%" stop-color="#60a5fa" stop-opacity="0"/></linearGradient></defs>
             <g>
-              <line x1=34 y1=16 x2=292 y2=16 stroke=#223150/><text x=28 y=20 text-anchor=end class=axis>115</text>
-              <line x1=34 y1=56 x2=292 y2=56 stroke=#223150/><text x=28 y=60 text-anchor=end class=axis>110</text>
-              <line x1=34 y1=96 x2=292 y2=96 stroke=#223150/><text x=28 y=100 text-anchor=end class=axis>105</text>
-              <line x1=34 y1=120 x2=292 y2=120 stroke=#223150/><text x=28 y=124 text-anchor=end class=axis>100</text>
+              <line x1="34" y1="16" x2="292" y2="16" stroke="#223150"/><text x="28" y="20" text-anchor="end" class="axis">115</text>
+              <line x1="34" y1="56" x2="292" y2="56" stroke="#223150"/><text x="28" y="60" text-anchor="end" class="axis">110</text>
+              <line x1="34" y1="96" x2="292" y2="96" stroke="#223150"/><text x="28" y="100" text-anchor="end" class="axis">105</text>
+              <line x1="34" y1="120" x2="292" y2="120" stroke="#223150"/><text x="28" y="124" text-anchor="end" class="axis">100</text>
             </g>
-            <!-- data: 103,105,104,108,110,112 -> y = 120-(v-100)*8 -->
-            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24 L288,128 L46,128 Z" fill=url(#ln)/>
-            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24" fill=none stroke=#60a5fa stroke-width=2.5 stroke-linecap=round stroke-linejoin=round/>
-            <g fill=#a78bfa><circle cx=46 cy=96 r=3/><circle cx=96 cy=80 r=3/><circle cx=146 cy=88 r=3/><circle cx=196 cy=56 r=3/><circle cx=246 cy=40 r=3/><circle cx=288 cy=24 r=3.6 fill=#60a5fa/></g>
-            <text x=288 y=16 text-anchor=end fill=#cfe0ff font-size=10 font-weight=700>112%</text>
-            <!-- x labels -->
-            <g class=axis text-anchor=middle>
-              <text x=46 y=146>Apr</text><text x=96 y=146>May</text><text x=146 y=146>Jun</text><text x=196 y=146>Jul</text><text x=246 y=146>Aug</text><text x=288 y=146>Sep</text>
+            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24 L288,128 L46,128 Z" fill="url(#ln)"/>
+            <path d="M46,96 L96,80 L146,88 L196,56 L246,40 L288,24" fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <g fill="#a78bfa">
+              <circle cx="46" cy="96" r="3"/><circle cx="96" cy="80" r="3"/><circle cx="146" cy="88" r="3"/><circle cx="196" cy="56" r="3"/><circle cx="246" cy="40" r="3"/><circle cx="288" cy="24" r="4" fill="#60a5fa"/>
+            </g>
+            <text x="282" y="18" text-anchor="end" fill="#cfe0ff" font-size="11" font-weight="700">112%</text>
+            <g class="axis" text-anchor="middle">
+              <text x="46" y="146">Apr</text><text x="96" y="146">May</text><text x="146" y="146">Jun</text><text x="196" y="146">Jul</text><text x="246" y="146">Aug</text><text x="288" y="146">Sep</text>
             </g>
           </svg>
         </div>
-        <!-- health gauge donut -->
-        <div class=panelcard>
-          <div class=pt><b>Health mix</b></div>
-          <svg viewBox="0 0 120 132" width="100%" height="132" role=img aria-label="Health mix: 68% healthy, 22% watch, 10% at risk">
-            <g transform="translate(60,58)">
-              <circle r=42 fill=none stroke=#1b2742 stroke-width=15/>
-              <!-- 68% green, 22% amber, 10% red; circumference ~264 -->
-              <circle r=42 fill=none stroke=#34d399 stroke-width=15 stroke-dasharray="179 85" transform="rotate(-90)" stroke-linecap=round/>
-              <circle r=42 fill=none stroke=#fbbf24 stroke-width=15 stroke-dasharray="58 206" stroke-dashoffset="-181" transform="rotate(-90)" stroke-linecap=round/>
-              <circle r=42 fill=none stroke=#fb7185 stroke-width=15 stroke-dasharray="26 238" stroke-dashoffset="-241" transform="rotate(-90)" stroke-linecap=round/>
-              <text y=-2 text-anchor=middle fill=#eaf0f8 font-size=18 font-weight=750>68%</text>
-              <text y=14 text-anchor=middle fill=#93a9cc font-size=8.5>healthy</text>
+        <!-- health donut: arc paths (robust), 68/22/10 -->
+        <div class="panelcard">
+          <div class="pt"><b>Health mix</b><span>184 accounts</span></div>
+          <svg viewBox="0 0 140 134" width="100%" height="134" role="img" aria-label="Health: 68 percent healthy, 22 percent watch, 10 percent at risk">
+            <g transform="translate(70,66)">
+              <circle r="46" fill="none" stroke="#1b2742" stroke-width="16"/>
+              <!-- segments drawn as stroked arcs; angles: healthy 0-244.8, watch 244.8-324, risk 324-360 deg -->
+              <path d="M 0 -46 A 46 46 0 1 1 -41.6 19.6" fill="none" stroke="#34d399" stroke-width="16" stroke-linecap="round"/>
+              <path d="M -41.6 19.6 A 46 46 0 0 1 15.2 43.4" fill="none" stroke="#fbbf24" stroke-width="16" stroke-linecap="round"/>
+              <path d="M 15.2 43.4 A 46 46 0 0 1 0 -46" fill="none" stroke="#fb7185" stroke-width="16" stroke-linecap="round"/>
+              <text x="0" y="-3" text-anchor="middle" fill="#eaf0f8" font-size="20" font-weight="750">68%</text>
+              <text x="0" y="14" text-anchor="middle" fill="#93a9cc" font-size="9">healthy</text>
             </g>
           </svg>
-          <div class=legend style="justify-content:center;flex-wrap:wrap;gap:9px"><span><i style="background:#34d399"></i>Healthy</span><span><i style="background:#fbbf24"></i>Watch</span><span><i style="background:#fb7185"></i>Risk</span></div>
+          <div class="legend" style="justify-content:center;flex-wrap:wrap;gap:10px"><span><i style="background:#34d399"></i>Healthy 125</span><span><i style="background:#fbbf24"></i>Watch 40</span><span><i style="background:#fb7185"></i>Risk 19</span></div>
         </div>
         <!-- renewal-stage bars -->
         <div class="panelcard span2">
-          <div class=pt><b>Open renewals by stage</b><span>next 120 days</span></div>
-          <svg viewBox="0 0 520 92" width="100%" height="82" role=img aria-label="Renewals: T-120 nine, T-90 six, T-60 five, T-30 three">
-            <g class=axis text-anchor=middle>
-              <!-- bars: values 9,6,5,3 (max 10 -> scale 6px/unit, baseline y=66) -->
-              <rect x=40 y=12 width=70 height=54 rx=5 fill=#3b82f6/><text x=75 y=8 fill=#cfe0ff font-size=11 font-weight=700>9</text><text x=75 y=82>T-120</text>
-              <rect x=170 y=30 width=70 height=36 rx=5 fill=#6366f1/><text x=205 y=26 fill=#cfe0ff font-size=11 font-weight=700>6</text><text x=205 y=82>T-90</text>
-              <rect x=300 y=36 width=70 height=30 rx=5 fill=#8b5cf6/><text x=335 y=32 fill=#cfe0ff font-size=11 font-weight=700>5</text><text x=335 y=82>T-60</text>
-              <rect x=430 y=48 width=70 height=18 rx=5 fill=#a78bfa/><text x=465 y=44 fill=#cfe0ff font-size=11 font-weight=700>3</text><text x=465 y=82>T-30</text>
-              <line x1=24 y1=66 x2=510 y2=66 stroke=#223150/>
+          <div class="pt"><b>Open renewals by stage</b><span>next 120 days</span></div>
+          <svg viewBox="0 0 520 96" width="100%" height="86" role="img" aria-label="Renewals: T-120 nine, T-90 six, T-60 five, T-30 three">
+            <line x1="24" y1="70" x2="512" y2="70" stroke="#223150"/>
+            <g text-anchor="middle">
+              <rect x="44" y="16" width="78" height="54" rx="6" fill="#3b82f6"/><text x="83" y="11" fill="#cfe0ff" font-size="12" font-weight="700">9</text>
+              <rect x="178" y="34" width="78" height="36" rx="6" fill="#6366f1"/><text x="217" y="29" fill="#cfe0ff" font-size="12" font-weight="700">6</text>
+              <rect x="312" y="40" width="78" height="30" rx="6" fill="#8b5cf6"/><text x="351" y="35" fill="#cfe0ff" font-size="12" font-weight="700">5</text>
+              <rect x="446" y="52" width="78" height="18" rx="6" fill="#a78bfa"/><text x="485" y="47" fill="#cfe0ff" font-size="12" font-weight="700">3</text>
+              <g class="axis"><text x="83" y="88">T-120</text><text x="217" y="88">T-90</text><text x="351" y="88">T-60</text><text x="485" y="88">T-30</text></g>
             </g>
           </svg>
         </div>
       </div>
     </div>
-    <div class="foot z"><svg width=14 height=14 viewBox="0 0 24 24" fill=none stroke=#34d399 stroke-width=2.4><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> <b>Secure access.</b> Single sign-on via Okta. JobAdder internal.</div>
+    <div class="foot z"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.4"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg> <b>Secure access.</b> Single sign-on via Okta. JobAdder internal.</div>
   </section>
 
   <section class=side>
