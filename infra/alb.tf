@@ -11,21 +11,19 @@ resource "aws_security_group" "alb" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description      = "HTTPS from Cloudflare edge"
-    from_port        = 443
-    to_port          = 443
-    protocol         = "tcp"
-    cidr_blocks      = var.cloudflare_ipv4_cidrs
-    ipv6_cidr_blocks = var.cloudflare_ipv6_cidrs
+    description = "HTTPS from Cloudflare edge"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.cloudflare_ipv4_cidrs
   }
 
   ingress {
-    description      = "HTTP from Cloudflare edge (redirected to HTTPS)"
-    from_port        = 80
-    to_port          = 80
-    protocol         = "tcp"
-    cidr_blocks      = var.cloudflare_ipv4_cidrs
-    ipv6_cidr_blocks = var.cloudflare_ipv6_cidrs
+    description = "HTTP from Cloudflare edge (redirected to HTTPS)"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.cloudflare_ipv4_cidrs
   }
 
   tags = merge(local.tags, { Name = "${local.name}-alb" })
@@ -78,7 +76,7 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
-  ip_address_type    = "dualstack" # Cloudflare originates over IPv4 and IPv6
+  ip_address_type    = "ipv4" # Tooling public subnets have no IPv6 CIDR; Cloudflare reaches an IPv4 ALB fine
 
   drop_invalid_header_fields = true
 
