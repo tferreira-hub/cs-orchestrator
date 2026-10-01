@@ -11,10 +11,19 @@ domain_name           = "csplatform.jobadder.tools"
 cognito_domain_prefix = "csplatform-jobadder"
 admin_group_name      = "CS-Platform-Admins"
 
-# Set once the DEDICATED CS Platform SAML app exists in AWS Identity Center.
-# Until then the pool is provisioned without federation and you can validate with
-# the app's dev-login path.
-saml_metadata_url = ""
+# Dedicated CS Platform SAML app in AWS Identity Center (Manager account 891377124793).
+# This is CS Platform's OWN app (metadata id ...7223ce73bceb4c09), independent of the
+# ja-observe app. Setting this makes Terraform create the pool's own JobAdderSSO SAML
+# IdP and point the app client at it.
+saml_metadata_url = "https://portal.sso.us-east-1.amazonaws.com/saml/metadata/ODkxMzc3MTI0NzkzX2lucy03MjIzY2U3M2JjZWI0YzA5"
+
+# Group IDs (UUIDs from Identity Center) govern access + admin. Fill these once the
+# CS-Platform-Admins group ID is known: both grant access, admin set grants admin.
+cs_admin_group_ids = ""
+cs_user_group_ids  = ""
+# Break-glass for cutover: lets a named admin in BEFORE the group IDs are wired, so we
+# can verify the Okta sign-in end to end. Replace with group IDs and clear this after.
+auth_admin_emails = "tferreira@jobadder.com"
 
 # First-apply image is bootstrapped from ECR; the CI pipeline swaps the real image.
 # Optionally pin an initial image here, e.g.:

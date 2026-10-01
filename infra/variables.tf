@@ -179,9 +179,29 @@ variable "saml_metadata_url" {
 }
 
 variable "admin_group_name" {
-  description = "SSO group (in custom:groups) granted CS Platform admin. Also set as CS_ADMIN_GROUPS on the task."
+  description = "Display name of the CS admin SSO group (for reference/docs)."
   type        = string
   default     = "CS-Platform-Admins"
+}
+
+# Identity Center emits group IDs (UUIDs), not names, in the SAML Group claim, so
+# CS_ADMIN_GROUPS / CS_USER_GROUPS must be the group IDs. rbac.py matches by substring.
+variable "cs_admin_group_ids" {
+  description = "Identity Center group ID(s) that grant CS Platform admin (comma-separated). Members see all accounts."
+  type        = string
+  default     = ""
+}
+
+variable "cs_user_group_ids" {
+  description = "Identity Center group ID(s) that grant scoped-CSM access (comma-separated). This is the hard entry gate; a user not in an admin or user group is denied. Admin groups also grant access."
+  type        = string
+  default     = ""
+}
+
+variable "auth_admin_emails" {
+  description = "Break-glass admin emails (comma-separated). Grants access + admin without a group, for cutover/bootstrap before the Identity Center group IDs are wired. Keep short-lived."
+  type        = string
+  default     = ""
 }
 
 # ---------------------------------------------------------------------------

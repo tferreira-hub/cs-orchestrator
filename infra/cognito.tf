@@ -64,12 +64,13 @@ resource "aws_cognito_identity_provider" "saml" {
     IDPSignout  = "true"
   }
 
-  # Map SAML assertion claims -> Cognito attributes. The "Group" claim becomes
-  # custom:groups, which rbac.py uses to resolve the CS Platform role.
+  # Map SAML assertion claims -> Cognito attributes, using the EXACT claim URIs
+  # configured in the CS Platform Identity Center SAML app (mirrors ja-observe).
+  # The "Group" claim becomes custom:groups, which rbac.py uses to resolve the role.
   attribute_mapping = {
-    email           = "email"
-    name            = "name"
-    "custom:groups" = "http://schemas.xmlsoap.org/claims/Group"
+    email           = "http://schemas.xmlformats.org/ws/2005/05/identity/claims/emailaddress"
+    name            = "http://schemas.xmlformats.org/ws/2005/05/identity/claims/name"
+    "custom:groups" = "http://schemas.xmlformats.org/claims/Group"
   }
 }
 

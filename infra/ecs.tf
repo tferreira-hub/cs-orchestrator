@@ -42,7 +42,9 @@ locals {
     AUTH_COGNITO_ISSUER      = local.cognito_issuer
     AUTH_COGNITO_ID          = aws_cognito_user_pool_client.app.id
     AUTH_COGNITO_DOMAIN      = var.cognito_domain_prefix
-    CS_ADMIN_GROUPS          = var.admin_group_name
+    CS_ADMIN_GROUPS          = var.cs_admin_group_ids
+    CS_USER_GROUPS           = var.cs_user_group_ids
+    AUTH_ADMIN_EMAILS        = var.auth_admin_emails
     REDSHIFT_ASSUME_ROLE_ARN = var.redshift_assume_role_arn
   })
 
