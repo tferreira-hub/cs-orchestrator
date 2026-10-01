@@ -232,6 +232,17 @@ variable "app_environment" {
     # Rocket Lane onboarding connector (non-secret config; key is an SSM secret).
     # Confirm the exact base URL for the JobAdder Rocket Lane tenant before go-live.
     ROCKET_LANE_API_URL = "https://api.rocketlane.com/api"
+    # Tableau embedding (Connected App direct trust). Non-secret config; the signing
+    # secret (TABLEAU_CA_SECRET_VALUE) is an SSM SecureString (see ssm.tf / ecs.tf).
+    # Verified live: the connected app mints a JWT that Tableau accepts for site 'jobadder'.
+    TABLEAU_SERVER_URL   = "https://prod-apsoutheast-a.online.tableau.com"
+    TABLEAU_SITE         = "jobadder"
+    TABLEAU_CA_CLIENT_ID = "d7bd4c64-2f66-435a-83e4-719f498da78d"
+    TABLEAU_CA_SECRET_ID = "83e41b22-e3e3-4dd1-8b5d-85b315507d02"
+    # Dashboards shown on the Reports page, as "Label=Workbook/View" (Embedding API v3
+    # path form, i.e. the REST contentUrl with "/sheets/" removed). Starter set of the
+    # CS/revenue-relevant views discovered on the site; tune with the CS team.
+    TABLEAU_VIEWS = "Revenue Dashboard=RevenueDashboard-Recent/RevenueDashboard, Revenue by Customer=RevenueDashboard-Recent/RevenuebyCustomer, NDR Overview Annual=NDRRevenueReporting_17663714097050/NDROverviewAnnual, NDR Summary=NDRRevenueReporting_17663714097050/NDRSummary, Billing Details=BillingDetailsDashboard/BillingDetailsDashboard, Stripe Payout=StripePayoutDashboard/StripePayOut"
   }
 }
 

@@ -18,6 +18,7 @@ locals {
     "sources/zendesk-token"      = "ZENDESK_TOKEN — Zendesk API token"
     "sources/rocket-lane-key"    = "ROCKET_LANE_KEY — Rocket Lane CS Platform API key"
     "sources/jiminny-key"        = "JIMINNY_KEY — Jiminny CS Platform API key"
+    "tableau/ca-secret-value"    = "TABLEAU_CA_SECRET_VALUE — Tableau connected-app secret (JWT signing key)"
   }
 }
 
