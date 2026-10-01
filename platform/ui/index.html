@@ -1106,6 +1106,17 @@ function filteredAccounts(){
     return true;
   });
 }
+// Tasks scoped to the current filter: a task belongs to the filtered view only if its
+// account is in filteredAccounts(). When no filter is active this returns every task, so
+// the default whole-book behaviour is unchanged. Keyed on account NAME (and id as a
+// fallback) because tasks reference their account by name, same as the pooled views.
+function filteredTasks(){
+  const tasks=(DATA&&DATA.tasks)||[];
+  if(!_filterActive()) return tasks;
+  const keys=new Set();
+  filteredAccounts().forEach(a=>{ if(a.name)keys.add(a.name); if(a.account_id)keys.add(a.account_id); });
+  return tasks.filter(t=>keys.has(t.account));
+}
 // True when any filter deviates from the default (whole active book). Used to decide
 // whether dashboard aggregates should be recomputed client-side from the filtered set
 // vs. trusting the richer server-side whole-book roll-up (rm.*).
@@ -1171,10 +1182,25 @@ function globalFilterBar(){
 function _refreshFilterMount(){const gfm=document.getElementById('globalFilterMount');if(gfm&&gfm.style.display!=='none')gfm.innerHTML=globalFilterBar();}
 function setSearchFilter(v){FILTER.search=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}
   // Re-render the view body only (not the mount) so the search box keeps focus; update the count label in place.
+  _syncSidebarCounts();
   render(_currentView);
   const c=document.querySelector('#globalFilterMount .gf-count');if(c){const n=filteredAccounts().length,total=(DATA&&DATA.accounts||[]).length,nf=x=>x.toLocaleString();c.innerHTML=(n===total)?nf(total)+' <em>companies</em>':nf(n)+' <em>of</em> '+nf(total)+' <em>companies</em>';}}
-function setFilter(k,v){FILTER[k]=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
-function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();render(_currentView);}
+function setFilter(k,v){FILTER[k]=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();_syncSidebarCounts();render(_currentView);}
+function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();_syncSidebarCounts();render(_currentView);}
+// Keep the sidebar nav counts in sync with the active filter from ANY view, not only when
+// the Command Center re-renders. Mirrors the counts renderScopeBar sets.
+function _syncSidebarCounts(){
+  if(!DATA||!DATA.accounts) return;
+  const ft=filteredTasks(), fa=filteredAccounts();
+  const byMand=m=>ft.filter(t=>t.mandate===m).length;
+  if(typeof setCount==='function'){
+    setCount('c-queue',ft.length);
+    setCount('c-acct',fa.length);
+    setCount('c-protect',byMand('MUST_PROTECT'),true);
+    setCount('c-expand',byMand('MUST_EXPAND'));
+    setCount('c-use',byMand('MUST_USE'));
+  }
+}
 try{const _sf=JSON.parse(sessionStorage.getItem('cs_filter')||'null');if(_sf)Object.assign(FILTER,_sf);}catch(e){}
 
 function go(v){
@@ -1354,7 +1380,7 @@ function renderMyDashboard(){
     window._mdRmLoading=true;
     api('/api/revenue-motion').then(r=>r.json()).then(j=>{_rmCache=j;}).catch(()=>{}).finally(()=>{window._mdRmLoading=false; if(_myDashTab==='dashboard') renderMyDashboard();});
   }
-  const accts=filteredAccounts(), tasks=DATA.tasks||[];
+  const accts=filteredAccounts(), tasks=filteredTasks();
   const totalArr=accts.reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowArr=accts.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
   const lowPct=totalArr?Math.round((lowArr/totalArr)*100):0;
@@ -1522,7 +1548,7 @@ function renderMyPortfolio(){
 }
 function renderMyWorkflows(){
   const host=document.getElementById('md-pane-workflows'); if(!host||!DATA)return;
-  const wf=(DATA.tasks||[]).filter(t=>t.mandate==='MUST_EXPAND'||t.mandate==='MUST_USE');
+  const wf=filteredTasks().filter(t=>t.mandate==='MUST_EXPAND'||t.mandate==='MUST_USE');
   const today=new Date().toISOString().slice(0,10);
   const body=wf.length?wf.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')">'+
     '<td><strong>'+escapeHtml(t.account)+'</strong></td>'+
@@ -1664,7 +1690,7 @@ function renderCalendar(){
   // Seed engine tasks (deterministic queue) as "due today", plus any user-created tasks by their date.
   const dayKeys=dow.map((_,i)=>{const dt=new Date(monday);dt.setDate(monday.getDate()+i);return iso(dt);});
   const byDay={}; dayKeys.forEach(k=>byDay[k]=[]);
-  (DATA.tasks||[]).forEach(t=>{const k=dayKeys[todayIdx]; byDay[k].push({name:t.trigger||'Task',company:t.account,owner:'System',status:'open',engine:true,priority:t.priority});});
+  (filteredTasks()).forEach(t=>{const k=dayKeys[todayIdx]; byDay[k].push({name:t.trigger||'Task',company:t.account,owner:'System',status:'open',engine:true,priority:t.priority});});
   _calTasks.forEach(t=>{ if(byDay[t.date]) byDay[t.date].push(t); });
   const total=Object.values(byDay).reduce((s,a)=>s+a.length,0);
   const cols=dow.map((d,i)=>{
@@ -2470,14 +2496,17 @@ async function boot(){
     if(jv.verdict==='PASS'){jb.className='src live';jb.textContent='WoW judge: PASS';jb.title='cs-playbook-judge verified the queue against the Ways of Working';}
     else{jb.className='src sample';jb.textContent='WoW judge: '+(jv.violations?jv.violations.length:0)+' issue(s)';jb.title=(jv.violations||[]).map(v=>v.rule+': '+(v.account||'')+' '+v.detail).join('\n')||jv.verdict;}
   }
-  const byMand=m=>DATA.tasks.filter(t=>t.mandate===m).length;
-  setCount('c-queue',DATA.tasks.length);
-  setCount('c-acct',DATA.accounts.length);
+  const _ft=filteredTasks(), _fa=filteredAccounts();
+  const byMand=m=>_ft.filter(t=>t.mandate===m).length;
+  setCount('c-queue',_ft.length);
+  setCount('c-acct',_fa.length);
   setCount('c-protect',byMand('MUST_PROTECT'),true);
   setCount('c-expand',byMand('MUST_EXPAND'));
   setCount('c-use',byMand('MUST_USE'));
   // The Expand badge should reflect real expansion opportunities, not only queued tasks.
-  (async()=>{try{const e=await (await api('/api/expansion')).json();const n=(e.count||0)+byMand('MUST_EXPAND');setCount('c-expand',n);}catch(_){}})();
+  // When a filter is active we show only the filtered queued expansions (the server
+  // expansion endpoint is whole-book and cannot be filtered client-side honestly).
+  (async()=>{try{if(_filterActive()){setCount('c-expand',byMand('MUST_EXPAND'));return;}const e=await (await api('/api/expansion')).json();const n=(e.count||0)+byMand('MUST_EXPAND');setCount('c-expand',n);}catch(_){}})();
   // Support shareable company deep-links: #company/<account_id>
   const bh=(location.hash||'').replace('#','');
   if(bh.indexOf('company/')===0){ openAccount(bh.slice('company/'.length)); }
@@ -2495,14 +2524,30 @@ function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.t
 // and Upcoming Renewals — all from live signals; honest "not connected" otherwise.
 async function renderCommandCenter(){
   const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
-  const tasks=DATA.tasks||[], accts=filteredAccounts();
+  const tasks=filteredTasks(), accts=filteredAccounts();
   const openRisks=tasks.filter(t=>t.mandate==='MUST_PROTECT').length;
+  const _active=_filterActive();
   let exec={}; try{exec=await (await api('/api/executive')).json();}catch(_){}
-  // Upcoming QBRs: Strategic accounts in the proactive renewal cadence window.
-  const qbrs=(exec.renewals_90d!=null)?exec.renewals_90d:0;
+  // Upcoming QBRs: accounts entering the proactive renewal cadence window (next 90 days).
+  // Whole-book comes from the server; under an active filter, compute it from the filtered
+  // accounts so the headline matches what the user is looking at.
+  let qbrs;
+  if(_active){
+    const _asOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+    qbrs=accts.filter(a=>{if(!a.renewal_date||a.churned)return false;const dd=Math.round((new Date(a.renewal_date+(String(a.renewal_date).length<=10?'T00:00:00':''))-_asOf)/86400000);return dd>=0&&dd<=90;}).length;
+  } else {
+    qbrs=(exec.renewals_90d!=null)?exec.renewals_90d:0;
+  }
+  // Open Expansion: whole-book server pipeline by default; under a filter, intersect the
+  // candidate accounts with the filtered set (by name) so the figure stays honest.
   let exp={}; try{exp=await (await api('/api/expansion')).json();}catch(_){}
-  const expPipelineArr=(exp.candidates||[]).reduce((s,c)=>s+(c.arr_usd||0),0);
-  const expCount=exp.count||0;
+  let expCandidates=exp.candidates||[];
+  if(_active){
+    const _names=new Set(accts.map(a=>a.name||a.account_id));
+    expCandidates=expCandidates.filter(c=>_names.has(c.name)||_names.has(c.account)||_names.has(c.account_id));
+  }
+  const expPipelineArr=expCandidates.reduce((s,c)=>s+(c.arr_usd||0),0);
+  const expCount=_active?expCandidates.length:(exp.count||0);
   // Three headline stat cards (Open Risks / Upcoming QBRs / Open Expansion)
   const bigStat=(l,v,cls)=>'<div class="cc-big"><div class="cc-big-l">'+l+'</div><div class="cc-big-v '+(cls||'')+'">'+v+'</div></div>';
   const headline='<div class="cc-headline">'+
@@ -2788,15 +2833,15 @@ function render(v){
     renderScopeBar(s);
     renderCommandCenter();
   }
-  if(v==='queue') document.getElementById('queue-body').innerHTML=taskSummaryStrip(DATA.tasks,'All open actions across every mandate')+taskTable(DATA.tasks,true);
-  if(v==='protect'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
+  if(v==='queue'){const ft=filteredTasks();document.getElementById('queue-body').innerHTML=taskSummaryStrip(ft,'All open actions across every mandate')+taskTable(ft,true);}
+  if(v==='protect'){const t=filteredTasks().filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
   if(v==='expand'){
-    const tasks=DATA.tasks.filter(t=>t.mandate==='MUST_EXPAND');
+    const tasks=filteredTasks().filter(t=>t.mandate==='MUST_EXPAND');
     document.getElementById('expand-body').innerHTML=(tasks.length?taskTable(tasks,true):'')+
       '<div id="expand-oppos" class="body pad"><span class="muted">Loading expansion opportunities...</span></div>';
     loadExpansionOpportunities();
   }
-  if(v==='use'){const t=DATA.tasks.filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
+  if(v==='use'){const t=filteredTasks().filter(t=>t.mandate==='MUST_USE');document.getElementById('use-body').innerHTML=taskSummaryStrip(t,'Onboarding, adoption and contact hygiene')+taskTable(t,true);}
   if(v==='accounts') document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
   if(v==='scaled') scaledTab(_scaledTab||'pool');
   if(v==='mydash') myDashTab(_myDashTab||'dashboard');
