@@ -866,14 +866,6 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       </div>
     </div>
 
-    <div class="navsection collapsed" data-sec="onboard">
-      <button class="ns-head" onclick="toggleSection('onboard')"><span class="ns-ico ns-onboard">◇</span><span>Onboarding</span><span class="ns-caret">▾</span></button>
-      <div class="nav">
-        <button data-v="life" onclick="go('life')" title="Lifecycle"><span class="ico">◔</span> <span class="label">Lifecycle</span></button>
-        <button data-v="gaps" onclick="go('gaps')" title="Data Gaps"><span class="ico">◇</span> <span class="label">Data Gaps</span> <span class="count" id="c-gaps"></span></button>
-      </div>
-    </div>
-
     <div class="navsection collapsed" data-sec="risk">
       <button class="ns-head" onclick="toggleSection('risk')"><span class="ns-ico ns-risk">◆</span><span>Risk</span><span class="ns-caret">▾</span></button>
       <div class="nav">
@@ -915,6 +907,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="ns-head" onclick="toggleSection('mgmt')"><span class="ns-ico ns-mgmt">⚙</span><span>Management</span><span class="ns-caret">▾</span></button>
       <div class="nav">
         <button data-v="integrations" onclick="go('integrations')" title="Integrations"><span class="ico">⬡</span> <span class="label">Integrations</span></button>
+        <button data-v="gaps" onclick="go('gaps')" title="Data Gaps"><span class="ico">◇</span> <span class="label">Data Gaps</span> <span class="count" id="c-gaps"></span></button>
         <button data-v="playbook" onclick="go('playbook')" title="Playbook Controls"><span class="ico">⚙</span> <span class="label">Playbook Controls</span></button>
         <button data-v="audit" onclick="go('audit')" title="Audit Trail"><span class="ico">🛡</span> <span class="label">Audit Trail</span></button>
       </div>
@@ -1082,7 +1075,7 @@ const meta={
   protect:['Must Protect','Defensive risk playbooks'],
   expand:['Must Expand','Renewals and expansion'],
   use:['Must Use','Adoption and hygiene'],
-  life:['Lifecycle','Onboarding velocity and adoption'],
+  life:['Lifecycle','Onboarding velocity and adoption'], // retired from nav; kept for any old deep link, resolves to dash via initialView
   kpi:['Leadership KPIs','Capacity and portfolio allocation'],
   integrations:['Integrations','Connected systems across the CS stack'],
   playbook:['Playbook Controls','Governed CS rule proposals and review'],
@@ -3606,25 +3599,84 @@ async function loadGaps(){
   let g;
   try{ g=await (await fetch('/api/datagaps')).json(); }
   catch(e){ document.getElementById('gaps-body').innerHTML='<div class="empty">Could not load data gaps.</div>'; return; }
+  _gapsData=g;
+  _renderGaps();
+}
+// Data Gaps view state: which accounts to show and how to sort. Lets a CSM/RevOps user
+// drive straight to the cleanup that matters instead of scrolling a flat 1.3k-row table.
+let _gapsData=null, _gapsFilter='withgaps', _gapsSort='gaps';
+function gapsSet(k,v){ if(k==='filter')_gapsFilter=v; else if(k==='sort')_gapsSort=v; _renderGaps(); }
+function _renderGaps(){
+  const g=_gapsData; if(!g) return;
   const s=g.summary, cp=s.coverage_pct;
+  const all=g.accounts||[];
+  const withGaps=all.filter(a=>a.gap_count>0);
+  // Headline stats: coverage per source + the cleanup backlog (accounts carrying any gap).
   document.getElementById('gaps-stats').innerHTML=[
+    ['Accounts with gaps',withGaps.length,'of '+all.length+' need cleanup',withGaps.length>0?'warn':'good'],
     ['HubSpot coverage',cp.hubspot+'%','of accounts',''],
     ['Zendesk coverage',cp.zendesk+'%',s.not_in_zendesk+' not in Zendesk',s.not_in_zendesk>0?'warn':''],
     ['Stripe coverage',cp.stripe+'%',s.not_in_stripe+' not in Stripe',s.not_in_stripe>0?'warn':''],
     ['Pendo coverage',cp.usage+'%',s.not_in_pendo+' not in Pendo',s.not_in_pendo>0?'warn':''],
     ['Missing contact roles',s.accounts_missing_roles,'accounts need tagging',s.accounts_missing_roles>0?'warn':'']
   ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
-  const fieldGaps=Object.entries(s.hubspot_field_gaps).filter(kv=>kv[1]>0)
-    .map(kv=>'<span class="pill a">'+escapeHtml(kv[0])+': '+kv[1]+'</span>').join(' ')||'<span class="muted">none</span>';
-  document.getElementById('gaps-body').innerHTML=
-    '<div class="pad" style="padding:14px 22px"><b>HubSpot field gaps (accounts missing each):</b><div class="chips" style="margin-top:8px">'+fieldGaps+'</div><div class="sub" style="margin-top:10px"><b>Source legend:</b> green means a live account record was returned; amber means the connector is live but this account has no matching record; grey means the connector is unavailable. Only the named missing system requires account mapping work.</div></div>'+
-    '<table><thead><tr><th>Account</th><th>Coverage</th><th>Missing systems</th><th>Missing HubSpot fields</th><th>Missing roles</th></tr></thead><tbody>'+
-    g.accounts.map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
+
+  // HubSpot field gaps as ranked bars (how many accounts miss each required field),
+  // worst first - the "fix this field across the book first" view.
+  const fieldEntries=Object.entries(s.hubspot_field_gaps).sort((a,b)=>b[1]-a[1]);
+  const maxField=Math.max(1,...fieldEntries.map(kv=>kv[1]));
+  const fieldBars=fieldEntries.some(kv=>kv[1]>0)?('<div class="seg-bars">'+fieldEntries.map(kv=>{
+    const pct=Math.round((kv[1]/maxField)*100);
+    const band=kv[1]===0?'g':(kv[1]/(all.length||1))>=0.5?'r':'a';
+    return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(kv[0])+'</span><span class="seg-val">'+kv[1]+' <span class="muted" style="font-size:.85em">accounts</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+Math.max(kv[1]>0?6:0,pct)+'%;background:'+(band==='g'?'var(--green)':band==='r'?'var(--red)':'var(--amber)')+'"></span></div></div>';
+  }).join('')+'</div>'):'<span class="muted">No required HubSpot fields are missing.</span>';
+
+  // Filter + sort controls.
+  const pill=(label,active,on)=>'<span class="fpill '+(active?'active':'ghost')+'" style="cursor:pointer" onclick="'+on+'">'+label+'</span>';
+  const controls='<div class="filterbar" style="padding:10px 0 4px">'+
+    '<span class="muted" style="font-size:.78em;align-self:center;margin-right:4px">Show:</span>'+
+    pill('With gaps',_gapsFilter==='withgaps',"gapsSet('filter','withgaps')")+
+    pill('Missing fields',_gapsFilter==='fields',"gapsSet('filter','fields')")+
+    pill('Missing systems',_gapsFilter==='systems',"gapsSet('filter','systems')")+
+    pill('Missing roles',_gapsFilter==='roles',"gapsSet('filter','roles')")+
+    pill('All accounts',_gapsFilter==='all',"gapsSet('filter','all')")+
+    '<span class="muted" style="font-size:.78em;align-self:center;margin:0 4px 0 10px">Sort:</span>'+
+    pill('Most gaps',_gapsSort==='gaps',"gapsSet('sort','gaps')")+
+    pill('Name',_gapsSort==='name',"gapsSet('sort','name')")+
+  '</div>';
+
+  // Apply filter.
+  let shown=all;
+  if(_gapsFilter==='withgaps') shown=withGaps;
+  else if(_gapsFilter==='fields') shown=all.filter(a=>a.missing_fields.length>0);
+  else if(_gapsFilter==='systems') shown=all.filter(a=>a.missing_systems.length>0);
+  else if(_gapsFilter==='roles') shown=all.filter(a=>a.missing_roles.length>0);
+  shown=shown.slice();
+  if(_gapsSort==='name') shown.sort((x,y)=>String(x.name).localeCompare(String(y.name)));
+  else shown.sort((x,y)=>y.gap_count-x.gap_count);
+  // Cap rows for responsiveness on the whole book; note the cap honestly.
+  const CAP=200; const capped=shown.length>CAP; const rows=shown.slice(0,CAP);
+
+  const gapBadge=n=>n===0?'<span class="pill g">0</span>':'<span class="pill '+(n>=4?'r':'a')+'">'+n+'</span>';
+  const table='<table><thead><tr><th>Account</th><th>Gaps</th><th>Coverage</th><th>Missing systems</th><th>Missing HubSpot fields</th><th>Missing roles</th></tr></thead><tbody>'+
+    (rows.length?rows.map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
+      '<td>'+gapBadge(a.gap_count)+'</td>'+
       '<td>'+covDots(a.coverage_status||a.coverage)+'</td>'+
-      '<td>'+(a.missing_systems.length?a.missing_systems.map(escapeHtml).join(', '):'<span class="pill g">All tracked records present</span>')+'</td>'+
-      '<td>'+(a.missing_fields.length?a.missing_fields.map(escapeHtml).join(', '):'<span class="muted">-</span>')+'</td>'+
-      '<td>'+(a.missing_roles.length?'<span class="pill a">'+a.missing_roles.length+' missing</span>':'<span class="pill g">complete</span>')+'</td></tr>').join('')+
+      '<td>'+(a.missing_systems.length?a.missing_systems.map(escapeHtml).join(', '):'<span class="pill g">all present</span>')+'</td>'+
+      '<td>'+(a.missing_fields.length?a.missing_fields.map(escapeHtml).join(', '):'<span class="muted">none</span>')+'</td>'+
+      '<td>'+(a.missing_roles.length?'<span class="pill a">'+a.missing_roles.length+' missing</span>':'<span class="pill g">complete</span>')+'</td></tr>').join('')
+     :'<tr><td colspan="6" class="empty" style="padding:24px">Nothing to clean up in this view.</td></tr>')+
     '</tbody></table>';
+  const countNote=shown.length+' account'+(shown.length===1?'':'s')+(capped?(' · showing the worst '+CAP):'');
+
+  document.getElementById('gaps-body').innerHTML=
+    '<div class="pad" style="padding:14px 22px">'+
+      '<b>Required HubSpot fields missing (across the book):</b>'+
+      '<div style="margin-top:10px;max-width:560px">'+fieldBars+'</div>'+
+      '<div class="sub" style="margin-top:14px"><b>Source legend:</b> green means a live account record was returned; amber means the connector is live but this account has no matching record; grey means the connector is unavailable. Only the named missing system requires account mapping work.</div>'+
+      controls+
+      '<div class="muted" style="font-size:.82em;margin:2px 0 10px">'+countNote+'</div>'+
+    '</div>'+table;
 }
 
 // Transparent health-score breakdown (mirrors Planhat's factor scorecard). Renders the
