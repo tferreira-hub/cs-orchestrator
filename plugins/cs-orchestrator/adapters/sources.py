@@ -865,6 +865,21 @@ class HubSpot:
         # annualrevenue is the company's total revenue, not contract ARR; do not
         # use it as a fallback because it would corrupt CS revenue-risk reporting.
         arr = _num("arr__v2_", "arr", "hs_active_contracts_arr")
+        company_renewal = _first("hs_next_renewal_date", "renewal_date", "contract_renewal_date")
+        # Many companies have blank ARR / renewal on the COMPANY object; the real signal
+        # lives on the closed-won DEAL. Derive from the deal when the company is blank:
+        #   arr          <- deal hs_arr or amount
+        #   renewal_date <- deal (signed or close date) + contract_length__months_
+        # Live, evidence-grounded (real deal values), never invented.
+        deal_arr, deal_renewal = None, None
+        if arr is None or not company_renewal:
+            d = self._account_deal(c.get("id"))
+            if d:
+                deal_arr = d.get("arr_usd")
+                deal_renewal = d.get("renewal_date")
+        if arr is None and deal_arr:
+            arr = int(deal_arr)
+        renewal_date = company_renewal or deal_renewal
         # Real CS segment lives in icp_sales_segment (e.g. "Corporate", "Agency 21+ Users").
         raw_segment = _first("icp_sales_segment", "cs_segment")
         # Authoritative pooled/tier flag from HubSpot. When cs_customer_tier is set it is
@@ -879,9 +894,12 @@ class HubSpot:
             "customer_tier": customer_tier,             # authoritative tier (e.g. "Pooled") when set in HubSpot
             "pooled": pooled,                           # True/False when tier known; None when unset
             "arr_usd": arr,
+            "arr_source": ("company" if _num("arr__v2_", "arr", "hs_active_contracts_arr") is not None
+                           else ("deal" if deal_arr else None)),
             "state": _first("hs_state_code", "state"),
             "country": p.get("country"),
-            "renewal_date": _first("hs_next_renewal_date", "renewal_date", "contract_renewal_date"),
+            "renewal_date": renewal_date,
+            "renewal_source": ("company" if company_renewal else ("deal" if deal_renewal else None)),
             "subscription_type": p.get("subscription_type"),
             "csm_owner": self._owner_name(p.get("hubspot_owner_id")),
             "csm_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
@@ -943,6 +961,62 @@ class HubSpot:
             return out
         except Exception:  # noqa: BLE001
             return []
+
+    def _account_deal(self, company_id):
+        """Most relevant closed-won deal for a company, with a derived renewal date.
+
+        Many companies carry no ARR / renewal on the COMPANY object; the real contract
+        signal is on the deal. Reads the company's associated deals, picks the latest
+        closed-won one, and derives:
+          arr_usd      <- hs_arr or amount (real booked value)
+          renewal_date <- (deal_signed_date or closedate) + contract_length__months_
+        Returns None on any error so the account still renders. Live, not invented."""
+        if not company_id:
+            return None
+        try:
+            assoc = config.http_get(
+                f"https://api.hubapi.com/crm/v4/objects/companies/{company_id}/associations/deals?limit=25",
+                self._headers())
+            ids = [a.get("toObjectId") for a in assoc.get("results", []) if a.get("toObjectId")]
+            if not ids:
+                return None
+            body = {"inputs": [{"id": str(i)} for i in ids],
+                    "properties": ["amount", "hs_arr", "closedate", "deal_signed_date",
+                                   "contract_length__months_", "hs_is_closed_won", "dealstage"]}
+            res = config.http_post(
+                "https://api.hubapi.com/crm/v3/objects/deals/batch/read", self._headers(), body)
+            won = [r.get("properties", {}) for r in res.get("results", [])
+                   if str(r.get("properties", {}).get("hs_is_closed_won")).lower() == "true"]
+            pool = won or [r.get("properties", {}) for r in res.get("results", [])]
+            if not pool:
+                return None
+            pool.sort(key=lambda pr: pr.get("closedate") or "", reverse=True)
+            p = pool[0]
+
+            def _f(k):
+                try:
+                    return float(p.get(k) or 0) or None
+                except (TypeError, ValueError):
+                    return None
+
+            arr = _f("hs_arr") or _f("amount")
+            renewal = None
+            start = p.get("deal_signed_date") or p.get("closedate")
+            term = p.get("contract_length__months_")
+            if start and term:
+                try:
+                    from datetime import datetime
+                    base = datetime.fromisoformat(str(start)[:10])
+                    months = int(float(term))
+                    yy = base.year + (base.month - 1 + months) // 12
+                    mm = (base.month - 1 + months) % 12 + 1
+                    dd = min(base.day, 28)
+                    renewal = f"{yy:04d}-{mm:02d}-{dd:02d}"
+                except (ValueError, TypeError):
+                    renewal = None
+            return {"arr_usd": arr, "renewal_date": renewal}
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _map_segment(label):
