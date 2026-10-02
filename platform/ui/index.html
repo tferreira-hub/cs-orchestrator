@@ -2925,7 +2925,9 @@ function _renderPaymentRiskChrome(){
   const rows=((d.pages||{})[_prState.active])||[];
   const note=d.stripe_connected?('Live from Stripe · access suspends at day '+d.thresholds.access_suspend_days+', cancels at day '+d.thresholds.cancel_days):'Stripe not connected';
   const table='<div class="body"><table class="acct-list"><thead><tr><th>Customer</th><th>JobAdder ID</th><th>Billing contact</th><th>CSM</th><th>Billing info</th><th>Access impact</th></tr></thead><tbody>'+_prRows(rows)+'</tbody></table></div>';
-  const errBanner=d.source_error?'<div class="supp" style="margin:8px 16px">Could not load live Stripe data: '+escapeHtml(d.source_error)+'</div>':'';
+  // Only show a quiet, user-facing note if live Stripe data genuinely could not be
+  // retrieved. Never surface the raw internal error / key-guard details to CSMs.
+  const errBanner=d.source_error?'<div class="supp" style="margin:8px 16px">Live billing data is temporarily unavailable. Please try again shortly.</div>':'';
   host.innerHTML='<div class="panel"><div class="head"><h2>Payment Risk Report</h2><span class="note'+(d.stripe_connected?'':' warn')+'">'+escapeHtml(note)+'</span></div>'+errBanner+tabs+table+'</div>';
 }
 async function renderPaymentRisk(){

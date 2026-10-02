@@ -211,11 +211,16 @@ variable "app_environment" {
   description = "Non-secret environment variables injected into the task definition."
   type        = map(string)
   default = {
-    AWS_REGION                   = "ap-southeast-2"
-    CS_SECURE_COOKIE             = "1"
-    CS_PENDO_ACTIVITY            = "1"
-    CS_STALE_REVALIDATE          = "1"
-    CS_CACHE_TTL                 = "600"
+    AWS_REGION          = "ap-southeast-2"
+    CS_SECURE_COOKIE    = "1"
+    CS_PENDO_ACTIVITY   = "1"
+    CS_STALE_REVALIDATE = "1"
+    CS_CACHE_TTL        = "600"
+    # Stripe is accessed with the live SECRET key currently in SSM; permit it until a
+    # restricted read-only key (rk_...) is issued. Needed by the Payment Risk Report and
+    # any live dunning signals. SECURITY: prefer rotating STRIPE_KEY to an rk_ key and
+    # removing this override.
+    CS_ALLOW_STRIPE_SECRET_KEY   = "1"
     CS_BEDROCK_REGION            = "ap-southeast-2"
     CS_BEDROCK_MODEL             = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
     ZENDESK_SUBDOMAIN            = "jobadder"
