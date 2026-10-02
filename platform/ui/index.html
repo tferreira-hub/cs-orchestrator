@@ -4113,6 +4113,7 @@ function renderCompanyPage(id,d){
     _writebackPanel(id,d)+
     _notesRolesPanel(id,d)+
     _csqlPanel(id,d)+
+    _digestPanel(id,d)+
   '</div>';
   document.getElementById('company-body').innerHTML=tabs+'<div class="company-wrap">'+left+rail+'</div>';
   go('company');
@@ -4121,6 +4122,8 @@ function renderCompanyPage(id,d){
   if(typeof adSyncScope==='function') adSyncScope();
   if(('#company/'+id)!==location.hash) history.replaceState(null,'',('#company/'+id));
   window.scrollTo({top:0,behavior:'instant'});
+  // Lazily load the monthly digest preview (fire-and-forget) so the planning tab fills in.
+  try{ loadDigestPreview(id); }catch(e){}
 }
 
 // Write-back panel (Account Planning): shows the CS data that would sync to HubSpot and
@@ -4257,6 +4260,52 @@ async function applyCsql(id,btn){
     else if(res.mode==='not-connected'){ if(status)status.textContent='HubSpot is not connected.'; }
     else { if(status)status.textContent='Prepared (not applied).'; }
   }catch(e){ if(status)status.textContent='Could not create the deal.'; }
+  finally{ if(btn)btn.disabled=false; }
+}
+// Monthly performance digest (Scenario E): compile the per-account digest from live signals
+// and (gated) send it to the Primary Admin. Dry-run-safe until an email provider is wired.
+function _digestPanel(id,d){
+  return '<div class="cp-section" data-cpt="planning"><div class="cp-shead"><h2>Monthly performance digest</h2></div>'+
+    '<div class="writeback" style="background:#fff" id="digest-wrap-'+escapeHtml(id)+'">'+
+    '<span class="muted">Loading digest preview…</span></div></div>';
+}
+async function loadDigestPreview(id){
+  const wrap=document.getElementById('digest-wrap-'+id); if(!wrap) return;
+  let g; try{ g=await (await api('/api/accounts/'+encodeURIComponent(id)+'/digest')).json(); }
+  catch(e){ wrap.innerHTML='<span class="muted">Digest preview unavailable.</span>'; return; }
+  const m=g.metrics||{};
+  const row=(label,val,suffix)=>'<div class="dc-row"><span>'+label+'</span><b>'+(val!=null&&val!==''?escapeHtml(String(val))+(suffix||''):'<span class="muted">no data</span>')+'</b></div>';
+  const cta=g.expansion_cta?'<div class="callout" style="margin:8px 0;background:#eefaf0;border-color:#bfe6cb">Licence utilisation ≥ 85% → the digest includes an inline <b>Add Seats / Upgrade</b> expansion CTA.</div>':'';
+  const recipient=g.missing_primary_admin
+    ? '<div class="supp" style="margin:0 0 10px">No <b>Primary Admin</b> tagged — tag one (above) before the digest can be sent.</div>'
+    : '<div style="margin:0 0 10px">Recipient: <b>'+escapeHtml(g.recipient_name||g.recipient||'')+'</b> ('+escapeHtml(g.recipient||'')+')</div>';
+  wrap.innerHTML=recipient+
+    '<div class="muted" style="font-size:.82em;margin-bottom:6px">'+escapeHtml(g.period||'')+' · from live signals</div>'+
+    row('Licence utilisation',m.licence_utilization_pct,'%')+
+    row('Active logins (7d)',m.active_logins_7d)+
+    row('Top feature adoption',m.top_feature_adoption_pct,'%')+
+    row('Tickets resolved (30d)',m.tickets_resolved_30d)+
+    row('CSAT (30d)',m.csat_30d)+
+    cta+
+    '<div style="margin-top:10px;display:flex;gap:8px;align-items:center">'+
+      '<button class="btn" '+(g.missing_primary_admin?'disabled':'')+' onclick="applySendDigest(\''+escapeHtml(id)+'\',this)">Send to Primary Admin</button>'+
+      '<span class="muted" id="digest-status-'+escapeHtml(id)+'" style="font-size:.85em"></span>'+
+    '</div>';
+}
+async function applySendDigest(id,btn){
+  if(!confirm('Send the monthly performance digest to the Primary Admin for this account?')) return;
+  const status=document.getElementById('digest-status-'+id);
+  if(btn)btn.disabled=true; if(status)status.textContent='Sending…';
+  try{
+    const r=await api('/api/accounts/'+encodeURIComponent(id)+'/send-digest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(r.status===403){ if(status)status.textContent='You can only send digests for accounts you own.'; }
+    else if(res.sent){ if(status)status.textContent='Sent to '+escapeHtml(res.recipient||'Primary Admin')+' ✓'; }
+    else if(res.mode==='no-recipient'){ if(status)status.textContent='No Primary Admin tagged.'; }
+    else if(res.mode==='no-email-provider'){ if(status)status.textContent='Prepared — no email provider connected yet.'; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (writes disabled on this environment).'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not send the digest.'; }
   finally{ if(btn)btn.disabled=false; }
 }
 // shows all). Fixes the previously-dead Related Data / Usage / Revenue / Account Planning tabs.

@@ -868,6 +868,14 @@ class Handler(BaseHTTPRequestHandler):
                 # Live Payment Risk Report (Stripe dunning + HubSpot billing/CSM + derived
                 # JobAdder admin link), owner-scoped. Honest empty when Stripe not connected.
                 self._json(200, engine.payment_risk_report()); return
+            if path.startswith("/api/accounts/") and path.endswith("/digest"):
+                account_id = path[len("/api/accounts/"):-len("/digest")].strip("/")
+                try:
+                    self._json(200, engine.monthly_digest(account_id)); return
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "forbidden"}); return
+                except KeyError:
+                    self._json(404, {"error": "account not found"}); return
             if path == "/api/playbook":
                 self._json(200, _playbook_summary()); return
             if path == "/api/agent/feedback/summary":
@@ -1101,6 +1109,25 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, engine.tag_contact_role(account_id, email, role, apply=apply_write))
                 except (KeyError, ValueError) as exc:
                     self._json(400, {"error": str(exc)})
+                return
+            if path.startswith("/api/accounts/") and path.endswith("/send-digest"):
+                account_id = path[len("/api/accounts/"):-len("/send-digest")].strip("/")
+                apply_write = bool(body.get("apply", False))
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only send digests for accounts you own."})
+                    return
+                try:
+                    record_audit("send_digest", principal,
+                                 {"account_id": account_id, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.send_digest(account_id, apply=apply_write))
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "forbidden"})
+                except KeyError:
+                    self._json(404, {"error": "account not found"})
                 return
             if path.startswith("/api/accounts/") and path.endswith("/create-csql"):
                 account_id = path[len("/api/accounts/"):-len("/create-csql")].strip("/")

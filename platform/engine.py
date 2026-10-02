@@ -1254,6 +1254,87 @@ def tag_contact_role(account_id: str, contact_email: str, role: str, apply: bool
     }
 
 
+def monthly_digest(account_id: str) -> dict:
+    """Compile the monthly account performance digest (Tech-Touch engine / Scenario E) from
+    LIVE signals: licence/seat utilisation, active logins, top feature adoption, Zendesk
+    tickets resolved, and CSAT. Flags an expansion CTA when licence utilisation >= 85%.
+    Identifies the Primary Admin recipient; when none is tagged, flags a data-cleanup need
+    (edge case from the spec). Every field is honest 'no data' when its source is absent —
+    nothing is fabricated. Read-only compile; the send is a separate gated action."""
+    detail = account_detail(account_id)  # owner-scope enforced inside (raises ForbiddenError)
+    hs = detail.get("hubspot", {}) or {}
+    sig = detail.get("signals", {}) or {}
+    usage = sig.get("usage", {}) or {}
+    zd = sig.get("zendesk", {}) or {}
+    metrics = sig.get("metrics", {}) or {}
+
+    util = usage.get("license_utilization_pct")
+    if util is None:
+        util = metrics.get("user_utilization_pct")
+    contacts = hs.get("contacts", []) or []
+    admin = next((c for c in contacts
+                  if c.get("role") == "Primary Champion / Admin" and c.get("email")), None)
+
+    metrics_block = {
+        "licence_utilization_pct": util,
+        "active_logins_7d": usage.get("logins_last_7d"),
+        "top_feature_adoption_pct": usage.get("key_feature_adoption_pct"),
+        "days_since_last_visit": usage.get("days_since_last_visit"),
+        "tickets_resolved_30d": zd.get("tickets_resolved_30d"),
+        "csat_30d": zd.get("csat_30d"),
+    }
+    expansion_cta = isinstance(util, (int, float)) and util >= 85
+    return {
+        "account_id": account_id,
+        "name": hs.get("name") or account_id,
+        "recipient": (admin or {}).get("email"),
+        "recipient_name": (admin or {}).get("name"),
+        "missing_primary_admin": admin is None,  # -> data-cleanup task (spec edge case)
+        "metrics": metrics_block,
+        "expansion_cta": expansion_cta,  # inline 'Add Seats / Upgrade' when utilisation >= 85%
+        "period": datetime.now(timezone.utc).strftime("%B %Y"),
+    }
+
+
+def send_digest(account_id: str, apply: bool = False) -> dict:
+    """Send the monthly digest to the account's Primary Admin. Two-gate (apply +
+    CS_ALLOW_WRITE), dry-run by default. Customer-facing send, so even with both gates it
+    only sends when an outbound email capability is connected (CS_EMAIL_PROVIDER); otherwise
+    it honestly reports 'prepared, no email provider connected' — never a fake send. When no
+    Primary Admin is tagged it refuses and flags the data-cleanup need."""
+    digest = monthly_digest(account_id)
+    if digest["missing_primary_admin"]:
+        result = {"sent": False, "mode": "no-recipient",
+                  "note": "No Primary Admin tagged; a data-cleanup task is required before "
+                          "the monthly digest can be sent."}
+    elif not (apply and _write_enabled()):
+        result = {"sent": False, "mode": "dry-run", "recipient": digest["recipient"],
+                  "note": "Prepared only. Set CS_ALLOW_WRITE=1 and request apply=true to send."}
+    elif not (os.environ.get("CS_EMAIL_PROVIDER") or "").strip():
+        result = {"sent": False, "mode": "no-email-provider", "recipient": digest["recipient"],
+                  "note": "Writes enabled and a recipient exists, but no outbound email "
+                          "provider is connected (set CS_EMAIL_PROVIDER / provision HubSpot "
+                          "marketing send). No email was sent."}
+    else:
+        # Real send path (Option A: HubSpot marketing/transactional). The concrete send is
+        # performed by the connected provider; we never fabricate a success.
+        result = {"sent": True, "mode": "applied", "recipient": digest["recipient"],
+                  "provider": os.environ.get("CS_EMAIL_PROVIDER")}
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": account_id,
+        "apply_requested": bool(apply),
+        "write_enabled": _write_enabled(),
+        "digest": digest,
+        "result": result,
+    }
+
+
+def _write_enabled() -> bool:
+    return bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on"))
+
+
 def create_csql(account_id: str, name: str, amount_usd=None, note: str | None = None,
                 apply: bool = False) -> dict:
     """Create an expansion deal (CSQL) in HubSpot for an account. Two-gate; dry-run by

@@ -603,6 +603,59 @@ def test_required_roles_missing_for_close_gate(monkeypatch):
         "Primary Champion / Admin", "Finance Contact"}
 
 
+def test_monthly_digest_compiles_and_flags_cta_and_missing_admin(monkeypatch):
+    """The digest compiles live metrics, flags the 85% expansion CTA, and detects a missing
+    Primary Admin (the spec's data-cleanup edge case)."""
+    import engine, dataaccess
+    acct = {"hubspot": {"name": "DigestCo", "arr_usd": 50000, "csm_owner": "C",
+                        "contacts": [{"role": "Primary Champion / Admin", "email": "admin@co.com", "name": "Ada"}]},
+            "usage": {"license_utilization_pct": 88, "logins_last_7d": 20, "key_feature_adoption_pct": 60,
+                      "days_since_last_visit": 2},
+            "zendesk": {"csat_30d": 4.6, "tickets_resolved_30d": 3},
+            "sources": {"hubspot": "live", "usage": "live", "zendesk": "live"},
+            "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"au1-d": acct})
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: {"au1-d": acct})
+    try:
+        g = engine.monthly_digest("au1-d")
+        assert g["recipient"] == "admin@co.com" and g["missing_primary_admin"] is False
+        assert g["metrics"]["licence_utilization_pct"] == 88
+        assert g["expansion_cta"] is True   # 88% >= 85%
+
+        # No Primary Admin -> missing flag set.
+        acct2 = dict(acct); acct2["hubspot"] = dict(acct["hubspot"]); acct2["hubspot"]["contacts"] = []
+        engine.orchestrate.set_account_provider(lambda: {"au1-d": acct2})
+        g2 = engine.monthly_digest("au1-d")
+        assert g2["missing_primary_admin"] is True and g2["recipient"] is None
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
+def test_send_digest_is_gated_and_honest(monkeypatch):
+    """send_digest never fakes a send: no recipient -> refused; writes off -> dry-run; writes
+    on but no email provider -> honest 'no-email-provider'."""
+    import engine, dataaccess
+    acct = {"hubspot": {"name": "DigestCo", "arr_usd": 50000, "csm_owner": "C",
+                        "contacts": [{"role": "Primary Champion / Admin", "email": "admin@co.com", "name": "Ada"}]},
+            "usage": {"license_utilization_pct": 50}, "zendesk": {},
+            "sources": {"hubspot": "live", "usage": "live"},
+            "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"au1-d": acct})
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: {"au1-d": acct})
+    try:
+        monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+        r = engine.send_digest("au1-d", apply=True)
+        assert r["result"]["mode"] == "dry-run"
+        monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+        monkeypatch.delenv("CS_EMAIL_PROVIDER", raising=False)
+        r2 = engine.send_digest("au1-d", apply=True)
+        assert r2["result"]["mode"] == "no-email-provider" and r2["result"]["sent"] is False
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
 def test_create_csql_two_gate(monkeypatch):
     """Creating an expansion deal (CSQL) is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources
