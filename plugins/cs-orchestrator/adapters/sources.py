@@ -429,6 +429,7 @@ class Stripe:
         if not data:
             raise config.SourceError(f"Stripe customer not found for {ref}")
         cid = data[0]["id"]
+        cust_email = data[0].get("email") or None
         inv = config.http_get(
             f"https://api.stripe.com/v1/invoices?customer={cid}&status=open&limit=100", headers
         )
@@ -443,6 +444,10 @@ class Stripe:
             "days_past_due": days_past_due or None,
             "amount_due_usd": amount,
             "dunning_stage": stage,
+            # Identity for the Payment Risk Report: the Stripe customer id builds the
+            # dashboard link, and the customer email is a billing-contact fallback.
+            "customer_id": cid,
+            "customer_email": cust_email,
             "_source": "stripe-live",
         }
 

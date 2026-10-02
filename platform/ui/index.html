@@ -915,6 +915,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="ns-head" onclick="toggleSection('reports')"><span class="ns-ico ns-reports">▦</span><span>Reports</span><span class="ns-caret">▾</span></button>
       <div class="nav">
         <button data-v="reports" onclick="go('reports')" title="Tableau Reports"><span class="ico">▦</span> <span class="label">Tableau Reports</span></button>
+        <button data-v="paymentrisk" onclick="go('paymentrisk')" title="Payment Risk Report"><span class="ico">⚠</span> <span class="label">Payment Risk Report</span></button>
       </div>
     </div>
 
@@ -1020,6 +1021,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div id="pooled-leafbody"></div>
       </section>
       <section class="view" id="v-reports"><div id="reports-body"></div></section>
+      <section class="view" id="v-paymentrisk"><div id="paymentrisk-body"></div></section>
       <section class="view" id="v-agent">
         <div class="agent-studio"><div class="agent-chrome"><span class="agent-lights"><i></i><i></i><i></i></span><span class="agent-tab">cs-orchestrator</span><span class="agent-path">Agent Automation / live session</span></div><div class="agent-workspace"><div class="agent-editor"><div class="agent-editor-head"><strong>CS Agent</strong> portfolio conversation</div><div class="agent-editor-body"><div id="agentOut" class="agent-thread"><div class="agent-turn assistant"><div class="agent-avatar">CS</div><div class="agent-bubble"><span style="color:#b5c1d9">Ready. Ask about your live portfolio and I will return a judged, evidence-backed answer.</span></div></div></div></div><div class="agent-compose"><div class="agent-compose-box"><span class="agent-prefix">@cs-orchestrator</span><input id="agentQ" placeholder="Ask about your portfolio..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAgent();}"><button onclick="askAgent()">Send</button></div><div class="agent-compose-hint">Enter to send · live sources · human approval required</div></div></div><aside class="agent-rail"><h3>Session context</h3><div class="agent-rail-card"><b><span class="live-dot"></span>Live portfolio</b><span>25 accounts · current book</span></div><div class="agent-rail-card"><b>WoW judge</b><span>PASS · signed rules active</span></div><div class="agent-rail-card"><b>Model + Harness</b><span>Bedrock explains. Rules decide.</span></div><h3 style="margin-top:22px">Start with</h3><div class="agent-shortcuts"><button onclick="agentAsk('What are my top 3 actions today?')">Top actions</button><button onclick="agentAsk('Which account needs protection first?')">Protect first</button><button onclick="agentAsk('Which Strategic accounts are disengaged?')">Disengaged accounts</button><button onclick="agentAsk('Where are the expansion signals?')">Expansion signals</button></div></aside></div></div><div class="panel" style="margin-top:18px"><div class="head"><h2>Harness Feedback</h2><span class="note">Anonymous review signals used to improve rules and prompts</span></div><div class="body pad" id="agent-feedback-summary"><span class="muted">No feedback recorded yet.</span></div></div>
       </section>
@@ -1087,6 +1089,7 @@ const meta={
   objadopt:['Objectives & Adoption','Customer objectives and product adoption'],
   pooled:['Pooled CS','Pooled 1-20 agency and Corporate accounts'],
   reports:['Reports','Your Tableau dashboards, embedded live'],
+  paymentrisk:['Payment Risk Report','Failed payments and access/cancellation risk, live from Stripe'],
   protect:['Must Protect','Defensive risk playbooks'],
   expand:['Must Expand','Renewals and expansion'],
   use:['Must Use','Adoption and hygiene'],
@@ -2885,6 +2888,59 @@ async function renderTableauReports(){
   _tableauMount();
 }
 
+// ===== Payment Risk Report — live from Stripe dunning + HubSpot + JobAdder admin =====
+// Four pages: Payment failed, Access risk (7d), Access risk (14d), Cancellation risk.
+// Every row is derived live; nothing is pasted. Columns mirror the manual report:
+// Customer | JobAdder ID | Billing contact | CSM | Billing info (Stripe) | Access impact (admin).
+const PR_PAGES=[
+  ['payment_failed','Payment failed'],
+  ['access_risk_7d','Access risk · next 7 days'],
+  ['access_risk_14d','Access risk · next 14 days'],
+  ['cancellation_risk','Cancellation risk'],
+];
+let _prState={active:'payment_failed', data:null};
+function prSelect(k){ _prState.active=k; _renderPaymentRiskChrome(); }
+function _prRows(rows){
+  if(!rows||!rows.length) return '<tr><td colspan="6" class="empty" style="padding:24px">No accounts in this bucket right now.</td></tr>';
+  return rows.map(r=>{
+    const ja=escapeHtml(r.account_id||'');
+    const stripe=r.stripe_url?'<a href="'+escapeHtml(r.stripe_url)+'" target="_blank" rel="noopener">Stripe customer ↗</a>':'<span class="muted">no data</span>';
+    const admin=r.admin_url?'<a href="'+escapeHtml(r.admin_url)+'" target="_blank" rel="noopener">JobAdder admin ↗</a>':'<span class="muted">no data</span>';
+    const dpd=(r.days_past_due!=null)?(' · '+r.days_past_due+'d past due'):'';
+    return '<tr class="click" onclick="openAccount(\''+ja+'\')"><td><strong>'+escapeHtml(r.name||r.account_id)+'</strong><div class="sub muted">'+escapeHtml(r.dunning_stage||'')+dpd+'</div></td>'+
+      '<td class="mono">'+ja+'</td>'+
+      '<td class="muted">'+(r.billing_contact?escapeHtml(r.billing_contact):'<span class="muted">no data</span>')+'</td>'+
+      '<td class="muted">'+(r.csm_owner?escapeHtml(r.csm_owner):'<span class="muted">no owner</span>')+'</td>'+
+      '<td>'+stripe+'</td>'+
+      '<td>'+admin+'</td></tr>';
+  }).join('');
+}
+function _renderPaymentRiskChrome(){
+  const host=document.getElementById('paymentrisk-body'); if(!host) return;
+  const d=_prState.data; if(!d) return;
+  const counts=d.counts||{};
+  const tabs='<div class="tb-tabs">'+PR_PAGES.map(([k,label])=>
+    '<button class="tb-tab'+(k===_prState.active?' active':'')+'" onclick="prSelect(\''+k+'\')">'+escapeHtml(label)+' <span class="mtg-count">'+(counts[k]||0)+'</span></button>').join('')+'</div>';
+  const rows=((d.pages||{})[_prState.active])||[];
+  const note=d.stripe_connected?('Live from Stripe · access suspends at day '+d.thresholds.access_suspend_days+', cancels at day '+d.thresholds.cancel_days):'Stripe not connected';
+  const table='<div class="body"><table class="acct-list"><thead><tr><th>Customer</th><th>JobAdder ID</th><th>Billing contact</th><th>CSM</th><th>Billing info</th><th>Access impact</th></tr></thead><tbody>'+_prRows(rows)+'</tbody></table></div>';
+  host.innerHTML='<div class="panel"><div class="head"><h2>Payment Risk Report</h2><span class="note'+(d.stripe_connected?'':' warn')+'">'+escapeHtml(note)+'</span></div>'+tabs+table+'</div>';
+}
+async function renderPaymentRisk(){
+  const host=document.getElementById('paymentrisk-body'); if(!host) return;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading payment risk…</span></div></div>';
+  let d;
+  try{ d=await (await api('/api/payment-risk')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load the payment risk report.</div></div></div>'; return; }
+  _prState={active:'payment_failed', data:d};
+  if(!d.stripe_connected){
+    host.innerHTML='<div class="panel"><div class="head"><h2>Payment Risk Report</h2><span class="note warn">Stripe not connected</span></div>'+
+      '<div class="body pad"><div class="empty"><b>Stripe is not connected</b><div class="sub" style="margin-top:6px">This report is built live from Stripe dunning plus the HubSpot billing contact and CSM, with the JobAdder admin link derived per account. Set the Stripe key to populate it. No sample data is shown.</div></div></div></div>';
+    return;
+  }
+  _renderPaymentRiskChrome();
+}
+
 function render(v){
   // Defensive: never attempt to render account/task data before the portfolio has
   // loaded. If a view is opened during boot, retry once DATA is ready.
@@ -2927,6 +2983,7 @@ function render(v){
   if(v==='objadopt') objAdoptTab(_objAdoptTab||'adoption');
   if(v==='pooled') pooledLeaf(_pooledLeaf||'process');
   if(v==='reports') renderTableauReports();
+  if(v==='paymentrisk') renderPaymentRisk();
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
   if(v==='agent') loadAgentFeedbackSummary();

@@ -1789,6 +1789,113 @@ def datagaps() -> dict:
     }
 
 
+def _admin_url(account_ref: str) -> str | None:
+    """Derive the JobAdder admin account URL from the account ref, e.g.
+    au5-402271 -> https://au5admin.jobadder.com/accounts/402271. Returns None when the
+    ref does not parse to a shard+tenant."""
+    from adapters import identity as _identity
+    p = _identity.parse(account_ref or "")
+    if not p:
+        return None
+    return f"https://{p['shard']}admin.jobadder.com/accounts/{p['tenant']}"
+
+
+def _billing_contact(hs: dict, stripe: dict) -> str | None:
+    """Billing contact for the Payment Risk Report: the HubSpot Finance Contact if tagged,
+    otherwise the Stripe customer email, otherwise any first contact's email. Live only."""
+    contacts = hs.get("contacts", []) or []
+    for c in contacts:
+        if c.get("role") == "Finance Contact":
+            return c.get("email") or c.get("name")
+    if stripe.get("customer_email"):
+        return stripe["customer_email"]
+    for c in contacts:
+        if c.get("email"):
+            return c.get("email")
+    return None
+
+
+def _payment_thresholds() -> dict:
+    """Access-suspension and cancellation day thresholds (days past due). Configurable so
+    the report matches JobAdder's real dunning schedule without a code change. Defaults are
+    conservative placeholders; set CS_ACCESS_SUSPEND_DAYS / CS_CANCEL_DAYS to the real
+    values."""
+    def _int(name, default):
+        try:
+            return int(os.environ.get(name, "").strip() or default)
+        except ValueError:
+            return default
+    return {
+        "access_suspend_days": _int("CS_ACCESS_SUSPEND_DAYS", 21),
+        "cancel_days": _int("CS_CANCEL_DAYS", 30),
+    }
+
+
+def payment_risk_report() -> dict:
+    """Payment Risk Report (live). Buckets the owner-scoped book into pages driven by live
+    Stripe dunning (days past due) plus configurable access/cancellation thresholds:
+
+      - payment_failed:    an open invoice is past due now (dunning_stage != none).
+      - access_risk_7d:    days past due is within 7 days of the access-suspension threshold.
+      - access_risk_14d:   within 14 days (and not already in the 7d bucket).
+      - cancellation_risk: days past due is within 14 days of the cancellation threshold.
+
+    Each row carries the fields the manual report tracks, all from live sources: customer
+    name, JobAdder id, billing contact (Finance Contact or Stripe email), CSM owner, the
+    Stripe customer dashboard link, and the derived JobAdder admin link. Honest empty when
+    Stripe is not connected — no data is fabricated."""
+    th = _payment_thresholds()
+    suspend_at, cancel_at = th["access_suspend_days"], th["cancel_days"]
+    stripe_live = "Stripe" in set(dataaccess.live_sources())
+
+    def _row(aid: str, a: dict, stripe: dict) -> dict:
+        hs = a.get("hubspot", {}) or {}
+        return {
+            "account_id": aid,
+            "name": hs.get("name") or aid,
+            "billing_contact": _billing_contact(hs, stripe),
+            "csm_owner": hs.get("csm_owner") or None,
+            "days_past_due": stripe.get("days_past_due"),
+            "amount_due_usd": stripe.get("amount_due_usd"),
+            "dunning_stage": stripe.get("dunning_stage"),
+            "stripe_url": (f"https://dashboard.stripe.com/customers/{stripe['customer_id']}"
+                           if stripe.get("customer_id") else None),
+            "admin_url": _admin_url(aid),
+        }
+
+    pages = {"payment_failed": [], "access_risk_7d": [], "access_risk_14d": [],
+             "cancellation_risk": []}
+    for aid, a in _scoped_accounts().items():
+        stripe = a.get("stripe", {}) or {}
+        dd = stripe.get("days_past_due")
+        stage = stripe.get("dunning_stage")
+        if not stage or stage == "none" or dd is None:
+            continue  # no live past-due signal -> not on the report
+        row = _row(aid, a, stripe)
+        # Payment failed: anything currently past due.
+        pages["payment_failed"].append(row)
+        # Access risk: how close the account is to the access-suspension threshold.
+        days_to_suspend = suspend_at - dd
+        if 0 <= days_to_suspend <= 7:
+            pages["access_risk_7d"].append(row)
+        elif 7 < days_to_suspend <= 14:
+            pages["access_risk_14d"].append(row)
+        # Cancellation risk: within 14 days of the cancellation threshold.
+        days_to_cancel = cancel_at - dd
+        if 0 <= days_to_cancel <= 14:
+            pages["cancellation_risk"].append(row)
+
+    for key in pages:
+        pages[key].sort(key=lambda r: -(r.get("days_past_due") or 0))
+
+    return {
+        "stripe_connected": stripe_live,
+        "thresholds": th,
+        "pages": pages,
+        "counts": {k: len(v) for k, v in pages.items()},
+    }
+
+
 if __name__ == "__main__":
     import json
     print(json.dumps(portfolio()["summary"], indent=2))

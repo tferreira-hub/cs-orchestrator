@@ -864,6 +864,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.integrations()); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
+            if path == "/api/payment-risk":
+                # Live Payment Risk Report (Stripe dunning + HubSpot billing/CSM + derived
+                # JobAdder admin link), owner-scoped. Honest empty when Stripe not connected.
+                self._json(200, engine.payment_risk_report()); return
             if path == "/api/playbook":
                 self._json(200, _playbook_summary()); return
             if path == "/api/agent/feedback/summary":
