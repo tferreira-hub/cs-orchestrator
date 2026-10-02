@@ -838,6 +838,10 @@ class Handler(BaseHTTPRequestHandler):
                 cohort = (query.get("cohort") or ["all"])[0]
                 cohort = cohort if cohort in ("managed", "pooled") else None
                 self._json(200, engine.full_roster(cohort=cohort)); return
+            if path == "/api/cohort/pooled":
+                # Preview the 1-20 Agency + Corporate cohort (count + ARR + owners) that the
+                # move-to-pooled action would touch. Owner-scoped inside the engine.
+                self._json(200, engine.pooled_cohort()); return
             if path == "/api/daily-brief":
                 self._json(200, engine.daily_brief()); return
             if path == "/api/accounts":
@@ -1141,6 +1145,27 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 try:
                     self._json(200, engine.run_monthly_digests(apply=apply_write))
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": str(exc)})
+                return
+            if path == "/api/cohort/move-to-pooled":
+                # Move the 1-20 Agency + Corporate cohort (or an explicit account_ids list)
+                # to the pooled structure in HubSpot. Owner-scoped per account inside the
+                # engine; two-gated + dry-run default; audited. Reversible.
+                apply_write = bool(body.get("apply", False))
+                account_ids = body.get("account_ids")
+                clear_owner = bool(body.get("clear_owner", True))
+                if account_ids is not None and not isinstance(account_ids, list):
+                    self._json(400, {"error": "account_ids must be a list"}); return
+                try:
+                    record_audit("move_to_pooled", principal,
+                                 {"apply": apply_write, "clear_owner": clear_owner,
+                                  "account_ids": account_ids})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.move_to_pooled(account_ids=account_ids,
+                                                           clear_owner=clear_owner, apply=apply_write))
                 except Exception as exc:  # noqa: BLE001
                     self._json(500, {"error": str(exc)})
                 return

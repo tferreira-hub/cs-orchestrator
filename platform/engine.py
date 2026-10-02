@@ -1442,6 +1442,105 @@ def create_csql(account_id: str, name: str, amount_usd=None, note: str | None = 
     }
 
 
+# The pooled (Scaled) cohort = sub-$10k structure: 1-20 user Agency tiers + Corporate.
+# Authoritative when HubSpot sets cs_customer_tier="Pooled"; otherwise this segment set is
+# the heuristic (same definition the portfolio uses for the pooled/managed split).
+POOLED_SEGMENTS = ("Agency 1-2 Users", "Agency 3-20 Users", "Corporate")
+
+
+def pooled_cohort(account_ids: list[str] | None = None) -> dict:
+    """Resolve the 1-20 Agency + Corporate cohort for the current principal (owner-scoped),
+    with count + ARR + current owners, so the move-to-pooled action can preview exactly what
+    it will touch. When account_ids is given, restrict to those; otherwise scan the book."""
+    accounts = orchestrate.load_accounts()
+    rows = []
+    total_arr = 0
+    for aid, a in accounts.items():
+        if account_ids is not None and aid not in account_ids:
+            continue
+        if not can_view_account(aid):
+            continue
+        live = _live_account(a)
+        hs = live.get("hubspot", {}) or {}
+        tier = hs.get("customer_tier")
+        seg = hs.get("segment_label") or hs.get("segment")
+        already_pooled = (str(tier or "").lower() == "pooled") or bool(hs.get("pooled"))
+        in_cohort = already_pooled or (seg in POOLED_SEGMENTS)
+        if not in_cohort:
+            continue
+        arr = hs.get("arr_usd") or 0
+        total_arr += arr
+        rows.append({"account_id": aid, "name": hs.get("name"), "segment": seg,
+                     "customer_tier": tier, "already_pooled": already_pooled,
+                     "csm_owner": hs.get("csm_owner"), "arr_usd": arr,
+                     "writable": can_write_account(aid)})
+    return {"cohort": "agency_1_20_plus_corporate", "count": len(rows),
+            "total_arr_usd": total_arr, "accounts": rows}
+
+
+def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = True,
+                   apply: bool = False) -> dict:
+    """Move the 1-20 Agency + Corporate cohort (or an explicit account_ids list) to the
+    pooled (Scaled) structure by setting cs_customer_tier='Pooled' in HubSpot, optionally
+    clearing the named owner so the accounts leave individual books and are served by the
+    pooled round-robin queue. Owner-scoped (a CSM moves only accounts they own; admin moves
+    any), two-gated (apply + CS_ALLOW_WRITE), dry-run by default, audited at the endpoint,
+    and fully reversible. Honest batch summary; never fabricates a write.
+
+    An account already pooled is skipped as a no-op (counted 'already_pooled')."""
+    cohort = pooled_cohort(account_ids)
+    rows = []
+    moved = dry_run = skipped_pooled = forbidden = not_connected = errors = 0
+    connected = bool(dataaccess._ADAPTERS and _src.HUBSPOT.live())
+    for acc in cohort["accounts"]:
+        aid = acc["account_id"]
+        if acc["already_pooled"]:
+            skipped_pooled += 1
+            rows.append({"account_id": aid, "name": acc["name"], "mode": "already-pooled"})
+            continue
+        if not can_write_account(aid):
+            forbidden += 1
+            rows.append({"account_id": aid, "name": acc["name"], "mode": "forbidden"})
+            continue
+        if not connected:
+            not_connected += 1
+            rows.append({"account_id": aid, "name": acc["name"], "mode": "not-connected"})
+            continue
+        try:
+            res = _src.HUBSPOT.set_customer_tier(aid, tier="Pooled",
+                                                 clear_owner=clear_owner, apply=apply)
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            rows.append({"account_id": aid, "name": acc["name"], "mode": "error", "error": str(exc)})
+            continue
+        mode = res.get("mode")
+        if mode == "applied":
+            moved += 1
+        elif mode == "dry-run":
+            dry_run += 1
+        rows.append({"account_id": aid, "name": acc["name"], "mode": mode,
+                     "cleared_owner": res.get("cleared_owner")})
+    return {
+        "batch_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "cohort": cohort["cohort"],
+        "apply_requested": bool(apply),
+        "clear_owner": bool(clear_owner),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "summary": {
+            "in_cohort": cohort["count"],
+            "total_arr_usd": cohort["total_arr_usd"],
+            "moved": moved,
+            "dry_run": dry_run,
+            "already_pooled": skipped_pooled,
+            "forbidden": forbidden,
+            "not_connected": not_connected,
+            "errors": errors,
+        },
+        "accounts": rows,
+    }
+
+
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
     dry-run by default. Resolving inbound in-platform (increment 3)."""

@@ -1738,6 +1738,35 @@ class HubSpot:
                 "email_id": email_id, "send_result": send_result or None,
                 "status_id": res.get("statusId"), "_source": "hubspot-live-write"}
 
+    def set_customer_tier(self, account_ref: str, tier: str = "Pooled",
+                          clear_owner: bool = False, apply: bool = False) -> dict[str, Any]:
+        """Set a company's cs_customer_tier (e.g. 'Pooled') in HubSpot, so CS can move an
+        account between the Managed and Scaled/Pooled structures from the platform. When
+        clear_owner is True (moving INTO pooled), the named HubSpot owner is also cleared so
+        the account leaves individual books and is served by the pooled round-robin queue.
+        Two-gate (apply + CS_ALLOW_WRITE); dry-run by default. Fully reversible (set the tier
+        back / reassign an owner). Owner-scope is enforced at the engine/endpoint, not here."""
+        tier = (tier or "").strip()
+        if not tier:
+            raise ValueError("tier is required")
+        c = self._find_company(account_ref)  # read-only lookup
+        props: dict[str, Any] = {"cs_customer_tier": tier}
+        if clear_owner:
+            # Clearing hubspot_owner_id removes named ownership -> pooled/unassigned.
+            props["hubspot_owner_id"] = ""
+        if apply and config.writes_allowed():
+            config.http_patch(
+                f"https://api.hubapi.com/crm/v3/objects/companies/{c['id']}",
+                self._headers(), {"properties": props})
+            return {"updated": True, "mode": "applied", "target": "hubspot.crm.companies",
+                    "company_id": c["id"], "written_fields": props, "tier": tier,
+                    "cleared_owner": bool(clear_owner), "_source": "hubspot-live-write"}
+        return {"updated": False, "mode": "dry-run", "target": "hubspot.crm.companies",
+                "company_id": c["id"], "would_write": props, "tier": tier,
+                "cleared_owner": bool(clear_owner),
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
 
 # Singletons the router uses.
 ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (

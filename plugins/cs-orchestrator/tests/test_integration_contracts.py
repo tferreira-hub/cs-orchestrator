@@ -764,6 +764,73 @@ def test_create_csql_requires_name(monkeypatch):
         pass
 
 
+def test_set_customer_tier_two_gate_and_clears_owner(monkeypatch):
+    """Setting the pooled tier is dry-run unless apply + CS_ALLOW_WRITE; clear_owner clears
+    the named HubSpot owner so the account leaves individual books."""
+    from adapters import config, sources
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "88"})
+    patches = []
+    monkeypatch.setattr(config, "http_patch", lambda url, h, b: patches.append((url, b)) or {"id": "88"})
+
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = sources.HUBSPOT.set_customer_tier("au1-1", tier="Pooled", clear_owner=True, apply=True)
+    assert r["mode"] == "dry-run" and r["updated"] is False and not patches
+    assert r["would_write"]["cs_customer_tier"] == "Pooled" and r["would_write"]["hubspot_owner_id"] == ""
+
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    r2 = sources.HUBSPOT.set_customer_tier("au1-1", tier="Pooled", clear_owner=True, apply=True)
+    assert r2["mode"] == "applied" and r2["updated"] is True and r2["cleared_owner"] is True
+    assert patches and "/crm/v3/objects/companies/88" in patches[0][0]
+    assert patches[0][1]["properties"]["cs_customer_tier"] == "Pooled"
+
+
+def test_move_to_pooled_batch_is_cohort_scoped_and_honest(monkeypatch):
+    """move_to_pooled targets only the 1-20 Agency + Corporate cohort, is dry-run unless
+    gated, skips already-pooled accounts, and reports an honest summary."""
+    import engine, dataaccess
+    book = {
+        "au1-a": {"hubspot": {"name": "SmallAgency", "segment_label": "Agency 3-20 Users",
+                              "arr_usd": 4000, "csm_owner": "Jo"},
+                  "sources": {"hubspot": "live"}, "usage": {}, "zendesk": {}, "churn": {},
+                  "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}},
+        "au1-b": {"hubspot": {"name": "CorpCo", "segment_label": "Corporate", "customer_tier": "Pooled",
+                              "pooled": True, "arr_usd": 9000, "csm_owner": "Jo"},
+                  "sources": {"hubspot": "live"}, "usage": {}, "zendesk": {}, "churn": {},
+                  "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}},
+        "au1-c": {"hubspot": {"name": "BigEnterprise", "segment_label": "Enterprise",
+                              "arr_usd": 90000, "csm_owner": "Jo"},
+                  "sources": {"hubspot": "live"}, "usage": {}, "zendesk": {}, "churn": {},
+                  "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}},
+    }
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: book)
+    monkeypatch.setattr(engine._src.HUBSPOT, "live", lambda: True)
+    monkeypatch.setattr(engine.dataaccess, "_ADAPTERS", True, raising=False)
+    captured = []
+    monkeypatch.setattr(engine._src.HUBSPOT, "set_customer_tier",
+                        lambda ref, tier="Pooled", clear_owner=False, apply=False:
+                        captured.append((ref, apply)) or
+                        {"mode": "applied" if apply else "dry-run", "cleared_owner": clear_owner})
+    try:
+        # Cohort = the agency + corporate accounts only (enterprise excluded).
+        preview = engine.pooled_cohort()
+        ids = {a["account_id"] for a in preview["accounts"]}
+        assert ids == {"au1-a", "au1-b"} and "au1-c" not in ids
+
+        # Dry-run: the one not-yet-pooled account is a dry-run; the pooled one is skipped.
+        d = engine.move_to_pooled(apply=False)
+        s = d["summary"]
+        assert s["in_cohort"] == 2 and s["already_pooled"] == 1 and s["dry_run"] == 1 and s["moved"] == 0
+
+        # Applied: moves the one not-yet-pooled account for real.
+        a = engine.move_to_pooled(apply=True)
+        assert a["summary"]["moved"] == 1 and a["summary"]["already_pooled"] == 1
+        assert ("au1-a", True) in captured   # applied call on the agency account
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
 def test_zendesk_reply_and_status_two_gate(monkeypatch):
     """Zendesk reply/close are dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources
