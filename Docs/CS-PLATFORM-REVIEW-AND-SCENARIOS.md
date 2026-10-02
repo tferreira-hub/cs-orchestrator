@@ -135,7 +135,7 @@ and whether the Service Hub Pro licence is purchased (relevant to the 50–60k b
 | Zendesk reply/close live (Scenario A) | **Done** — deployed token is an admin agent (write-capable); verified 2026-10 | — |
 | NDR shows a number | `rpt_account_ndr_monthly` live + a prior period | Data Platform |
 | Rocket Lane onboarding (unified lifecycle) | `ROCKET_LANE_KEY` (Phase 2) | RevOps/IT |
-| Security hygiene | Rotate Stripe key to `rk_`; rotate Tableau secret | IT/Security |
+| Security hygiene | Rotate Stripe `sk_live_` → `rk_` read-only + drop `CS_ALLOW_STRIPE_SECRET_KEY`; rotate Tableau secret. Step-by-step runbook: `Docs/SECURITY-ROTATION-RUNBOOK.md`. Code already enforces the secure end-state (refuses `sk_live_` once the override is dropped). | IT/Security |
 
 Everything not dependent on the above is **already live and tested**. The platform already
 delivers the Must-Have orchestration core, the "CSMs work in one place" write model, contact-
