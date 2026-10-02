@@ -1739,13 +1739,16 @@ class HubSpot:
                 "status_id": res.get("statusId"), "_source": "hubspot-live-write"}
 
     def set_customer_tier(self, account_ref: str, tier: str = "Pooled",
-                          clear_owner: bool = False, apply: bool = False) -> dict[str, Any]:
+                          clear_owner: bool = False, pooled_team: str | None = None,
+                          apply: bool = False) -> dict[str, Any]:
         """Set a company's cs_customer_tier (e.g. 'Pooled') in HubSpot, so CS can move an
         account between the Managed and Scaled/Pooled structures from the platform. When
         clear_owner is True (moving INTO pooled), the named HubSpot owner is also cleared so
         the account leaves individual books and is served by the pooled round-robin queue.
-        Two-gate (apply + CS_ALLOW_WRITE); dry-run by default. Fully reversible (set the tier
-        back / reassign an owner). Owner-scope is enforced at the engine/endpoint, not here."""
+        When pooled_team is given, it is written to cs_pooled_team so the account is assigned
+        to a specific pooled team/queue rather than the general pool. Two-gate (apply +
+        CS_ALLOW_WRITE); dry-run by default. Fully reversible. Owner-scope is enforced at the
+        engine/endpoint, not here."""
         tier = (tier or "").strip()
         if not tier:
             raise ValueError("tier is required")
@@ -1754,16 +1757,20 @@ class HubSpot:
         if clear_owner:
             # Clearing hubspot_owner_id removes named ownership -> pooled/unassigned.
             props["hubspot_owner_id"] = ""
+        pooled_team = (pooled_team or "").strip()
+        if pooled_team:
+            props["cs_pooled_team"] = pooled_team
         if apply and config.writes_allowed():
             config.http_patch(
                 f"https://api.hubapi.com/crm/v3/objects/companies/{c['id']}",
                 self._headers(), {"properties": props})
             return {"updated": True, "mode": "applied", "target": "hubspot.crm.companies",
                     "company_id": c["id"], "written_fields": props, "tier": tier,
-                    "cleared_owner": bool(clear_owner), "_source": "hubspot-live-write"}
+                    "cleared_owner": bool(clear_owner), "pooled_team": pooled_team or None,
+                    "_source": "hubspot-live-write"}
         return {"updated": False, "mode": "dry-run", "target": "hubspot.crm.companies",
                 "company_id": c["id"], "would_write": props, "tier": tier,
-                "cleared_owner": bool(clear_owner),
+                "cleared_owner": bool(clear_owner), "pooled_team": pooled_team or None,
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 

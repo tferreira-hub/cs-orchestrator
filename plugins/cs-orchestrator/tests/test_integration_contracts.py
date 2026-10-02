@@ -778,10 +778,13 @@ def test_set_customer_tier_two_gate_and_clears_owner(monkeypatch):
     assert r["would_write"]["cs_customer_tier"] == "Pooled" and r["would_write"]["hubspot_owner_id"] == ""
 
     monkeypatch.setenv("CS_ALLOW_WRITE", "1")
-    r2 = sources.HUBSPOT.set_customer_tier("au1-1", tier="Pooled", clear_owner=True, apply=True)
+    r2 = sources.HUBSPOT.set_customer_tier("au1-1", tier="Pooled", clear_owner=True,
+                                           pooled_team="APAC Pool", apply=True)
     assert r2["mode"] == "applied" and r2["updated"] is True and r2["cleared_owner"] is True
+    assert r2["pooled_team"] == "APAC Pool"
     assert patches and "/crm/v3/objects/companies/88" in patches[0][0]
     assert patches[0][1]["properties"]["cs_customer_tier"] == "Pooled"
+    assert patches[0][1]["properties"]["cs_pooled_team"] == "APAC Pool"
 
 
 def test_move_to_pooled_batch_is_cohort_scoped_and_honest(monkeypatch):
@@ -809,7 +812,7 @@ def test_move_to_pooled_batch_is_cohort_scoped_and_honest(monkeypatch):
     monkeypatch.setattr(engine.dataaccess, "_ADAPTERS", True, raising=False)
     captured = []
     monkeypatch.setattr(engine._src.HUBSPOT, "set_customer_tier",
-                        lambda ref, tier="Pooled", clear_owner=False, apply=False:
+                        lambda ref, tier="Pooled", clear_owner=False, pooled_team=None, apply=False:
                         captured.append((ref, apply)) or
                         {"mode": "applied" if apply else "dry-run", "cleared_owner": clear_owner})
     try:

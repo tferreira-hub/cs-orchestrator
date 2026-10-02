@@ -1479,13 +1479,14 @@ def pooled_cohort(account_ids: list[str] | None = None) -> dict:
 
 
 def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = True,
-                   apply: bool = False) -> dict:
+                   pooled_team: str | None = None, apply: bool = False) -> dict:
     """Move the 1-20 Agency + Corporate cohort (or an explicit account_ids list) to the
     pooled (Scaled) structure by setting cs_customer_tier='Pooled' in HubSpot, optionally
     clearing the named owner so the accounts leave individual books and are served by the
-    pooled round-robin queue. Owner-scoped (a CSM moves only accounts they own; admin moves
-    any), two-gated (apply + CS_ALLOW_WRITE), dry-run by default, audited at the endpoint,
-    and fully reversible. Honest batch summary; never fabricates a write.
+    pooled round-robin queue. When pooled_team is given, each account is also assigned to
+    that pooled team (cs_pooled_team). Owner-scoped (a CSM moves only accounts they own;
+    admin moves any), two-gated (apply + CS_ALLOW_WRITE), dry-run by default, audited at the
+    endpoint, and fully reversible. Honest batch summary; never fabricates a write.
 
     An account already pooled is skipped as a no-op (counted 'already_pooled')."""
     cohort = pooled_cohort(account_ids)
@@ -1508,7 +1509,8 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
             continue
         try:
             res = _src.HUBSPOT.set_customer_tier(aid, tier="Pooled",
-                                                 clear_owner=clear_owner, apply=apply)
+                                                 clear_owner=clear_owner,
+                                                 pooled_team=pooled_team, apply=apply)
         except Exception as exc:  # noqa: BLE001
             errors += 1
             rows.append({"account_id": aid, "name": acc["name"], "mode": "error", "error": str(exc)})
@@ -1526,6 +1528,7 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
         "cohort": cohort["cohort"],
         "apply_requested": bool(apply),
         "clear_owner": bool(clear_owner),
+        "pooled_team": (pooled_team or None),
         "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
         "summary": {
             "in_cohort": cohort["count"],

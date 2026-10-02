@@ -1373,43 +1373,68 @@ function loadPooledMovePanel(){
 }
 function _renderPooledMove(d){
   const b=document.getElementById('pooled-move-body'); if(!b) return;
-  const notPooled=(d.accounts||[]).filter(a=>!a.already_pooled);
+  window._poolCohort=d.accounts||[];
+  const movable=(d.accounts||[]).filter(a=>!a.already_pooled && a.writable!==false);
   const owners=[...new Set((d.accounts||[]).map(a=>a.csm_owner).filter(Boolean))];
+  // Pooled teams to assign to. Starter set; a CS_POOLED_TEAMS config can override later.
+  const teams=['Pooled Team A','Pooled Team B','APAC Pool','EMEA Pool','Americas Pool'];
+  const rows=(d.accounts||[]).map(a=>{
+    const dis=(a.already_pooled||a.writable===false);
+    const tag=a.already_pooled?'<span class="pill nc2">already pooled</span>':(a.writable===false?'<span class="pill nc2">not yours</span>':'');
+    return '<tr>'+
+      '<td style="width:34px"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'"'+(dis?' disabled':' checked')+'></td>'+
+      '<td><strong>'+escapeHtml(a.name||a.account_id)+'</strong> '+tag+'</td>'+
+      '<td class="muted">'+escapeHtml(a.segment||'—')+'</td>'+
+      '<td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span class="muted">unassigned</span>')+'</td>'+
+      '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'—')+'</td></tr>';
+  }).join('');
   b.innerHTML=
     '<div class="cc-headline" style="margin-bottom:14px">'+
       '<div class="cc-big"><div class="cc-big-l">In cohort</div><div class="cc-big-v">'+(d.count||0)+'</div></div>'+
-      '<div class="cc-big"><div class="cc-big-l">To move</div><div class="cc-big-v">'+notPooled.length+'</div></div>'+
+      '<div class="cc-big"><div class="cc-big-l">Movable</div><div class="cc-big-v">'+movable.length+'</div></div>'+
       '<div class="cc-big"><div class="cc-big-l">Cohort ARR</div><div class="cc-big-v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
       '<div class="cc-big"><div class="cc-big-l">Current owners</div><div class="cc-big-v">'+owners.length+'</div></div>'+
     '</div>'+
-    '<p class="muted" style="margin:0 0 14px;max-width:720px;line-height:1.5">Sets <strong>cs_customer_tier = Pooled</strong> in HubSpot and removes named ownership, so these accounts leave individual books and are served by the pooled round-robin queue. Owner-scoped, audited, and reversible. Accounts already pooled are skipped.</p>'+
-    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+    '<p class="muted" style="margin:0 0 14px;max-width:760px;line-height:1.5">Select the accounts to move and the pooled team to assign them to. The platform sets <strong>cs_customer_tier = Pooled</strong> in HubSpot, assigns the chosen team, and removes individual ownership. Owner-scoped, audited, reversible. Accounts already pooled or not in your book are locked.</p>'+
+    '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+      '<label style="display:flex;align-items:center;gap:8px"><span class="muted">Assign to pooled team</span>'+
+        '<select id="pool-team" class="btn" style="padding:7px 10px">'+teams.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>'+
+      '</label>'+
+      '<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pool-selall" checked onchange="_poolToggleAll(this.checked)"> <span class="muted">Select all movable</span></label>'+
+      '<span id="pool-selcount" class="muted"></span>'+
+    '</div>'+
+    '<div class="body" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0">'+
+      '<table class="acct-list"><thead><tr><th></th><th>Company</th><th>Segment</th><th>Current owner</th><th>ARR</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">'+
       '<button class="btn" onclick="runMoveToPooled(false,this)">Preview (dry-run)</button>'+
-      '<button class="btn btn-primary" onclick="runMoveToPooled(true,this)"'+(notPooled.length?'':' disabled')+'>Move '+notPooled.length+' to pooled</button>'+
+      '<button class="btn btn-primary" onclick="runMoveToPooled(true,this)"'+(movable.length?'':' disabled')+'>Move selected to pooled</button>'+
     '</div>'+
     '<div id="pooled-move-result" style="margin-top:14px"></div>';
+  document.querySelectorAll('#pooled-move-panel .pool-pick').forEach(c=>c.addEventListener('change',_poolUpdateCount));
+  _poolUpdateCount();
 }
+function _poolSelectedIds(){ return [...document.querySelectorAll('#pooled-move-panel .pool-pick:checked:not(:disabled)')].map(c=>c.value); }
+function _poolToggleAll(on){ document.querySelectorAll('#pooled-move-panel .pool-pick:not(:disabled)').forEach(c=>c.checked=on); _poolUpdateCount(); }
+function _poolUpdateCount(){ const n=_poolSelectedIds().length; const el=document.getElementById('pool-selcount'); if(el)el.textContent=n+' selected'; const mv=document.querySelector('#pooled-move-panel .btn-primary'); if(mv)mv.textContent='Move '+n+' to pooled'; }
 function runMoveToPooled(apply,btn){
   const res=document.getElementById('pooled-move-result');
-  if(apply && !confirm('Move '+((document.querySelectorAll('#pooled-move-panel .cc-big-v')[1]||{}).textContent||'these')+' accounts (1–20 Agency + Corporate) to the pooled structure in HubSpot?\n\nThis sets cs_customer_tier = Pooled and clears named ownership. It is audited and reversible.')) return;
+  const ids=_poolSelectedIds();
+  const team=(document.getElementById('pool-team')||{}).value||'';
+  if(!ids.length){ if(res)res.innerHTML='<span class="muted">Select at least one account to move.</span>'; return; }
+  if(apply && !confirm('Move '+ids.length+' selected account'+(ids.length===1?'':'s')+' to the pooled structure in HubSpot and assign them to "'+team+'"?\n\nThis sets cs_customer_tier = Pooled and removes individual ownership. It is audited and reversible.')) return;
   const buttons=document.querySelectorAll('#pooled-move-panel button'); buttons.forEach(x=>x.disabled=true);
-  if(res)res.innerHTML='<span class="muted">'+(apply?'Moving accounts…':'Running dry-run…')+'</span>';
-  fetch('/api/cohort/move-to-pooled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:apply,clear_owner:true})})
+  if(res)res.innerHTML='<span class="muted">'+(apply?'Moving selected accounts…':'Running dry-run…')+'</span>';
+  fetch('/api/cohort/move-to-pooled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:apply,clear_owner:true,pooled_team:team,account_ids:ids})})
     .then(r=>r.json()).then(d=>{
       const s=d.summary||{};
-      const chips=[
-        ['Cohort',s.in_cohort||0,''],
-        [apply?'Moved':'Would move',apply?(s.moved||0):(s.dry_run||0),apply?'ok':'info'],
-        ['Already pooled',s.already_pooled||0,''],
-      ];
+      const chips=[['Selected',ids.length,''],[apply?'Moved':'Would move',apply?(s.moved||0):(s.dry_run||0),'info'],['Already pooled',s.already_pooled||0,'']];
       if(s.forbidden)chips.push(['Not yours (skipped)',s.forbidden,'warn']);
-      if(s.not_connected)chips.push(['Not connected',s.not_connected,'warn']);
       if(s.errors)chips.push(['Errors',s.errors,'bad']);
       const banner=apply
-        ? '<div class="note" style="color:var(--good);font-weight:600;margin-bottom:8px">✓ Move applied in HubSpot. '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' now pooled. The list refreshes below.</div>'
-        : '<div class="note" style="margin-bottom:8px">Dry-run only — nothing was written. '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would be moved. Click <strong>Move</strong> to apply.</div>';
-      if(res)res.innerHTML=banner+'<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        chips.map(c=>'<span class="pill '+(c[2]==='ok'?'pln':'')+'" style="background:var(--panel2,#1a1f2b);border:1px solid var(--line,#2a3140);padding:4px 10px;border-radius:14px">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
+        ? '<div class="note" style="color:var(--good);font-weight:600;margin-bottom:8px">✓ Applied in HubSpot. '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' moved to “'+escapeHtml(team)+'”. The list refreshes below.</div>'
+        : '<div class="note" style="margin-bottom:8px">Dry-run only — nothing written. '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would move to “'+escapeHtml(team)+'”. Click <strong>Move</strong> to apply.</div>';
+      if(res)res.innerHTML=banner+'<div style="display:flex;gap:8px;flex-wrap:wrap">'+chips.map(c=>'<span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:4px 10px;border-radius:14px">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
       if(apply) setTimeout(()=>{loadPooledMovePanel(); if(typeof refresh==='function')refresh();},800);
     }).catch(()=>{ if(res)res.innerHTML='<span class="muted" style="color:var(--bad)">Request failed. Please retry.</span>'; })
     .finally(()=>{ buttons.forEach(x=>x.disabled=false); });

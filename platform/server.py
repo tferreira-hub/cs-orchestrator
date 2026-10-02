@@ -1155,17 +1155,20 @@ class Handler(BaseHTTPRequestHandler):
                 apply_write = bool(body.get("apply", False))
                 account_ids = body.get("account_ids")
                 clear_owner = bool(body.get("clear_owner", True))
+                pooled_team = (body.get("pooled_team") or "").strip() or None
                 if account_ids is not None and not isinstance(account_ids, list):
                     self._json(400, {"error": "account_ids must be a list"}); return
                 try:
                     record_audit("move_to_pooled", principal,
                                  {"apply": apply_write, "clear_owner": clear_owner,
-                                  "account_ids": account_ids})
+                                  "pooled_team": pooled_team, "account_ids": account_ids})
                 except Exception:  # noqa: BLE001
                     pass
                 try:
                     self._json(200, engine.move_to_pooled(account_ids=account_ids,
-                                                           clear_owner=clear_owner, apply=apply_write))
+                                                           clear_owner=clear_owner,
+                                                           pooled_team=pooled_team,
+                                                           apply=apply_write))
                 except Exception as exc:  # noqa: BLE001
                     self._json(500, {"error": str(exc)})
                 return
