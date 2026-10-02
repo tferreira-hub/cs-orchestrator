@@ -603,6 +603,33 @@ def test_required_roles_missing_for_close_gate(monkeypatch):
         "Primary Champion / Admin", "Finance Contact"}
 
 
+def test_create_csql_two_gate(monkeypatch):
+    """Creating an expansion deal (CSQL) is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
+    from adapters import config, sources
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "77"})
+    posts = []
+    monkeypatch.setattr(config, "http_post", lambda *a, **k: posts.append(a[0]) or {"id": "deal9"})
+
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = sources.HUBSPOT.create_csql("au1-1", "Acme — expansion", amount_usd=12000, apply=True)
+    assert r["mode"] == "dry-run" and r["created"] is False and not posts
+    assert r["would_write"]["dealname"] == "Acme — expansion"
+
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    r2 = sources.HUBSPOT.create_csql("au1-1", "Acme — expansion", amount_usd=12000, apply=True)
+    assert r2["mode"] == "applied" and r2["created"] is True and r2["deal_id"] == "deal9"
+    assert any("/crm/v3/objects/deals" in u for u in posts)
+
+
+def test_create_csql_requires_name(monkeypatch):
+    from adapters import sources
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "77"})
+    try:
+        sources.HUBSPOT.create_csql("au1-1", "  ", apply=False); assert False
+    except ValueError:
+        pass
+
+
 def test_zendesk_reply_and_status_two_gate(monkeypatch):
     """Zendesk reply/close are dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources

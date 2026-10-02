@@ -1254,6 +1254,24 @@ def tag_contact_role(account_id: str, contact_email: str, role: str, apply: bool
     }
 
 
+def create_csql(account_id: str, name: str, amount_usd=None, note: str | None = None,
+                apply: bool = False) -> dict:
+    """Create an expansion deal (CSQL) in HubSpot for an account. Two-gate; dry-run by
+    default; owner-scope enforced at the endpoint. Expansion routing from in-platform."""
+    if not (dataaccess._ADAPTERS and _src.HUBSPOT.live()):
+        result = {"created": False, "mode": "not-connected"}
+    else:
+        result = _src.HUBSPOT.create_csql(account_id, name, amount_usd=amount_usd, note=note, apply=apply)
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": account_id,
+        "apply_requested": bool(apply),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
     dry-run by default. Resolving inbound in-platform (increment 3)."""
@@ -1807,7 +1825,7 @@ def integrations() -> dict:
              **status_for("HubSpot"),
              "pulls": ["contract value", "renewal date", "account hierarchy", "contacts"],
              "pushes": hs_pushes,
-             "writes": (["CS write-back", "sequence enrolment", "notes", "contact roles"]
+             "writes": (["CS write-back", "sequence enrolment", "notes", "contact roles", "expansion deals (CSQL)"]
                         if (hs_live and writes_on) else [])},
             {"system": "Stripe", "category": "Billing / Finance", "direction": "read-only",
              **status_for("Stripe"),

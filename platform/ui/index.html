@@ -4112,6 +4112,7 @@ function renderCompanyPage(id,d){
         (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+'</div>').join('')+'</div>'):'')+
     _writebackPanel(id,d)+
     _notesRolesPanel(id,d)+
+    _csqlPanel(id,d)+
   '</div>';
   document.getElementById('company-body').innerHTML=tabs+'<div class="company-wrap">'+left+rail+'</div>';
   go('company');
@@ -4226,7 +4227,38 @@ async function applyTagRole(id,email,btn){
   }catch(e){ if(status)status.textContent='Could not tag the contact.'; }
   finally{ if(btn)btn.disabled=false; }
 }
-// Company-profile tab switch: show only the sections tagged for the chosen tab (Overview
+// Expansion deal (CSQL) creation (increment 5): a CSM routes an expansion opportunity to
+// HubSpot without leaving the platform. Two-gated, owner-scoped, audited server-side.
+function _csqlPanel(id,d){
+  const hs=d.hubspot||{}; const nm=escapeHtml((hs.name||id)+' — expansion');
+  return '<div class="cp-section" data-cpt="planning revenue"><div class="cp-shead"><h2>Create expansion deal (CSQL)</h2></div>'+
+    '<div class="writeback" style="background:#fff">Route an expansion opportunity into HubSpot as a deal (CSQL):'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">'+
+        '<input id="csql-name-'+escapeHtml(id)+'" type="text" value="'+nm+'" style="flex:1;min-width:200px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+        '<input id="csql-amt-'+escapeHtml(id)+'" type="number" placeholder="ARR (USD)" style="width:130px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+        '<button class="btn" onclick="applyCsql(\''+escapeHtml(id)+'\',this)">Create deal</button>'+
+      '</div>'+
+      '<span class="muted" id="csql-status-'+escapeHtml(id)+'" style="font-size:.85em;display:block;margin-top:8px"></span>'+
+    '</div></div>';
+}
+async function applyCsql(id,btn){
+  const nm=(document.getElementById('csql-name-'+id)||{}).value||'';
+  const amt=(document.getElementById('csql-amt-'+id)||{}).value||'';
+  const status=document.getElementById('csql-status-'+id);
+  if(!nm.trim()){ if(status)status.textContent='Give the deal a name.'; return; }
+  if(!confirm('Create a HubSpot expansion deal "'+nm+'"'+(amt?(' for $'+amt):'')+' on this account?')) return;
+  if(btn)btn.disabled=true; if(status)status.textContent='Creating…';
+  try{
+    const r=await api('/api/accounts/'+encodeURIComponent(id)+'/create-csql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm.trim(),amount_usd:amt||null,apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(r.status===403){ if(status)status.textContent='You can only create deals on accounts you own.'; }
+    else if(res.created){ if(status)status.textContent='Deal created in HubSpot ✓'; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (writes disabled on this environment).'; }
+    else if(res.mode==='not-connected'){ if(status)status.textContent='HubSpot is not connected.'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not create the deal.'; }
+  finally{ if(btn)btn.disabled=false; }
+}
 // shows all). Fixes the previously-dead Related Data / Usage / Revenue / Account Planning tabs.
 function cpTab(name,btn){
   document.querySelectorAll('.cp-tabs .cp-tab').forEach(b=>b.classList.toggle('active',b===btn||b.dataset.cpt===name));

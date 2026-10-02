@@ -1644,6 +1644,53 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 
+    def create_csql(self, account_ref: str, name: str, amount_usd=None,
+                    note: str | None = None, apply: bool = False) -> dict[str, Any]:
+        """Create an expansion deal (CSQL) in HubSpot and associate it to the company, so a
+        CSM can route an expansion opportunity without leaving the platform. Pipeline/stage
+        are portal-specific and configurable via CS_HS_EXPANSION_PIPELINE / _STAGE (default
+        to HubSpot's standard sales pipeline + appointmentscheduled). Two-gate; dry-run
+        default. Reversible (a deal can be deleted/closed-lost)."""
+        import os as _os
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("deal name is required")
+        c = self._find_company(account_ref)  # read-only lookup
+        pipeline = _os.environ.get("CS_HS_EXPANSION_PIPELINE", "default").strip() or "default"
+        stage = _os.environ.get("CS_HS_EXPANSION_STAGE", "appointmentscheduled").strip() or "appointmentscheduled"
+        props = {"dealname": name, "pipeline": pipeline, "dealstage": stage,
+                 "deal_source_type": "CS_PLATFORM_CSQL"}
+        if amount_usd not in (None, ""):
+            try:
+                props["amount"] = str(int(float(amount_usd)))
+            except (TypeError, ValueError):
+                pass
+        if apply and config.writes_allowed():
+            body = {"properties": props, "associations": [{
+                "to": {"id": c["id"]},
+                "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 5}],  # deal -> company
+            }]}
+            res = config.http_post("https://api.hubapi.com/crm/v3/objects/deals",
+                                   self._headers(), body)
+            deal_id = res.get("id")
+            if note and deal_id:
+                try:
+                    import time as _t
+                    config.http_post("https://api.hubapi.com/crm/v3/objects/notes", self._headers(), {
+                        "properties": {"hs_note_body": note, "hs_timestamp": int(_t.time() * 1000)},
+                        "associations": [{"to": {"id": deal_id},
+                                          "types": [{"associationCategory": "HUBSPOT_DEFINED",
+                                                     "associationTypeId": 214}]}]})  # note -> deal
+                except Exception:  # noqa: BLE001
+                    pass
+            return {"created": True, "mode": "applied", "target": "hubspot.crm.deals",
+                    "company_id": c["id"], "deal_id": deal_id, "pipeline": pipeline,
+                    "stage": stage, "_source": "hubspot-live-write"}
+        return {"created": False, "mode": "dry-run", "target": "hubspot.crm.deals",
+                "company_id": c["id"], "would_write": props,
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
 
 # Singletons the router uses.
 ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (

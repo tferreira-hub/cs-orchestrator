@@ -1102,6 +1102,26 @@ class Handler(BaseHTTPRequestHandler):
                 except (KeyError, ValueError) as exc:
                     self._json(400, {"error": str(exc)})
                 return
+            if path.startswith("/api/accounts/") and path.endswith("/create-csql"):
+                account_id = path[len("/api/accounts/"):-len("/create-csql")].strip("/")
+                name = (body.get("name") or "").strip()
+                amount = body.get("amount_usd")
+                note = (body.get("note") or "").strip() or None
+                apply_write = bool(body.get("apply", False))
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only create deals on accounts you own."})
+                    return
+                try:
+                    record_audit("create_csql", principal,
+                                 {"account_id": account_id, "name": name, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.create_csql(account_id, name, amount_usd=amount, note=note, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
             if path == "/api/zendesk/reply":
                 ticket_id = str(body.get("ticket_id") or "").strip()
                 reply = (body.get("body") or "").strip()
