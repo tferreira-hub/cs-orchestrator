@@ -18,7 +18,7 @@ live · **[PLANNED]** not yet built · **[DECISION]** blocked on a leadership ch
 | HubSpot bi-directional sync | **[LIVE]** | Pull: contract value, renewal, hierarchy, contacts. Push (write): health, risk, active playbook, **notes, contact roles, expansion deals** — all gated/owner-scoped/audited. |
 | Stripe read-only (invoice, ARR, dunning) | **[LIVE]** | Powers the Payment Risk Report. Stays read-only by design. |
 | Zendesk (tickets, CSAT, Sev-1) read | **[LIVE]** | Feeds health. |
-| Zendesk reply/close (write) | **[BUILT]** | Needs a Zendesk **ticket-write token**; dry-run-safe until then. |
+| Zendesk reply/close (write) | **[READY]** | Built; the deployed Zendesk API token authenticates as an **admin agent** (`integrations@jobadder.com`), so it already carries ticket-write scope. Verified 2026-10 via a read-only `/users/me` probe. Gated by the platform two-gate (`CS_ALLOW_WRITE=1` set + per-request `apply=true`). |
 | Product telemetry (adoption, utilisation, API) | **[LIVE]** | Pendo + Entitlements. |
 | ML churn (>70%) | **[LIVE]** | Redshift; honest computed fallback, never mislabelled. |
 | Jiminny (sentiment, summaries) | **[LIVE]** | Feeds health. |
@@ -132,7 +132,7 @@ and whether the Service Hub Pro licence is purchased (relevant to the 50–60k b
 | Routing-layer decision (A vs B) | Leadership choice | CS Leadership / RevOps |
 | Monthly digest + outreach (Scenario E) | Email + scheduler (per decision) | Eng, after decision |
 | 5 live inbound channels (Scenario A) | Channel wiring (per decision) + CSM presence feed | Eng, after decision |
-| Zendesk reply/close live (Scenario A) | Zendesk ticket-write token | RevOps/IT |
+| Zendesk reply/close live (Scenario A) | **Done** — deployed token is an admin agent (write-capable); verified 2026-10 | — |
 | NDR shows a number | `rpt_account_ndr_monthly` live + a prior period | Data Platform |
 | Rocket Lane onboarding (unified lifecycle) | `ROCKET_LANE_KEY` (Phase 2) | RevOps/IT |
 | Security hygiene | Rotate Stripe key to `rk_`; rotate Tableau secret | IT/Security |
