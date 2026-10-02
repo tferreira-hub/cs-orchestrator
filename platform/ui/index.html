@@ -191,6 +191,45 @@ tr.row-roster:hover td{opacity:1}
 .panel .head{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 .panel .head h2{font-size:1em;font-weight:700;letter-spacing:-.01em}
 .panel .head .note{font-size:.75em;color:var(--muted);font-weight:500}
+/* Move-to-pooled module — systemised layout */
+.mp-wrap{padding:18px 20px}
+.mp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.mp-stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.mp-stat .l{font-size:.68em;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:800}
+.mp-stat .v{font-size:1.55em;font-weight:800;letter-spacing:-.02em;color:var(--ink);margin-top:5px}
+.mp-stat.accent{background:var(--brandsoft);border-color:#d7d9fb}
+.mp-stat.accent .v{color:var(--brand)}
+.mp-desc{font-size:.82em;color:var(--ink2);line-height:1.5;margin:0 0 16px;max-width:780px}
+.mp-desc code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:.92em;color:var(--ink)}
+.mp-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.mp-field{display:flex;flex-direction:column;gap:4px}
+.mp-field label{font-size:.68em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:800}
+.mp-field select{padding:8px 11px;border:1px solid #dfe3ed;border-radius:8px;font:inherit;font-size:.86em;background:#fff;color:var(--ink);min-width:190px}
+.mp-selall{display:flex;align-items:center;gap:7px;font-size:.82em;color:var(--ink2)}
+.mp-selcount{margin-left:auto;font-size:.8em;color:var(--muted);font-weight:600}
+.mp-list{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.mp-list .mp-scroll{max-height:300px;overflow:auto}
+.mp-list table{width:100%;border-collapse:collapse}
+.mp-list thead th{position:sticky;top:0;background:#fbfcfe;z-index:1;text-align:left;font-size:.68em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:800;padding:9px 14px;border-bottom:1px solid var(--line)}
+.mp-list tbody td{padding:10px 14px;border-bottom:1px solid var(--line);font-size:.85em;color:var(--ink)}
+.mp-list tbody tr:last-child td{border-bottom:0}
+.mp-list tbody tr:hover{background:#fafbff}
+.mp-list tbody tr.locked{opacity:.55}
+.mp-list .mp-co{font-weight:600}
+.mp-list input[type=checkbox]{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
+.mp-tag{display:inline-block;font-size:.64em;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--muted);margin-left:7px;vertical-align:middle}
+.mp-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.btn.btn-ghost{background:#fff;color:var(--ink2);border:1px solid #dfe3ed}
+.btn.btn-ghost:hover{border-color:var(--brand);color:var(--brand);opacity:1}
+.mp-result{margin-top:16px}
+.mp-banner{display:flex;align-items:flex-start;gap:9px;border-radius:9px;padding:11px 13px;font-size:.84em;line-height:1.45;margin-bottom:10px}
+.mp-banner.ok{background:#edfaf3;border:1px solid #bfe8d4;color:#157347}
+.mp-banner.info{background:var(--brandsoft);border:1px solid #d7d9fb;color:#3a39c7}
+.mp-banner.err{background:#fdecec;border:1px solid #f3c2c2;color:#b42318}
+.mp-chips{display:flex;gap:8px;flex-wrap:wrap}
+.mp-chip{font-size:.78em;background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px;color:var(--ink2)}
+.mp-chip strong{color:var(--ink)}
+@media(max-width:760px){.mp-stats{grid-template-columns:1fr 1fr}}
 .panel .body{padding:2px 6px}.panel .body.pad{padding:16px 20px}
 
 table{width:100%;border-collapse:collapse;font-size:.87em}
@@ -1376,67 +1415,67 @@ function _renderPooledMove(d){
   window._poolCohort=d.accounts||[];
   const movable=(d.accounts||[]).filter(a=>!a.already_pooled && a.writable!==false);
   const owners=[...new Set((d.accounts||[]).map(a=>a.csm_owner).filter(Boolean))];
-  // Pooled teams to assign to. Starter set; a CS_POOLED_TEAMS config can override later.
   const teams=['Pooled Team A','Pooled Team B','APAC Pool','EMEA Pool','Americas Pool'];
   const rows=(d.accounts||[]).map(a=>{
-    const dis=(a.already_pooled||a.writable===false);
-    const tag=a.already_pooled?'<span class="pill nc2">already pooled</span>':(a.writable===false?'<span class="pill nc2">not yours</span>':'');
-    return '<tr>'+
-      '<td style="width:34px"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'"'+(dis?' disabled':' checked')+'></td>'+
-      '<td><strong>'+escapeHtml(a.name||a.account_id)+'</strong> '+tag+'</td>'+
-      '<td class="muted">'+escapeHtml(a.segment||'—')+'</td>'+
-      '<td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span class="muted">unassigned</span>')+'</td>'+
-      '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'—')+'</td></tr>';
+    const locked=(a.already_pooled||a.writable===false);
+    const tag=a.already_pooled?'<span class="mp-tag">already pooled</span>':(a.writable===false?'<span class="mp-tag">not yours</span>':'');
+    return '<tr class="'+(locked?'locked':'')+'">'+
+      '<td style="width:38px;text-align:center"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'"'+(locked?' disabled':' checked')+'></td>'+
+      '<td><span class="mp-co">'+escapeHtml(a.name||a.account_id)+'</span>'+tag+'</td>'+
+      '<td style="color:var(--ink2)">'+escapeHtml(a.segment||'—')+'</td>'+
+      '<td style="color:var(--ink2)">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span style="color:var(--muted)">unassigned</span>')+'</td>'+
+      '<td class="mono" style="text-align:right">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span style="color:var(--muted)">—</span>')+'</td></tr>';
   }).join('');
   b.innerHTML=
-    '<div class="cc-headline" style="margin-bottom:14px">'+
-      '<div class="cc-big"><div class="cc-big-l">In cohort</div><div class="cc-big-v">'+(d.count||0)+'</div></div>'+
-      '<div class="cc-big"><div class="cc-big-l">Movable</div><div class="cc-big-v">'+movable.length+'</div></div>'+
-      '<div class="cc-big"><div class="cc-big-l">Cohort ARR</div><div class="cc-big-v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
-      '<div class="cc-big"><div class="cc-big-l">Current owners</div><div class="cc-big-v">'+owners.length+'</div></div>'+
-    '</div>'+
-    '<p class="muted" style="margin:0 0 14px;max-width:760px;line-height:1.5">Select the accounts to move and the pooled team to assign them to. The platform sets <strong>cs_customer_tier = Pooled</strong> in HubSpot, assigns the chosen team, and removes individual ownership. Owner-scoped, audited, reversible. Accounts already pooled or not in your book are locked.</p>'+
-    '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
-      '<label style="display:flex;align-items:center;gap:8px"><span class="muted">Assign to pooled team</span>'+
-        '<select id="pool-team" class="btn" style="padding:7px 10px">'+teams.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>'+
-      '</label>'+
-      '<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pool-selall" checked onchange="_poolToggleAll(this.checked)"> <span class="muted">Select all movable</span></label>'+
-      '<span id="pool-selcount" class="muted"></span>'+
-    '</div>'+
-    '<div class="body" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0">'+
-      '<table class="acct-list"><thead><tr><th></th><th>Company</th><th>Segment</th><th>Current owner</th><th>ARR</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    '</div>'+
-    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">'+
-      '<button class="btn" onclick="runMoveToPooled(false,this)">Preview (dry-run)</button>'+
-      '<button class="btn btn-primary" onclick="runMoveToPooled(true,this)"'+(movable.length?'':' disabled')+'>Move selected to pooled</button>'+
-    '</div>'+
-    '<div id="pooled-move-result" style="margin-top:14px"></div>';
+    '<div class="mp-wrap">'+
+      '<div class="mp-stats">'+
+        '<div class="mp-stat"><div class="l">In cohort</div><div class="v">'+(d.count||0)+'</div></div>'+
+        '<div class="mp-stat accent"><div class="l">To move</div><div class="v">'+movable.length+'</div></div>'+
+        '<div class="mp-stat"><div class="l">Cohort ARR</div><div class="v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
+        '<div class="mp-stat"><div class="l">Current owners</div><div class="v">'+owners.length+'</div></div>'+
+      '</div>'+
+      '<p class="mp-desc">Select the accounts to move and the pooled team to assign them to. The platform sets <code>cs_customer_tier = Pooled</code> in HubSpot, assigns the chosen team, and removes individual ownership so they join the pooled round-robin queue. Owner-scoped, audited, and reversible. Rows that are already pooled or outside your book are locked.</p>'+
+      '<div class="mp-toolbar">'+
+        '<div class="mp-field"><label for="pool-team">Assign to pooled team</label>'+
+          '<select id="pool-team">'+teams.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select></div>'+
+        '<label class="mp-selall"><input type="checkbox" id="pool-selall" checked onchange="_poolToggleAll(this.checked)"> Select all movable</label>'+
+        '<span class="mp-selcount" id="pool-selcount"></span>'+
+      '</div>'+
+      '<div class="mp-list"><div class="mp-scroll"><table>'+
+        '<thead><tr><th></th><th>Company</th><th>Segment</th><th>Current owner</th><th style="text-align:right">ARR</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody></table></div></div>'+
+      '<div class="mp-actions">'+
+        '<button class="btn btn-ghost" onclick="runMoveToPooled(false,this)">Preview (dry-run)</button>'+
+        '<button class="btn" onclick="runMoveToPooled(true,this)"'+(movable.length?'':' disabled')+'>Move selected to pooled</button>'+
+      '</div>'+
+      '<div class="mp-result" id="pooled-move-result"></div>'+
+    '</div>';
   document.querySelectorAll('#pooled-move-panel .pool-pick').forEach(c=>c.addEventListener('change',_poolUpdateCount));
   _poolUpdateCount();
 }
 function _poolSelectedIds(){ return [...document.querySelectorAll('#pooled-move-panel .pool-pick:checked:not(:disabled)')].map(c=>c.value); }
 function _poolToggleAll(on){ document.querySelectorAll('#pooled-move-panel .pool-pick:not(:disabled)').forEach(c=>c.checked=on); _poolUpdateCount(); }
-function _poolUpdateCount(){ const n=_poolSelectedIds().length; const el=document.getElementById('pool-selcount'); if(el)el.textContent=n+' selected'; const mv=document.querySelector('#pooled-move-panel .btn-primary'); if(mv)mv.textContent='Move '+n+' to pooled'; }
+function _poolUpdateCount(){ const n=_poolSelectedIds().length; const el=document.getElementById('pool-selcount'); if(el)el.textContent=n+' selected'; const mv=document.querySelector('#pooled-move-panel .mp-actions .btn:not(.btn-ghost)'); if(mv)mv.textContent='Move '+n+' to pooled'; }
 function runMoveToPooled(apply,btn){
   const res=document.getElementById('pooled-move-result');
   const ids=_poolSelectedIds();
   const team=(document.getElementById('pool-team')||{}).value||'';
-  if(!ids.length){ if(res)res.innerHTML='<span class="muted">Select at least one account to move.</span>'; return; }
+  if(!ids.length){ if(res)res.innerHTML='<div class="mp-banner info">Select at least one account to move.</div>'; return; }
   if(apply && !confirm('Move '+ids.length+' selected account'+(ids.length===1?'':'s')+' to the pooled structure in HubSpot and assign them to "'+team+'"?\n\nThis sets cs_customer_tier = Pooled and removes individual ownership. It is audited and reversible.')) return;
-  const buttons=document.querySelectorAll('#pooled-move-panel button'); buttons.forEach(x=>x.disabled=true);
-  if(res)res.innerHTML='<span class="muted">'+(apply?'Moving selected accounts…':'Running dry-run…')+'</span>';
+  const buttons=document.querySelectorAll('#pooled-move-panel .mp-actions button'); buttons.forEach(x=>x.disabled=true);
+  if(res)res.innerHTML='<div class="mp-banner info">'+(apply?'Moving selected accounts…':'Running dry-run…')+'</div>';
   fetch('/api/cohort/move-to-pooled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:apply,clear_owner:true,pooled_team:team,account_ids:ids})})
     .then(r=>r.json()).then(d=>{
       const s=d.summary||{};
-      const chips=[['Selected',ids.length,''],[apply?'Moved':'Would move',apply?(s.moved||0):(s.dry_run||0),'info'],['Already pooled',s.already_pooled||0,'']];
-      if(s.forbidden)chips.push(['Not yours (skipped)',s.forbidden,'warn']);
-      if(s.errors)chips.push(['Errors',s.errors,'bad']);
+      const chips=[['Selected',ids.length],[apply?'Moved':'Would move',apply?(s.moved||0):(s.dry_run||0)],['Already pooled',s.already_pooled||0]];
+      if(s.forbidden)chips.push(['Skipped (not yours)',s.forbidden]);
+      if(s.errors)chips.push(['Errors',s.errors]);
       const banner=apply
-        ? '<div class="note" style="color:var(--good);font-weight:600;margin-bottom:8px">✓ Applied in HubSpot. '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' moved to “'+escapeHtml(team)+'”. The list refreshes below.</div>'
-        : '<div class="note" style="margin-bottom:8px">Dry-run only — nothing written. '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would move to “'+escapeHtml(team)+'”. Click <strong>Move</strong> to apply.</div>';
-      if(res)res.innerHTML=banner+'<div style="display:flex;gap:8px;flex-wrap:wrap">'+chips.map(c=>'<span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:4px 10px;border-radius:14px">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
+        ? '<div class="mp-banner ok"><strong>✓ Applied in HubSpot.</strong> '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' moved to “'+escapeHtml(team)+'”. The list refreshes below.</div>'
+        : '<div class="mp-banner info"><strong>Dry-run only — nothing written.</strong> '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would move to “'+escapeHtml(team)+'”. Click <strong>Move selected to pooled</strong> to apply.</div>';
+      if(res)res.innerHTML=banner+'<div class="mp-chips">'+chips.map(c=>'<span class="mp-chip">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
       if(apply) setTimeout(()=>{loadPooledMovePanel(); if(typeof refresh==='function')refresh();},800);
-    }).catch(()=>{ if(res)res.innerHTML='<span class="muted" style="color:var(--bad)">Request failed. Please retry.</span>'; })
+    }).catch(()=>{ if(res)res.innerHTML='<div class="mp-banner err">Request failed. Please retry.</div>'; })
     .finally(()=>{ buttons.forEach(x=>x.disabled=false); });
 }
 // Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
