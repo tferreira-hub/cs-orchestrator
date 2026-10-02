@@ -471,6 +471,18 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .cc-mixrow .cc-mixname{font-weight:700;color:var(--ink)}
 .cc-mixrow .cc-mixval{margin-left:auto;font-weight:800;color:var(--ink)}
 .cc-mixrow .cc-mixn{color:var(--muted);font-weight:600;font-size:.9em}
+/* Tableau Reports: a full-bleed, viewport-tall embed with a clean tab strip. */
+.tb-panel .head{position:relative}
+.tb-open{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:.82em;font-weight:700;color:var(--brand);text-decoration:none;white-space:nowrap}
+.tb-open:hover{text-decoration:underline}
+.tb-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:10px 16px 0;border-bottom:1px solid var(--line)}
+.tb-tab{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--ink2);font:inherit;font-size:.86em;font-weight:600;padding:8px 12px 10px;cursor:pointer;border-radius:6px 6px 0 0;white-space:nowrap;transition:background .12s,color .12s}
+.tb-tab:hover{background:var(--side-hover);color:var(--ink)}
+.tb-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+/* The stage fills the viewport below the header so dashboards get real room. */
+.tb-stage{width:100%;height:calc(100vh - 230px);min-height:560px;background:#fff}
+.tb-stage tableau-viz{width:100%;height:100%}
+.tb-stage iframe{border:0;width:100%;height:100%}
 /* Meetings grouped rows + contacts */
 tr.mtg-group td{padding:7px 16px;font-size:.74em;font-weight:800;letter-spacing:.02em;text-transform:none}
 tr.mtg-group .mtg-gico{margin-right:7px;font-size:1.05em;vertical-align:-1px}
@@ -2621,10 +2633,9 @@ async function renderCommandCenter(){
   const moShort=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const nowM=_rbmAsOf.getMonth(), nowY=_rbmAsOf.getFullYear();
   // 12 forward buckets keyed by year-month from the current month.
-  const fwd=new Array(12).fill(0); let overdueArr12=0; let datedCount=0;
+  const fwd=new Array(12).fill(0); let overdueArr12=0;
   accts.forEach(a=>{
     if(!a.renewal_date) return;
-    datedCount++;
     const dd=_rbmDays(a.renewal_date); const arr=a.arr_usd||0;
     if(dd==null) return;
     if(dd<0){ overdueArr12+=arr; return; }
@@ -2644,15 +2655,8 @@ async function renderCommandCenter(){
   }).join('');
   const anyRen=overdueArr12>0||fwd.some(v=>v>0);
   const renTotal=overdueArr12+fwd.reduce((s,v)=>s+v,0);
-  // Be honest about coverage: most accounts have no renewal_date in HubSpot yet, so the
-  // empty months reflect missing data, not a quiet year. Surface the dated count and point
-  // to where that gap is tracked.
-  const covNote=accts.length?(datedCount+' of '+accts.length+' accounts have a renewal date'):'';
-  const headNote=anyRen?(mfmt(renTotal)+' up for renewal · '+covNote):(covNote||'Next 12 months');
-  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+headNote+'</span></div><div class="body pad"><div class="cc-months">'+
-    (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection. Add renewal dates (see Data Gaps) to populate this chart.</div>')+'</div>'+
-    (anyRen&&accts.length&&datedCount<accts.length?'<div class="muted" style="font-size:.78em;margin-top:10px">Empty months mean no renewal date is set for those accounts, not that nothing renews. '+(accts.length-datedCount).toLocaleString()+' accounts are missing a renewal date (tracked in Data Gaps).</div>':'')+
-    '</div></div>';
+  const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+(anyRen?(mfmt(renTotal)+' up for renewal, next 12 months'):'Next 12 months')+'</span></div><div class="body pad"><div class="cc-months">'+
+    (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
   // Renewal Forecast — the deterministic outcome mix across dated accounts, drawn as a
   // horizontal proportion bar + legend. A stacked bar reads a MIX far better than four
   // separate columns, and categories with no accounts simply drop out (no empty "0" bar).
@@ -2776,7 +2780,13 @@ function _tableauVizEl(cfg, view, token){
   viz.setAttribute('token',token);
   viz.setAttribute('toolbar','bottom');
   viz.setAttribute('hide-tabs','');
-  viz.style.width='100%'; viz.style.minHeight='720px'; viz.style.display='block';
+  // Fit the embed to the available area: Tableau sizes to the host element, so give it a
+  // tall, viewport-based height and full width. 'device=desktop' picks the dashboard's
+  // desktop layout rather than a cramped default.
+  viz.setAttribute('device','desktop');
+  viz.setAttribute('width','100%');
+  viz.setAttribute('height','100%');
+  viz.style.width='100%'; viz.style.height='100%'; viz.style.display='block';
   return viz;
 }
 async function _tableauMount(){
@@ -2802,11 +2812,14 @@ function _tableauSelect(i){ _tableauState.active=i; _renderTableauChrome(); _tab
 function _renderTableauChrome(){
   const host=document.getElementById('reports-body'); if(!host) return;
   const cfg=_tableauState.cfg, views=_tableauState.views;
-  const tabs=views.length>1?('<div class="cc-tabs" style="margin-bottom:12px">'+
-    views.map((v,i)=>'<button class="cc-tab'+(i===_tableauState.active?' active':'')+'" onclick="_tableauSelect('+i+')">'+escapeHtml(v.label)+'</button>').join('')+'</div>'):'';
+  const tabs=views.length>1?('<div class="tb-tabs">'+
+    views.map((v,i)=>'<button class="tb-tab'+(i===_tableauState.active?' active':'')+'" onclick="_tableauSelect('+i+')">'+escapeHtml(v.label)+'</button>').join('')+'</div>'):'';
   const siteNote=cfg.site?(' · site '+escapeHtml(cfg.site)):'';
-  host.innerHTML='<div class="panel"><div class="head"><h2>Tableau Reports</h2><span class="note">Embedded live from '+escapeHtml((cfg.server_url||'').replace(/^https?:\/\//,''))+siteNote+'</span></div>'+
-    '<div class="body pad">'+tabs+'<div id="tableau-stage"></div></div></div>';
+  const active=views[_tableauState.active];
+  const open=(cfg.server_url&&active)?('<a class="tb-open" href="'+escapeHtml(cfg.server_url.replace(/\/$/,'')+(cfg.site?('/#/site/'+encodeURIComponent(cfg.site)):'')+'/views/'+active.path)+'" target="_blank" rel="noopener">Open in Tableau ↗</a>'):'';
+  host.innerHTML='<div class="panel tb-panel"><div class="head"><h2>'+(active?escapeHtml(active.label):'Tableau Reports')+'</h2><span class="note">Embedded live from '+escapeHtml((cfg.server_url||'').replace(/^https?:\/\//,''))+siteNote+'</span>'+open+'</div>'+
+    tabs+
+    '<div class="tb-stage" id="tableau-stage"></div></div>';
 }
 function _tableauNotConfigured(cfg){
   const host=document.getElementById('reports-body'); if(!host) return;
