@@ -1365,8 +1365,8 @@ function _mpHost(){ return document.getElementById('sc-pane-pool'); }
 function loadPooledMovePanel(){
   const host=_mpHost(); if(!host) return;
   let box=document.getElementById('pooled-move-panel');
-  if(!box){ box=document.createElement('div'); box.id='pooled-move-panel'; box.className='panel'; box.style.marginBottom='14px'; host.insertBefore(box,host.firstChild); }
-  box.innerHTML='<div class="head"><h2>Move to pooled structure</h2><span class="note">1–20 user Agency + Corporate</span></div><div class="body" id="pooled-move-body"><span class="muted">Loading cohort…</span></div>';
+  if(!box){ box=document.createElement('div'); box.id='pooled-move-panel'; box.className='panel'; box.style.marginBottom='16px'; host.insertBefore(box,host.firstChild); }
+  box.innerHTML='<div class="head"><h2>Move to pooled structure</h2><span class="note">Scaled restructure · 1–20 user Agency + Corporate</span></div><div class="body" id="pooled-move-body"><span class="muted">Loading cohort…</span></div>';
   fetch('/api/cohort/pooled').then(r=>r.json()).then(d=>_renderPooledMove(d)).catch(()=>{
     const b=document.getElementById('pooled-move-body'); if(b)b.innerHTML='<span class="muted">Cohort preview unavailable.</span>';
   });
@@ -1376,30 +1376,43 @@ function _renderPooledMove(d){
   const notPooled=(d.accounts||[]).filter(a=>!a.already_pooled);
   const owners=[...new Set((d.accounts||[]).map(a=>a.csm_owner).filter(Boolean))];
   b.innerHTML=
-    '<div class="note" style="margin-bottom:8px">The platform moves these accounts to <strong>cs_customer_tier = Pooled</strong> in HubSpot and removes named ownership, so they leave individual books and are served by the pooled round-robin queue. Reversible and audited.</div>'+
-    '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:10px">'+
-      '<div><div class="muted">In cohort</div><div class="mono" style="font-size:18px">'+(d.count||0)+'</div></div>'+
-      '<div><div class="muted">Not yet pooled</div><div class="mono" style="font-size:18px">'+notPooled.length+'</div></div>'+
-      '<div><div class="muted">Cohort ARR (USD)</div><div class="mono" style="font-size:18px">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
-      '<div><div class="muted">Current owners</div><div class="mono" style="font-size:18px">'+owners.length+'</div></div>'+
+    '<div class="cc-headline" style="margin-bottom:14px">'+
+      '<div class="cc-big"><div class="cc-big-l">In cohort</div><div class="cc-big-v">'+(d.count||0)+'</div></div>'+
+      '<div class="cc-big"><div class="cc-big-l">To move</div><div class="cc-big-v">'+notPooled.length+'</div></div>'+
+      '<div class="cc-big"><div class="cc-big-l">Cohort ARR</div><div class="cc-big-v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
+      '<div class="cc-big"><div class="cc-big-l">Current owners</div><div class="cc-big-v">'+owners.length+'</div></div>'+
     '</div>'+
-    '<div style="display:flex;gap:8px;align-items:center">'+
+    '<p class="muted" style="margin:0 0 14px;max-width:720px;line-height:1.5">Sets <strong>cs_customer_tier = Pooled</strong> in HubSpot and removes named ownership, so these accounts leave individual books and are served by the pooled round-robin queue. Owner-scoped, audited, and reversible. Accounts already pooled are skipped.</p>'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
       '<button class="btn" onclick="runMoveToPooled(false,this)">Preview (dry-run)</button>'+
       '<button class="btn btn-primary" onclick="runMoveToPooled(true,this)"'+(notPooled.length?'':' disabled')+'>Move '+notPooled.length+' to pooled</button>'+
-      '<span id="pooled-move-status" class="muted"></span>'+
-    '</div>';
+    '</div>'+
+    '<div id="pooled-move-result" style="margin-top:14px"></div>';
 }
 function runMoveToPooled(apply,btn){
-  const st=document.getElementById('pooled-move-status');
-  if(apply && !confirm('Move the 1–20 Agency + Corporate accounts to the pooled structure in HubSpot? This clears named ownership and is audited. It is reversible.')) return;
-  if(btn)btn.disabled=true; if(st)st.textContent=apply?'Moving…':'Previewing…';
+  const res=document.getElementById('pooled-move-result');
+  if(apply && !confirm('Move '+((document.querySelectorAll('#pooled-move-panel .cc-big-v')[1]||{}).textContent||'these')+' accounts (1–20 Agency + Corporate) to the pooled structure in HubSpot?\n\nThis sets cs_customer_tier = Pooled and clears named ownership. It is audited and reversible.')) return;
+  const buttons=document.querySelectorAll('#pooled-move-panel button'); buttons.forEach(x=>x.disabled=true);
+  if(res)res.innerHTML='<span class="muted">'+(apply?'Moving accounts…':'Running dry-run…')+'</span>';
   fetch('/api/cohort/move-to-pooled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:apply,clear_owner:true})})
     .then(r=>r.json()).then(d=>{
       const s=d.summary||{};
-      if(st)st.textContent='Cohort '+(s.in_cohort||0)+' · '+(apply?('moved '+(s.moved||0)):('would move '+(s.dry_run||0)))+' · already pooled '+(s.already_pooled||0)+(s.forbidden?(' · forbidden '+s.forbidden):'')+(s.not_connected?(' · not connected '+s.not_connected):'')+(s.errors?(' · errors '+s.errors):'');
-      if(apply) setTimeout(()=>{loadPooledMovePanel(); if(typeof refresh==='function')refresh();},600);
-    }).catch(()=>{ if(st)st.textContent='Request failed.'; })
-    .finally(()=>{ if(btn)btn.disabled=false; });
+      const chips=[
+        ['Cohort',s.in_cohort||0,''],
+        [apply?'Moved':'Would move',apply?(s.moved||0):(s.dry_run||0),apply?'ok':'info'],
+        ['Already pooled',s.already_pooled||0,''],
+      ];
+      if(s.forbidden)chips.push(['Not yours (skipped)',s.forbidden,'warn']);
+      if(s.not_connected)chips.push(['Not connected',s.not_connected,'warn']);
+      if(s.errors)chips.push(['Errors',s.errors,'bad']);
+      const banner=apply
+        ? '<div class="note" style="color:var(--good);font-weight:600;margin-bottom:8px">✓ Move applied in HubSpot. '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' now pooled. The list refreshes below.</div>'
+        : '<div class="note" style="margin-bottom:8px">Dry-run only — nothing was written. '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would be moved. Click <strong>Move</strong> to apply.</div>';
+      if(res)res.innerHTML=banner+'<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        chips.map(c=>'<span class="pill '+(c[2]==='ok'?'pln':'')+'" style="background:var(--panel2,#1a1f2b);border:1px solid var(--line,#2a3140);padding:4px 10px;border-radius:14px">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
+      if(apply) setTimeout(()=>{loadPooledMovePanel(); if(typeof refresh==='function')refresh();},800);
+    }).catch(()=>{ if(res)res.innerHTML='<span class="muted" style="color:var(--bad)">Request failed. Please retry.</span>'; })
+    .finally(()=>{ buttons.forEach(x=>x.disabled=false); });
 }
 // Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
 function renderPooledDashboard(){
