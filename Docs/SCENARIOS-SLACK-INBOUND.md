@@ -1,160 +1,107 @@
-# CS Platform — End-to-End Scenarios (Slack inbound)
+# CS Platform — Four Capability Scenarios (for team agreement)
 
 **Audience:** CS Leadership, RevOps, CS Engineering
 **Date:** 2 October 2026
-**Purpose:** Show how a message a customer or CSM drops in Slack is handled end-to-end,
-entirely inside the CS Platform, so a CSM never logs into another system to act on it.
+**Purpose:** Demonstrate that a CSM does their work **in one place** — the CS Platform —
+without logging into HubSpot, Zendesk, Stripe, or the warehouse. Each scenario starts with
+a message in Slack and is handled end-to-end in the platform.
 
-## Decided routing model: Option A (HubSpot Service Hub is the Help Desk)
+## Routing model: Option A (decided)
 
-Per `DECISION-tech-touch-routing.md`, the team has chosen **Option A**:
+Per `DECISION-tech-touch-routing.md`, the team has chosen **Option A**: the five inbound
+channels (including Slack) land in **HubSpot Service Hub**; the **CS Platform surfaces the
+queue and is where the CSM acts** — reply, close, hand off, raise a CSQL, move a cohort,
+send the digest — through owner-scoped, two-gated, audited writes.
 
-- The five inbound channels (including Slack call-log) land in **HubSpot Service Hub**.
-  Tickets are native HubSpot Service tickets; round-robin uses HubSpot "Rotate Record
-  Owner"; CSM availability is HubSpot Help Desk status.
-- The **CS Platform's role is "surface + act"**: it reads the HubSpot ticket queue, layers
-  CS context on top (health, risk, ARR, renewal, NDR, churn, expansion), and lets the CSM
-  **act from one pane** — reply, close, hand off, raise a CSQL, log notes, send the digest —
-  through the platform's already-shipped, owner-scoped, audited writes.
-- Outbound lifecycle email (the monthly digest, campaign replies) is sent via **HubSpot**
-  (transactional single-send), which the business already licenses.
-
-What this means for the scenarios below: the **Slack → HubSpot ticket** hop is HubSpot
-configuration (Service Hub routing), not platform code. Everything the CSM then does —
-and all the CS intelligence shown — is **live in the platform today** (noted per step).
-
-### Status legend
-- **Live** — shipped, deployed, and verified this programme.
-- **Config (Option A)** — HubSpot Service Hub configuration owned by RevOps, not platform code.
-- **Owner action** — a one-off provisioning step (credential / template), not code.
+**Status legend per step:** **[Live]** shipped + verified · **[Config A]** HubSpot Service
+Hub configuration (RevOps) · **[Owner]** one-off provisioning (credential/template).
 
 ---
 
-## Scenario 1 — Technical issue raised in Slack → triaged, handed to the support desk, closed in CS
+## Scenario 1 — Technical issue → triaged, handed to support, closed in CS
 
-**Requirements:** 5-channel inbound (#18), automated triage technical→support (#19),
-round-robin + 24h SLA (#20), duplicate merge (#23), Zendesk ingestion (#3), reply/close.
+**Slack message**
+> **#cs-inbound** — *Daniel Osei (admin, Meridian Recruitment)* 9:02 AM
+> We can't log in this morning — getting a 500 error on every page. Whole team is locked out, can someone help urgently?
 
-1. A customer admin posts in the shared Slack channel:
-   *"We can't log in this morning — 500 error on every page."*
-2. **[Config A]** HubSpot Service Hub ingests the Slack message as a ticket and rotates it
-   to an available pooled CSM under the 24-hour first-response SLA.
-3. **[Live]** The CS Platform surfaces that ticket in the Pooled Inbox with full account
-   context: health score, ARR, renewal date, open ticket count. The platform's own
-   deterministic triage classifies the intent as **technical** (keyword match on
-   "can't log in", "500", "error"), confirming/validating the routing for the audit log.
-4. **[Live]** From one pane the CSM **replies** to acknowledge and **hands the ticket to the
-   technical support desk** (Zendesk), using the platform's live Zendesk write
-   (`reply_ticket` + `set_ticket_status`). Verified: the deployed Zendesk token is an
-   admin agent, so it is write-capable.
-5. **[Live]** The CS ticket is **closed in the CS queue** (honest handoff — the support desk
-   owns the fix), keeping the triage-accuracy goal (no technical tickets lingering in CS) clean.
+**End to end**
+1. **[Config A]** HubSpot ingests the Slack message as a ticket and rotates it to an available pooled CSM under the 24-hour SLA.
+2. **[Live]** The platform surfaces the ticket with full account context (health, ARR, renewal, open tickets) and classifies the intent as **technical**.
+3. **[Live]** From one pane the CSM **replies** to acknowledge and **hands off to the support desk** (Zendesk) using the live Zendesk write — verified write-capable (admin-agent token).
+4. **[Live]** The CS ticket is **closed in the CS queue** (honest handoff), keeping the "no technical tickets in the CS queue" goal clean.
 
-**Outcome:** The CSM never opened Zendesk or HubSpot. One pane: see context, reply, hand off, close.
+**CSM logged into:** nothing but the CS Platform.
 
 ---
 
-## Scenario 2 — Expansion signal in Slack → CSQL raised without leaving the platform
+## Scenario 2 — Expansion signal → CSQL raised in HubSpot from the platform
 
-**Requirements:** inbound (#18), triage expansion→CSQL (#19), 85% licence-utilisation
-expansion trigger (#11), expansion deal create (Increment 5), HubSpot write (#1).
+**Slack message**
+> **#cs-inbound** — *Hannah Lees (champion, BrightPath Talent)* 11:27 AM
+> We're hiring fast this quarter and running out of licences. Can we add 10 more user seats next month? Keen to get it sorted before our next bill.
 
-1. A champion posts: *"We're hiring fast — can we add 10 more user seats next month?"*
-2. **[Config A]** HubSpot ingests it; because it is expansion intent it routes to the
-   **account owner** (not the pooled queue).
-3. **[Live]** The platform classifies the intent as **expansion** (expansion wins ties by
-   design — highest commercial value) and cross-checks the live expansion trigger: Pendo /
-   Entitlements **licence utilisation**. If the account is already **≥85% utilised** (#11),
-   the account page shows the "Add Seats / Upgrade" CTA, corroborating the Slack ask with data.
-4. **[Live]** The owner clicks **Create expansion deal (CSQL)** — the gated, owner-scoped,
-   audited `HubSpot.create_csql` write raises the deal in HubSpot. Two-gate (explicit
-   apply + global write flag); recorded in the immutable audit log.
+**End to end**
+1. **[Config A]** HubSpot ingests it; expansion intent routes to the **account owner**.
+2. **[Live]** The platform classifies **expansion** and corroborates with the live 85% licence-utilisation trigger (Pendo/Entitlements). If the account is already ≥85% utilised, the "Add Seats / Upgrade" CTA is shown next to the ask.
+3. **[Live]** The owner clicks **Create expansion deal (CSQL)** — the gated, owner-scoped, audited `HubSpot.create_csql` write raises the deal in HubSpot.
 
-**Outcome:** A Slack hint becomes a qualified pipeline deal in HubSpot, raised from the
-platform, with the utilisation evidence attached. No HubSpot login.
+**CSM logged into:** nothing but the CS Platform (the deal appears in HubSpot).
 
 ---
 
-## Scenario 3 — Billing question in Slack → CS ticket with live payment context, "No-Chasing" respected
+## Scenario 3 — Move 1–20 Agency + Corporate to the pooled structure — executed by the platform
 
-**Requirements:** inbound (#18), triage billing→CS queue (#19), Stripe read-only (#2),
-payment "No Chasing" days 1–14 automated / day-15 strategic (#9), duplicate merge (#23).
+This is the structural-change scenario: the platform **performs the move itself**.
 
-1. A finance contact posts twice within an hour: *"Did our invoice go through?"* then
-   *"Also — were we overcharged this month?"*
-2. **[Config A]** HubSpot ingests both and rotates the ticket to an available pooled CSM.
-3. **[Live]** The platform's duplicate-merge logic recognises the same sender within the
-   **2-hour window** and treats them as **one** item (so the CSM is not double-tasked, #23).
-4. **[Live]** Intent classifies as **billing**; the ticket opens with **live Stripe context**
-   (read-only, #2): invoice status, days past due, and the computed `dunning_stage`.
-   - If the account is in **days 1–14**, the platform shows it is on the **automated
-     "No-Chasing" path** (#9) — the CSM does not manually chase.
-   - If **day-15+**, the **Strategic playbook** is surfaced instead.
-5. **[Live]** The CSM answers from one pane with the real billing facts in front of them.
+**Slack message**
+> **#cs-inbound** — *Priya Natarajan (RevOps)* 2:14 PM
+> We've decided to move our **1–20 user Agency accounts and all Corporate accounts** onto the **pooled (Scaled) structure** rather than named ownership. Can CS reassign them out of individual books and into the pooled cohort? How many accounts and ARR are we talking?
 
-**Outcome:** The billing question is answered with authoritative Stripe data, and the
-"No-Chasing" policy is honoured automatically. No Stripe or billing-tool login.
+**End to end — all [Live], all in the platform**
+1. The CSM/ops user opens **Scaled Customer Success → The Pool → "Move to pooled structure"**.
+2. The platform **previews the exact cohort** it will touch — the 1–20 Agency + Corporate accounts (`Agency 1-2 Users`, `Agency 3-20 Users`, `Corporate`, or any already carrying `cs_customer_tier = Pooled`) — with **count, total ARR, and current owners**. This answers Priya's question directly.
+   - *Verified live on the current book: 21 accounts, ~$500k ARR.*
+3. The user clicks **Preview (dry-run)** to see exactly what would change — nothing is written.
+4. The user clicks **Move N to pooled** and confirms. The platform executes a **gated, owner-scoped, audited** batch write to HubSpot: it sets **`cs_customer_tier = Pooled`** and **clears the named owner** on each account, so they leave individual books.
+5. Those accounts are now served by the **pooled round-robin queue**; the Pooled Dashboard and executive capacity view reflect the rebalanced load immediately.
 
----
+**Why this is safe:** two-gate (explicit `apply=true` + global write flag), **owner-scoped** (a CSM moves only accounts they own; an admin/ops user moves the cohort), **audited** (every move recorded in the immutable log), **reversible** (set the tier back / reassign an owner), and **dry-run by default** (the preview writes nothing). Accounts already pooled are skipped as no-ops.
 
-## Scenario 4 — Renewal/health risk flagged in Slack → risk task, live churn + NDR context, proactive save
-
-**Requirements:** inbound (#18), health scoring (#12), ML churn >70% → defensive P1 + 24h
-SLA (#5, #8), renewal cadence T-120/90/60/30 (#10), NDR reporting (#16), executive
-governance (#14), contact-role close-gate (#15).
-
-1. A CSM posts on behalf of a worried account: *"Customer sounded unhappy on our call and
-   said they're reviewing options before renewal."*
-2. **[Config A]** HubSpot captures it as a ticket for the account owner.
-3. **[Live]** The platform enriches the account with its full live risk picture, in one view:
-   - **Health score** (#12) from usage + CSAT + Jiminny **call sentiment** — the "unhappy
-     call" is corroborated by real negative sentiment, not a hunch.
-   - **ML churn** (#5) — **now live**: the cross-account warehouse reader was provisioned
-     this programme and verified returning **10,278 scored accounts**. If this account is
-     **>70%**, the orchestrator raises the **Defensive Risk Task at P1 with a 24-hour SLA** (#8).
-   - **NDR** (#16) — **now live**: verified real values flowing from the warehouse
-     (`rpt_account_ndr_monthly`), so the retention trajectory shows a real number, not "no data".
-   - **Renewal cadence** (#10): if the account is inside T-120/90/60/30, the renewal play is
-     already queued.
-4. **[Live]** The CSM runs the save from one pane: logs the call note (HubSpot write),
-   confirms the **contact roles** are complete (the close-gate, #15, blocks a renewal task
-   from closing with missing Sponsor/Champion/Finance roles), and the **executive governance
-   KPIs** (#14) reflect the at-risk ARR for leadership.
-
-**Outcome:** A soft Slack signal becomes a governed, data-backed retention play with a
-P1 SLA — driven from one pane, with live churn and NDR now behind it.
+**CSM logged into:** nothing but the CS Platform — the re-tiering lands in HubSpot automatically.
 
 ---
 
-## What is live vs. what remains (honest summary)
+## Scenario 4 — Renewal/health risk → risk task with live churn + NDR, proactive save
 
-**Live and verified today (all four scenarios' CS actions):**
-- Triage, routing, round-robin, 24h SLA, 20h reassign, 2h duplicate merge (deterministic engine, tested).
-- Health, Jiminny sentiment, renewal cadence, expansion trigger, payment "No-Chasing".
-- **ML churn and NDR** — warehouse access provisioned and verified end-to-end this programme.
-- Owner-scoped, two-gated, audited writes: HubSpot CS write-back, notes, contact roles,
-  **expansion deals (CSQL)**; Zendesk reply/close (token confirmed write-capable).
-- Monthly performance digest: compile + gated send + 1st-of-month scheduler (dry-run-safe).
+**Slack message**
+> **#cs-inbound** — *Aisha Bello (CSM, internal)* 3:10 PM
+> Flagging a risk: just got off a call with Northgate Group and they sounded unhappy — mentioned they're reviewing other options before their renewal. Want to get ahead of this.
 
-**Config (Option A) — RevOps, HubSpot Service Hub:**
-- Route the five channels (incl. Slack call-log) into HubSpot Service tickets; configure
-  Rotate Record Owner, availability, and the 24h SLA in HubSpot workflows.
-- Confirm the Service Hub Pro licence is within the budget (the gate for Option A).
+**End to end**
+1. **[Config A]** HubSpot captures it as a ticket for the account owner.
+2. **[Live]** The platform enriches the account with its full live risk picture in one view:
+   - **Health** from usage + CSAT + Jiminny **call sentiment** (the "unhappy call" corroborated by real sentiment).
+   - **ML churn** — **live** (warehouse access provisioned this programme; **10,278 accounts scored**). If >70%, the orchestrator raises a **Defensive Risk Task at P1 with a 24h SLA**.
+   - **NDR** — **live** (verified real values from `rpt_account_ndr_monthly`), so the retention trajectory shows a real number.
+   - **Renewal cadence** (T-120/90/60/30): the renewal play is already queued.
+3. **[Live]** The CSM runs the save from one pane: logs the call note (HubSpot write), confirms the **contact roles** are complete (the close-gate blocks a renewal task from closing with missing Sponsor/Champion/Finance roles), and executive governance KPIs reflect the at-risk ARR.
 
-**Owner actions (one-off, not code):**
-- HubSpot transactional email template id → to send the monthly digest for real.
-- Security hygiene: rotate the Stripe key to a restricted read-only `rk_` key; rotate the
-  Tableau connected-app secret (runbook: `SECURITY-ROTATION-RUNBOOK.md`).
-
-**Phase 2 (deferred per Meeting Notes):**
-- Rocket Lane onboarding is connected (live); the deeper onboarding-stagnation alerts and
-  unified lifecycle view are Phase-2 scope.
+**CSM logged into:** nothing but the CS Platform.
 
 ---
 
-## The single decision that makes these fully end-to-end
+## What this proves
 
-Option A is chosen. The remaining gate is **confirming the HubSpot Service Hub Pro licence**
-and configuring the channel routing in HubSpot. Once that is in place, the Slack → ticket
-hop is live and all four scenarios run with no manual stitching: the customer's Slack
-message lands as a HubSpot ticket, and the CSM does everything else from the CS Platform.
+Across all four scenarios the CSM **never leaves the CS Platform**. The platform reads
+every live source and **acts on each system** on the CSM's behalf — reply/close a Zendesk
+ticket, raise a HubSpot CSQL, **re-tier a whole cohort to pooled in HubSpot**, log notes,
+and surface live churn + NDR — all gated, owner-scoped, and audited.
+
+**Live and verified today:** triage/routing/SLA/dedupe, health, sentiment, renewal cadence,
+expansion trigger, payment No-Chasing, ML churn + NDR (warehouse provisioned this
+programme), HubSpot writes (CS write-back, notes, roles, CSQL, **move-to-pooled**), Zendesk
+reply/close, monthly digest (compile + gated send + scheduler).
+
+**Remaining to make Slack intake itself end-to-end:** confirm the HubSpot Service Hub Pro
+licence and configure channel routing (Option A). **One-off owner actions:** HubSpot
+transactional-email template id (digest send), Stripe `rk_` + Tableau secret rotations.
