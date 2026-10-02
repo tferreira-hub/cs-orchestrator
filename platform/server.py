@@ -1048,6 +1048,43 @@ class Handler(BaseHTTPRequestHandler):
                 except (KeyError, ValueError) as exc:
                     self._json(400, {"error": str(exc)})
                 return
+            if path.startswith("/api/accounts/") and path.endswith("/log-note"):
+                account_id = path[len("/api/accounts/"):-len("/log-note")].strip("/")
+                note = (body.get("note") or "").strip()
+                apply_write = bool(body.get("apply", False))
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only log notes on accounts you own."})
+                    return
+                try:
+                    record_audit("log_note", principal,
+                                 {"account_id": account_id, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.log_note(account_id, note, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path.startswith("/api/accounts/") and path.endswith("/tag-contact-role"):
+                account_id = path[len("/api/accounts/"):-len("/tag-contact-role")].strip("/")
+                email = (body.get("contact_email") or "").strip()
+                role = (body.get("role") or "").strip()
+                apply_write = bool(body.get("apply", False))
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only tag contacts on accounts you own."})
+                    return
+                try:
+                    record_audit("tag_contact_role", principal,
+                                 {"account_id": account_id, "role": role, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.tag_contact_role(account_id, email, role, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
             self._json(404, {"error": "not found", "path": path})
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": f"{type(exc).__name__}: {exc}"})

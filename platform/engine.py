@@ -1199,6 +1199,41 @@ def enrol_sequence(account_id: str, sequence: str = "low_usage_reengage", apply:
     }
 
 
+def log_note(account_id: str, note: str, apply: bool = False) -> dict:
+    """Log a call/meeting note to the account's HubSpot timeline. Reversible CRM write;
+    two-gate (apply + CS_ALLOW_WRITE), dry-run by default."""
+    if not (dataaccess._ADAPTERS and _src.HUBSPOT.live()):
+        result = {"logged": False, "mode": "not-connected"}
+    else:
+        result = _src.HUBSPOT.log_note(account_id, note, apply=apply)
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": account_id,
+        "apply_requested": bool(apply),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
+def tag_contact_role(account_id: str, contact_email: str, role: str, apply: bool = False) -> dict:
+    """Tag a contact's CS role (Exec Sponsor / Primary Champion / Finance Contact) in
+    HubSpot. Reversible; two-gate; dry-run by default. Satisfies the WoW contact-role
+    architecture requirement from inside the platform."""
+    if not (dataaccess._ADAPTERS and _src.HUBSPOT.live()):
+        result = {"tagged": False, "mode": "not-connected"}
+    else:
+        result = _src.HUBSPOT.tag_contact_role(account_id, contact_email, role, apply=apply)
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": account_id,
+        "apply_requested": bool(apply),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
 def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     """Portfolio revenue retention, computed transparently from LIVE signals only.
 
@@ -1644,10 +1679,6 @@ def integrations() -> dict:
             liveset.add("Tableau")
     except Exception:  # noqa: BLE001
         pass
-    # Count accounts actually carrying live data for each source.
-    def synced(src_key):
-        return sum(1 for a in accounts.values() if a.get("sources", {}).get(src_key) == "live")
-
     # Precise, honest status. Three distinct states instead of a vague "not connected":
     #   connected (live)      — the source is authenticated and returning data
     #   configuration required — we have access but a specific env value is missing
@@ -1681,37 +1712,45 @@ def integrations() -> dict:
     def st(name):
         return status_for(name)["status"]
     hs_live = "HubSpot" in liveset
+    writes_on = str(_os.environ.get("CS_ALLOW_WRITE", "")).lower() in ("1", "true", "yes", "on")
+    hs_pushes = (["health score", "risk status", "active playbook",
+                  "call/meeting notes", "contact roles (Sponsor/Champion/Finance)"]
+                 if hs_live else [])
     return {
+        "writes_enabled": writes_on,
         "connectors": [
-            {"system": "HubSpot", "category": "CRM", "direction": "bi-directional",
-             **status_for("HubSpot"), "accounts_synced": synced("hubspot"),
+            {"system": "HubSpot", "category": "CRM",
+             "direction": "bi-directional (write)" if (hs_live and writes_on) else "bi-directional",
+             **status_for("HubSpot"),
              "pulls": ["contract value", "renewal date", "account hierarchy", "contacts"],
-             "pushes": ["health score", "risk status", "active playbook"] if hs_live else []},
+             "pushes": hs_pushes,
+             "writes": (["CS write-back", "sequence enrolment", "notes", "contact roles"]
+                        if (hs_live and writes_on) else [])},
             {"system": "Stripe", "category": "Billing / Finance", "direction": "read-only",
-             **status_for("Stripe"), "accounts_synced": synced("stripe"),
+             **status_for("Stripe"),
              "pulls": ["invoice status", "days past due", "ARR"], "pushes": []},
             {"system": "Zendesk", "category": "Support", "direction": "read-only",
-             **status_for("Zendesk"), "accounts_synced": synced("zendesk"),
+             **status_for("Zendesk"),
              "pulls": ["ticket volume", "CSAT", "Sev-1 flags"], "pushes": []},
             {"system": "Product Telemetry", "category": "Usage (Pendo)", "direction": "read-only",
-             **status_for("Pendo"), "accounts_synced": synced("usage"),
+             **status_for("Pendo"),
              "pulls": ["risk advisor", "adoption", "days since last visit", "plan tier"], "pushes": []},
             {"system": "Jiminny", "category": "Conversational Intelligence", "direction": "read-only",
-             **status_for("Jiminny"), "accounts_synced": synced("jiminny"),
+             **status_for("Jiminny"),
              "pulls": ["last call", "sentiment", "summary", "customer talk ratio"], "pushes": []},
             {"system": "Rocket Lane", "category": "Onboarding", "direction": "read-only",
-             **status_for("Rocket Lane"), "accounts_synced": synced("onboarding"),
+             **status_for("Rocket Lane"),
              "pulls": ["onboarding status", "time to value", "onboarding health"], "pushes": []},
             {"system": "Churn Model (Redshift)", "category": "Data Platform · Redshift Data API",
              "direction": "read-only", "access": "read-only",
-             **status_for("Churn Model"), "accounts_synced": synced("churn"),
+             **status_for("Churn Model"),
              "pulls": ["ML churn score", "model version", "top risk drivers"], "pushes": []},
             {"system": "Entitlements", "category": "Licensing / Billing",
              "direction": "read-only", "access": "read-only",
-             **status_for("Entitlements"), "accounts_synced": synced("entitlements"),
+             **status_for("Entitlements"),
              "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
             {"system": "Tableau", "category": "Analytics / Reporting", "direction": "embed (SSO)",
-             "access": "read-only", **status_for("Tableau"), "accounts_synced": None,
+             "access": "read-only", **status_for("Tableau"),
              "pulls": ["embedded dashboards (Revenue, NDR, Billing, Stripe)"],
              "pushes": ["signed-in CSM identity (Connected App JWT)"]},
         ]

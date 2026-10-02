@@ -3387,7 +3387,7 @@ async function loadIntegrations(){
     const detail=c.detail?'<div class="intdetail '+(state==='config'?'cfg':'pend')+'">'+escapeHtml(c.detail)+'</div>':'';
     return '<div class="intcard"><div class="top"><div><h3>'+escapeHtml(c.system)+'</h3><div class="cat">'+escapeHtml(c.category)+'</div></div><span class="pill '+cls+'">'+escapeHtml(c.status)+'</span></div>'+
       '<div class="dirbadge">'+escapeHtml(access)+'</div>'+detail+
-      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+(c.accounts_synced!=null?'<br><span class="muted">'+c.accounts_synced+' accounts synced</span>':'')+'</div></div>';
+      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+((c.writes&&c.writes.length)?'<br><b>Writes:</b> '+c.writes.map(escapeHtml).join(', '):'')+'</div></div>';
   }).join('');
 }
 async function loadAudit(){
@@ -4061,6 +4061,7 @@ function renderCompanyPage(id,d){
       d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
         (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+'</div>').join('')+'</div>'):'')+
     _writebackPanel(id,d)+
+    _notesRolesPanel(id,d)+
   '</div>';
   document.getElementById('company-body').innerHTML=tabs+'<div class="company-wrap">'+left+rail+'</div>';
   go('company');
@@ -4104,6 +4105,69 @@ async function applyWriteback(id,btn){
     else if(res.mode==='not-connected'){ if(status)status.textContent='HubSpot is not connected.'; }
     else { if(status)status.textContent='Prepared (not applied).'; }
   }catch(e){ if(status)status.textContent='Could not sync right now.'; }
+  finally{ if(btn)btn.disabled=false; }
+}
+
+// Reversible CRM writes (increment 2): log a call/meeting note to the HubSpot timeline, and
+// tag a contact's CS role (Exec Sponsor / Primary Champion / Finance Contact). Two-gated,
+// owner-scoped, audited server-side. The role tagging satisfies the WoW contact-role
+// architecture from inside the platform.
+const CS_ROLES=['Executive Sponsor','Primary Champion / Admin','Finance Contact'];
+function _notesRolesPanel(id,d){
+  const hs=d.hubspot||{}, contacts=(hs.contacts||[]);
+  const noteBox='<div class="cp-section" data-cpt="planning"><div class="cp-shead"><h2>Log a note to HubSpot</h2></div>'+
+    '<div class="cp-comment"><textarea id="note-'+escapeHtml(id)+'" placeholder="Log a call or meeting note to the HubSpot timeline..."></textarea></div>'+
+    '<div style="margin-top:8px;display:flex;gap:8px;align-items:center">'+
+      '<button class="btn" onclick="applyLogNote(\''+escapeHtml(id)+'\',this)">Log note</button>'+
+      '<span class="muted" id="note-status-'+escapeHtml(id)+'" style="font-size:.85em"></span>'+
+    '</div></div>';
+  const roleOpts=CS_ROLES.map(r=>'<option value="'+escapeHtml(r)+'">'+escapeHtml(r)+'</option>').join('');
+  const rows=contacts.length?contacts.map(c=>{
+    const em=escapeHtml(c.email||'');
+    if(!em) return '';
+    return '<div class="dc-row" style="gap:10px;align-items:center"><span>'+escapeHtml(c.name||c.email)+(c.role?' <span class="pill g" style="font-size:.72em">'+escapeHtml(c.role)+'</span>':'')+'</span>'+
+      '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
+        '<select class="role-sel" data-email="'+em+'">'+roleOpts+'</select>'+
+        '<button class="btn" style="padding:5px 10px" onclick="applyTagRole(\''+escapeHtml(id)+'\',\''+em+'\',this)">Tag</button>'+
+      '</span></div>';
+  }).join(''):'<div class="muted">No associated contacts to tag.</div>';
+  const rolePanel='<div class="cp-section" data-cpt="planning"><div class="cp-shead"><h2>Contact roles</h2></div>'+
+    '<div class="writeback" style="background:#fff">Tag the required CS roles so renewal/onboarding tasks can close (WoW §5):<div style="margin-top:10px">'+rows+'</div>'+
+    '<span class="muted" id="role-status-'+escapeHtml(id)+'" style="font-size:.85em;display:block;margin-top:8px"></span></div></div>';
+  return noteBox+rolePanel;
+}
+async function applyLogNote(id,btn){
+  const ta=document.getElementById('note-'+id); const status=document.getElementById('note-status-'+id);
+  const note=(ta&&ta.value||'').trim();
+  if(!note){ if(status)status.textContent='Write a note first.'; return; }
+  if(!confirm('Log this note to the HubSpot timeline for this account?')) return;
+  if(btn)btn.disabled=true; if(status)status.textContent='Logging…';
+  try{
+    const r=await api('/api/accounts/'+encodeURIComponent(id)+'/log-note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note,apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(r.status===403){ if(status)status.textContent='You can only log notes on accounts you own.'; }
+    else if(res.logged){ if(status)status.textContent='Logged to HubSpot ✓'; if(ta)ta.value=''; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (writes disabled on this environment).'; }
+    else if(res.mode==='not-connected'){ if(status)status.textContent='HubSpot is not connected.'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not log the note.'; }
+  finally{ if(btn)btn.disabled=false; }
+}
+async function applyTagRole(id,email,btn){
+  const sel=btn.parentElement.querySelector('.role-sel'); const role=sel?sel.value:'';
+  const status=document.getElementById('role-status-'+id);
+  if(!confirm('Tag '+email+' as "'+role+'" in HubSpot?')) return;
+  if(btn)btn.disabled=true; if(status)status.textContent='Tagging '+email+'…';
+  try{
+    const r=await api('/api/accounts/'+encodeURIComponent(id)+'/tag-contact-role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact_email:email,role,apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(r.status===403){ if(status)status.textContent='You can only tag contacts on accounts you own.'; }
+    else if(r.status===400){ if(status)status.textContent=(j.error||'Could not tag that contact.'); }
+    else if(res.tagged){ if(status)status.textContent='Tagged '+escapeHtml(email)+' as '+escapeHtml(role)+' ✓'; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (writes disabled on this environment).'; }
+    else if(res.mode==='not-connected'){ if(status)status.textContent='HubSpot is not connected.'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not tag the contact.'; }
   finally{ if(btn)btn.disabled=false; }
 }
 // Company-profile tab switch: show only the sections tagged for the chosen tab (Overview

@@ -504,6 +504,70 @@ def test_sequence_enrolment_rejects_unknown_sequence():
         pass
 
 
+def test_log_note_two_gate(monkeypatch):
+    """Logging a note to HubSpot is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
+    from adapters import config, sources
+    monkeypatch.setenv("STRIPE_KEY", "x")  # unrelated; keep env stable
+    prev_find = sources.HubSpot._find_company
+    posts = []
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "99"})
+    monkeypatch.setattr(config, "http_post", lambda *a, **k: posts.append(a[0]) or {"id": "note1"})
+
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = sources.HUBSPOT.log_note("au1-1", "Called the champion", apply=True)
+    assert r["mode"] == "dry-run" and r["logged"] is False and not posts
+
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    r2 = sources.HUBSPOT.log_note("au1-1", "Called the champion", apply=True)
+    assert r2["mode"] == "applied" and r2["logged"] is True
+    assert any("/crm/v3/objects/notes" in u for u in posts)
+    sources.HubSpot._find_company = prev_find
+
+
+def test_log_note_requires_text(monkeypatch):
+    from adapters import sources
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "99"})
+    try:
+        sources.HUBSPOT.log_note("au1-1", "   ", apply=False)
+        assert False, "expected ValueError for empty note"
+    except ValueError:
+        pass
+
+
+def test_tag_contact_role_two_gate_and_validation(monkeypatch):
+    """Tagging a contact role is dry-run unless both gates; rejects unknown roles and
+    contacts not already associated with the account."""
+    from adapters import config, sources
+    monkeypatch.setattr(sources.HubSpot, "_find_company", lambda self, ref: {"id": "99"})
+    monkeypatch.setattr(sources.HubSpot, "_contacts",
+                        lambda self, cid, limit=50: [{"name": "A", "email": "a@co.com", "role": None}])
+    patches = []
+    monkeypatch.setattr(config, "http_post", lambda *a, **k: {"results": [{"id": "c1"}]})
+    monkeypatch.setattr(config, "http_patch", lambda *a, **k: patches.append(a[0]) or {})
+
+    # Unknown role rejected.
+    try:
+        sources.HUBSPOT.tag_contact_role("au1-1", "a@co.com", "Mascot", apply=True)
+        assert False
+    except ValueError:
+        pass
+    # Contact not on account rejected.
+    try:
+        sources.HUBSPOT.tag_contact_role("au1-1", "nobody@co.com", "Finance Contact", apply=True)
+        assert False
+    except ValueError:
+        pass
+    # Dry-run by default.
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = sources.HUBSPOT.tag_contact_role("au1-1", "a@co.com", "Finance Contact", apply=True)
+    assert r["mode"] == "dry-run" and r["tagged"] is False and not patches
+    # Applied with both gates.
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    r2 = sources.HUBSPOT.tag_contact_role("au1-1", "a@co.com", "Finance Contact", apply=True)
+    assert r2["mode"] == "applied" and r2["tagged"] is True
+    assert r2["hs_buying_role"] == "BUDGET_HOLDER" and patches
+
+
 def test_rocket_lane_adapter_maps_onboarding(monkeypatch):
     from adapters import config, sources
 

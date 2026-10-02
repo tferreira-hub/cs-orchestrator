@@ -1513,6 +1513,85 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true to enable.",
                 "_source": "hubspot-live-readonly"}
 
+    # Buying-role label -> HubSpot hs_buying_role internal value. HubSpot's default enum
+    # uses these tokens; a portal with custom values can override via CS_HS_ROLE_MAP later.
+    _ROLE_TO_HS = {
+        "Executive Sponsor": "DECISION_MAKER",
+        "Primary Champion / Admin": "CHAMPION",
+        "Finance Contact": "BUDGET_HOLDER",
+    }
+
+    def log_note(self, account_ref: str, note: str, apply: bool = False) -> dict[str, Any]:
+        """Log a call/meeting NOTE to the company's HubSpot timeline (a note engagement).
+        Reversible. Two-gate: dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
+        note = (note or "").strip()
+        if not note:
+            raise ValueError("note text is required")
+        c = self._find_company(account_ref)  # read-only lookup
+        if apply and config.writes_allowed():
+            import time as _t
+            body = {
+                "properties": {
+                    "hs_note_body": note,
+                    "hs_timestamp": int(_t.time() * 1000),
+                },
+                "associations": [{
+                    "to": {"id": c["id"]},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED",
+                               "associationTypeId": 190}],  # note -> company
+                }],
+            }
+            res = config.http_post("https://api.hubapi.com/crm/v3/objects/notes",
+                                   self._headers(), body)
+            return {"logged": True, "mode": "applied", "target": "hubspot.crm.notes",
+                    "company_id": c["id"], "note_id": res.get("id"),
+                    "_source": "hubspot-live-write"}
+        return {"logged": False, "mode": "dry-run", "target": "hubspot.crm.notes",
+                "company_id": c["id"], "would_write": {"hs_note_body": note},
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
+    def tag_contact_role(self, account_ref: str, contact_email: str, role: str,
+                         apply: bool = False) -> dict[str, Any]:
+        """Tag a contact's CS role (Executive Sponsor / Primary Champion / Finance Contact)
+        by setting hs_buying_role on the contact. Reversible. Two-gate as above. Resolves
+        the contact by email among the company's associated contacts (never writes a contact
+        that is not already on the account)."""
+        role = (role or "").strip()
+        contact_email = (contact_email or "").strip().lower()
+        hs_role = self._ROLE_TO_HS.get(role)
+        if not hs_role:
+            raise ValueError(f"unknown role {role!r}; expected one of {list(self._ROLE_TO_HS)}")
+        if not contact_email:
+            raise ValueError("contact_email is required")
+        c = self._find_company(account_ref)
+        contacts = self._contacts(c["id"], limit=50)
+        match = next((x for x in contacts if (x.get("email") or "").lower() == contact_email), None)
+        if not match:
+            raise ValueError(f"no associated contact with email {contact_email} on this account")
+        # Resolve the contact id (the _contacts helper does not return it; search by email).
+        found = config.http_post(
+            "https://api.hubapi.com/crm/v3/objects/contacts/search", self._headers(),
+            {"filterGroups": [{"filters": [
+                {"propertyName": "email", "operator": "EQ", "value": contact_email}]}],
+             "properties": ["email", "hs_buying_role"], "limit": 1})
+        hits = found.get("results", [])
+        if not hits:
+            raise ValueError(f"contact {contact_email} not found in HubSpot")
+        contact_id = hits[0]["id"]
+        if apply and config.writes_allowed():
+            config.http_patch(
+                f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}",
+                self._headers(), {"properties": {"hs_buying_role": hs_role}})
+            return {"tagged": True, "mode": "applied", "target": "hubspot.crm.contacts",
+                    "contact_id": contact_id, "email": contact_email,
+                    "role": role, "hs_buying_role": hs_role, "_source": "hubspot-live-write"}
+        return {"tagged": False, "mode": "dry-run", "target": "hubspot.crm.contacts",
+                "contact_id": contact_id, "email": contact_email, "role": role,
+                "would_write": {"hs_buying_role": hs_role},
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
 
 # Singletons the router uses.
 ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (
