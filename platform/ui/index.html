@@ -2052,7 +2052,49 @@ function _emailConnectPanel(title,note){
     '<div class="filterbar" style="padding:10px 16px 4px"><span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Search..."></span><span class="fpill ghost">Company</span><span class="fpill ghost">Conversation type</span><span class="fb-count">0 conversations</span></div>'+
     '<div class="body pad"><div class="empty"><b>Email sync not connected</b><div class="sub" style="margin-top:6px">Inbox pages show a filterable feed of emails once an email/calendar source is connected. No sample data is shown.</div></div></div></div>';
 }
-function renderPooledInbox(){_pooledHost().innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails');}
+function renderPooledInbox(){
+  const host=_pooledHost();
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading inbox…</span></div></div>';
+  (async()=>{
+    let r;
+    try{ r=await (await api('/api/inbound/triage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:[]})})).json(); }
+    catch(e){ host.innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails'); return; }
+    const s=r.summary||{}, tickets=r.tickets||[];
+    const roster=(s.available_csms||[]);
+    // Honest connect-state: no channels are wired yet, so there are no live items. Show the
+    // engine's readiness (round-robin roster, SLA, routing) rather than fabricating a feed.
+    const header='<div class="panel"><div class="head"><h2>Inbox · Scaled Tech-Touch</h2><span class="note">5-channel triage · round-robin · 24h SLA</span></div>'+
+      '<div class="body pad">'+
+      '<div class="mdw-grid" style="margin-bottom:12px">'+
+        _widgetBig('Open items',tickets.length)+
+        _widgetBig('Expansion (CSQL)',s.csqls||0,(s.csqls||0)>0?'good':'')+
+        _widgetBig('Zendesk handoffs',s.zendesk_handoffs||0)+
+        _widgetBig('SLA breached',s.breached||0,(s.breached||0)>0?'warn':'good')+
+      '</div>'+
+      '<div class="muted" style="font-size:.84em">Round-robin pool: '+(roster.length?roster.map(escapeHtml).join(', '):'<em>no available pooled CSMs configured</em>')+'</div>'+
+      '</div></div>';
+    let body;
+    if(!tickets.length){
+      body='<div class="panel"><div class="body pad"><div class="empty"><b>No inbound items yet</b>'+
+        '<div class="sub" style="margin-top:6px">The triage + round-robin engine is live. Once the five inbound channels (Zendesk misroutes, Slack call logs, '+
+        'accountmanagement@ mailbox, campaign replies, high-intent forms) are connected, items will arrive here, be classified by intent '+
+        '(technical → Zendesk, billing → CS queue, expansion → CSQL), and round-robin to the available pooled CSMs under a 24-hour SLA. No sample data is shown.</div></div></div></div>';
+    } else {
+      const rows=tickets.map(t=>{
+        const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':'a';
+        const dueTxt=t.sla_breached?'<span class="pill r">SLA breached</span>':(t.needs_reassign?'<span class="pill a">reassign</span>':'<span class="pill g">on track</span>');
+        return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.from||'')+' · '+escapeHtml(t.channel||'')+'</div></td>'+
+          '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent)+'</span></td>'+
+          '<td class="muted">'+escapeHtml(t.destination.replace(/_/g,' '))+'</td>'+
+          '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
+          '<td>'+dueTxt+'</td></tr>';
+      }).join('');
+      body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+tickets.length+' items</span></div>'+
+        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    }
+    host.innerHTML=header+body;
+  })();
+}
 function renderPooledEscalations(){_pooledHost().innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email');}
 function renderPooledResponseRates(){
   // Real proxy: outreach drafts prepared across the pooled queue (the tasks with drafts).

@@ -64,6 +64,7 @@ import rbac  # noqa: E402
 import tableau  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "cs-orchestrator"))
 from adapters import sources as _src  # noqa: E402
+import inbound as _inbound  # noqa: E402
 
 # Transient OIDC flow state (state -> code_verifier), in-process. Fine for a single
 # server; a multi-instance deployment would use a shared store.
@@ -917,6 +918,24 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts/enrich":
                 ids = body.get("ids") if isinstance(body.get("ids"), list) else []
                 self._json(200, engine.enrich_rows([str(i) for i in ids if i]))
+                return
+            # Scaled Tech-Touch inbound triage + round-robin (Use Case 1). Accepts a batch
+            # of already-normalised inbound items and an optional roster of pooled CSMs
+            # ({name, available}); returns classified/routed tickets with round-robin
+            # assignment and 24h SLA. Deterministic and side-effect-free: a "technical ->
+            # Zendesk" result is a handoff description, not an executed call. When no roster
+            # is posted, derive available pooled CSMs from the portfolio owners.
+            if path == "/api/inbound/triage":
+                items = body.get("items") if isinstance(body.get("items"), list) else []
+                roster = body.get("roster") if isinstance(body.get("roster"), list) else None
+                if not roster:
+                    owners = sorted({
+                        (a.get("csm_owner") or "").strip()
+                        for a in engine.portfolio().get("accounts", [])
+                        if (a.get("pooled") or a.get("cohort") == "pooled") and a.get("csm_owner")
+                    })
+                    roster = [{"name": o, "available": True} for o in owners if o]
+                self._json(200, _inbound.triage_inbound(items, roster=roster))
                 return
             if path == "/api/agent":
                 question = (body.get("question") or "").strip() or "What are my top CS actions today?"
