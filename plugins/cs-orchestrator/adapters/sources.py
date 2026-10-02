@@ -430,17 +430,65 @@ class Stripe:
             raise config.SourceError(f"Stripe customer not found for {ref}")
         cid = data[0]["id"]
         cust_email = data[0].get("email") or None
+        # All non-draft open invoices (JobAdder bills by charge attempt; many invoices have
+        # NO due_date, so a due-date-only filter misses genuine failed payments). We treat an
+        # invoice as a FAILED PAYMENT when it is open/past_due, has been attempted, and still
+        # has an amount remaining — i.e. a collection attempt that bounced.
         inv = config.http_get(
             f"https://api.stripe.com/v1/invoices?customer={cid}&status=open&limit=100", headers
         )
         invoices = inv.get("data", [])
         now = int(time.time())
-        past_due = [i for i in invoices if i.get("due_date") and i["due_date"] < now]
-        amount = sum(i.get("amount_due", 0) for i in past_due) / 100.0
-        days_past_due = max((now - i["due_date"]) // 86400 for i in past_due) if past_due else 0
-        stage = "day_15_plus" if days_past_due >= 15 else "day_1_14" if past_due else "none"
+
+        def _unpaid(i):
+            return (i.get("amount_remaining", i.get("amount_due", 0)) or 0) > 0
+
+        failed = [i for i in invoices
+                  if _unpaid(i) and i.get("attempted") and (i.get("attempt_count") or 0) >= 1]
+        due_past = [i for i in invoices if i.get("due_date") and i["due_date"] < now and _unpaid(i)]
+        # Union of the two signals = the account's open payment problems.
+        problem = list({(i.get("id") or idx): i
+                        for idx, i in enumerate(failed + due_past)}.values())
+
+        amount = sum((i.get("amount_remaining") or i.get("amount_due", 0)) for i in problem) / 100.0
+
+        # Days past due: prefer the real due_date; otherwise age from the invoice's
+        # created/period_end so attempt-based failures still get a meaningful age.
+        def _age_days(i):
+            anchor = i.get("due_date") or i.get("period_end") or i.get("created")
+            return ((now - anchor) // 86400) if anchor and anchor < now else 0
+        days_past_due = max((_age_days(i) for i in problem), default=0)
+
+        # Subscription status is the authoritative access signal: past_due / unpaid mean the
+        # customer is in dunning / has lost (or is about to lose) access.
+        sub_status = None
+        try:
+            subs = config.http_get(
+                f"https://api.stripe.com/v1/subscriptions?customer={cid}&status=all&limit=10", headers
+            ).get("data", [])
+            bad = [s for s in subs if s.get("status") in ("past_due", "unpaid")]
+            canceled = [s for s in subs if s.get("status") == "canceled"]
+            if bad:
+                sub_status = bad[0]["status"]
+            elif canceled and not any(s.get("status") == "active" for s in subs):
+                sub_status = "canceled"
+        except Exception:  # noqa: BLE001
+            sub_status = None
+
+        has_problem = bool(problem) or sub_status in ("past_due", "unpaid")
+        if not has_problem:
+            stage = "none"
+        elif days_past_due >= 15 or sub_status == "unpaid":
+            stage = "day_15_plus"
+        else:
+            stage = "day_1_14"
+
+        max_attempts = max((i.get("attempt_count") or 0 for i in problem), default=0)
         return {
-            "past_due_invoices": len(past_due),
+            "past_due_invoices": len(problem),
+            "payment_failed": bool(failed) or sub_status in ("past_due", "unpaid"),
+            "failed_attempts": max_attempts,
+            "subscription_status": sub_status,
             "days_past_due": days_past_due or None,
             "amount_due_usd": amount,
             "dunning_stage": stage,
@@ -450,6 +498,75 @@ class Stripe:
             "customer_email": cust_email,
             "_source": "stripe-live",
         }
+
+    def list_payment_problems(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Account-wide list of customers with a live payment problem, sourced DIRECTLY
+        from Stripe (not from the per-account enrichment cache) so the Payment Risk Report
+        is complete regardless of how the whole-book roster was warmed.
+
+        Paginates OPEN invoices, keeps those that are failed (attempted + unpaid) or past
+        the due date, groups by customer, and resolves each customer's JobAdder account id
+        (metadata['ja_account_id']) and email. Returns one row per customer:
+          {account_ref, customer_id, customer_email, dunning_stage, days_past_due,
+           amount_due_usd, failed_attempts, past_due_invoices, payment_failed}
+        """
+        import time
+        key = self._guard_key()
+        headers = {"Authorization": f"Bearer {key}", "Accept": "application/json",
+                   "Stripe-Version": self.API_VERSION}
+        now = int(time.time())
+
+        def _unpaid(i):
+            return (i.get("amount_remaining", i.get("amount_due", 0)) or 0) > 0
+
+        # Collect problem invoices across all pages (bounded), expanding the customer so we
+        # get ja_account_id + email without a second call per invoice.
+        by_cust: dict[str, dict] = {}
+        url = ("https://api.stripe.com/v1/invoices?status=open&limit=100"
+               "&expand[]=data.customer")
+        fetched = 0
+        while url and fetched < limit:
+            page = config.http_get(url, headers)
+            rows = page.get("data", [])
+            fetched += len(rows)
+            for i in rows:
+                failed = _unpaid(i) and i.get("attempted") and (i.get("attempt_count") or 0) >= 1
+                past_due = i.get("due_date") and i["due_date"] < now and _unpaid(i)
+                if not (failed or past_due):
+                    continue
+                cust = i.get("customer")
+                cust = cust if isinstance(cust, dict) else {"id": cust}
+                ja = (cust.get("metadata") or {}).get("ja_account_id")
+                if not ja:
+                    continue  # cannot map to a JobAdder account -> skip (honest)
+                anchor = i.get("due_date") or i.get("period_end") or i.get("created")
+                age = ((now - anchor) // 86400) if anchor and anchor < now else 0
+                rec = by_cust.setdefault(ja, {
+                    "account_ref": ja, "customer_id": cust.get("id"),
+                    "customer_email": cust.get("email"),
+                    "amount_due_usd": 0.0, "days_past_due": 0,
+                    "failed_attempts": 0, "past_due_invoices": 0, "payment_failed": False,
+                })
+                rec["amount_due_usd"] += (i.get("amount_remaining") or i.get("amount_due", 0)) / 100.0
+                rec["days_past_due"] = max(rec["days_past_due"], age)
+                rec["failed_attempts"] = max(rec["failed_attempts"], i.get("attempt_count") or 0)
+                rec["past_due_invoices"] += 1
+                rec["payment_failed"] = rec["payment_failed"] or bool(failed)
+            if page.get("has_more") and rows:
+                last = rows[-1].get("id")
+                url = ("https://api.stripe.com/v1/invoices?status=open&limit=100"
+                       f"&starting_after={last}&expand[]=data.customer")
+            else:
+                url = None
+        # Finalise dunning stage per customer.
+        out = []
+        for rec in by_cust.values():
+            dd = rec["days_past_due"]
+            rec["dunning_stage"] = "day_15_plus" if dd >= 15 else "day_1_14"
+            rec["days_past_due"] = dd or None
+            rec["_source"] = "stripe-live"
+            out.append(rec)
+        return out
 
 
 # -------------------------------------------------------------- Churn (ML) ---

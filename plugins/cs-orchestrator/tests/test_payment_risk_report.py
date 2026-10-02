@@ -1,8 +1,9 @@
 """Tests for the Payment Risk Report (engine.payment_risk_report).
 
-Verifies the 4 pages are bucketed from live Stripe dunning + configurable thresholds, and
-that each row's billing contact, Stripe link and derived JobAdder admin link are correct.
-No pasted data — accounts are injected and the engine derives everything.
+The report now sources failed/past-due payments DIRECTLY from Stripe
+(Stripe.list_payment_problems) and joins to the account roster for billing contact + CSM.
+These tests mock the Stripe problem list and the roster, then assert the 4/5 pages are
+bucketed correctly and each row's links are derived right. No pasted data.
 """
 
 from __future__ import annotations
@@ -16,118 +17,104 @@ sys.path.insert(0, str(PLUGIN))
 sys.path.insert(0, str(PLATFORM))
 
 
-def _acct(aid, name, days_past_due, stage, *, cid="cus_X", csm="Clair Davies",
-          finance_email=None, stripe_email=None):
-    contacts = []
-    if finance_email:
-        contacts.append({"role": "Finance Contact", "email": finance_email})
-    return {
-        "hubspot": {"name": name, "csm_owner": csm, "contacts": contacts},
-        "stripe": {"days_past_due": days_past_due, "dunning_stage": stage,
-                   "amount_due_usd": 100.0, "customer_id": cid,
-                   "customer_email": stripe_email},
-        "sources": {"hubspot": "live", "stripe": "live"},
-    }
+def _problem(ref, days_past_due, *, cid="cus_X", email=None, failed=True, attempts=5):
+    stage = "day_15_plus" if (days_past_due or 0) >= 15 else "day_1_14"
+    return {"account_ref": ref, "customer_id": cid, "customer_email": email,
+            "amount_due_usd": 174.90, "days_past_due": days_past_due,
+            "dunning_stage": stage, "failed_attempts": attempts,
+            "past_due_invoices": 1, "payment_failed": failed, "_source": "stripe-live"}
 
 
-def _run(monkeypatch, accounts, env=None):
+def _roster_acct(name, csm="Clair Davies", finance_email=None, owner_id=None):
+    contacts = [{"role": "Finance Contact", "email": finance_email}] if finance_email else []
+    hs = {"name": name, "csm_owner": csm, "contacts": contacts}
+    if owner_id:
+        hs["csm_owner_id"] = owner_id
+    return {"hubspot": hs, "sources": {"hubspot": "live"}}
+
+
+def _run(monkeypatch, problems, roster=None, env=None, principal=None):
     import engine, dataaccess
-    monkeypatch.setattr(dataaccess, "all_accounts", lambda: accounts)
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: (roster or {}))
     monkeypatch.setattr(dataaccess, "live_sources", lambda: ["HubSpot", "Stripe"])
+    monkeypatch.setattr(sources.STRIPE, "list_payment_problems", lambda *a, **k: problems)
     for k, v in (env or {}).items():
         monkeypatch.setenv(k, v)
-    engine.set_principal(None)  # admin / open mode -> whole book
-    return engine.payment_risk_report()
+    engine.set_principal(principal)
+    try:
+        return engine.payment_risk_report()
+    finally:
+        engine.set_principal(None)
 
 
-def test_payment_failed_lists_all_past_due(monkeypatch):
-    accts = {
-        "au5-402271": _acct("au5-402271", "Alex James", 3, "day_1_14"),
-        "au1-3242": _acct("au1-3242", "Edmen", 20, "day_15_plus"),
-        "au6-2701": _acct("au6-2701", "Lumia Care", None, "none"),  # not past due -> excluded
-    }
-    r = _run(monkeypatch, accts)
-    names = {row["name"] for row in r["pages"]["payment_failed"]}
-    assert names == {"Alex James", "Edmen"}
+def test_payment_failed_lists_all_problems(monkeypatch):
+    problems = [_problem("au5-402271", 30), _problem("au1-3242", 2, failed=False, attempts=0)]
+    roster = {"au5-402271": _roster_acct("Alex James"), "au1-3242": _roster_acct("Edmen")}
+    r = _run(monkeypatch, problems, roster)
+    assert {x["name"] for x in r["pages"]["payment_failed"]} == {"Alex James", "Edmen"}
     assert r["counts"]["payment_failed"] == 2
 
 
 def test_access_risk_buckets_by_threshold(monkeypatch):
     # Default access-suspend threshold is 21 days.
-    accts = {
-        "au5-1": _acct("au5-1", "Near7", 16, "day_15_plus"),   # 21-16=5 -> 7d bucket
-        "au5-2": _acct("au5-2", "Near14", 9, "day_1_14"),      # 21-9=12 -> 14d bucket
-        "au5-3": _acct("au5-3", "Far", 2, "day_1_14"),         # 21-2=19 -> neither
-    }
-    r = _run(monkeypatch, accts)
-    assert {x["name"] for x in r["pages"]["access_risk_7d"]} == {"Near7"}
-    assert {x["name"] for x in r["pages"]["access_risk_14d"]} == {"Near14"}
+    problems = [_problem("au5-1", 16), _problem("au5-2", 9), _problem("au5-3", 2)]
+    roster = {"au5-1": _roster_acct("Near7"), "au5-2": _roster_acct("Near14"),
+              "au5-3": _roster_acct("Far")}
+    r = _run(monkeypatch, problems, roster)
+    assert {x["name"] for x in r["pages"]["access_risk_7d"]} == {"Near7"}   # 21-16=5
+    assert {x["name"] for x in r["pages"]["access_risk_14d"]} == {"Near14"}  # 21-9=12
 
 
-def test_cancellation_risk_within_14_days_of_threshold(monkeypatch):
-    # Default cancel threshold is 30 days; within 14 -> days_past_due >= 16.
-    accts = {
-        "au5-1": _acct("au5-1", "Cancelish", 20, "day_15_plus"),  # 30-20=10 -> in
-        "au5-2": _acct("au5-2", "Early", 5, "day_1_14"),          # 30-5=25 -> out
-    }
-    r = _run(monkeypatch, accts)
-    assert {x["name"] for x in r["pages"]["cancellation_risk"]} == {"Cancelish"}
+def test_cancellation_risk_split_7d_14d(monkeypatch):
+    # Default cancel threshold is 30 days.
+    problems = [_problem("au5-1", 25), _problem("au5-2", 20), _problem("au5-3", 5)]
+    roster = {"au5-1": _roster_acct("Cancel7"), "au5-2": _roster_acct("Cancel14"),
+              "au5-3": _roster_acct("Early")}
+    r = _run(monkeypatch, problems, roster)
+    assert {x["name"] for x in r["pages"]["cancellation_risk_7d"]} == {"Cancel7"}    # 30-25=5
+    assert {x["name"] for x in r["pages"]["cancellation_risk_14d"]} == {"Cancel14"}  # 30-20=10
 
 
 def test_thresholds_are_configurable(monkeypatch):
-    accts = {"au5-1": _acct("au5-1", "A", 5, "day_1_14")}
-    # Set suspend threshold to 10 -> 10-5=5 -> 7d bucket.
-    r = _run(monkeypatch, accts, env={"CS_ACCESS_SUSPEND_DAYS": "10"})
+    problems = [_problem("au5-1", 5)]
+    roster = {"au5-1": _roster_acct("A")}
+    r = _run(monkeypatch, problems, roster, env={"CS_ACCESS_SUSPEND_DAYS": "10"})  # 10-5=5
     assert {x["name"] for x in r["pages"]["access_risk_7d"]} == {"A"}
     assert r["thresholds"]["access_suspend_days"] == 10
 
 
-def test_admin_url_derivation_per_region(monkeypatch):
-    accts = {
-        "au5-402271": _acct("au5-402271", "AU5 Co", 3, "day_1_14"),
-        "eu2-2148": _acct("eu2-2148", "EU2 Co", 3, "day_1_14"),
-    }
-    r = _run(monkeypatch, accts)
-    by = {row["name"]: row for row in r["pages"]["payment_failed"]}
+def test_admin_url_and_stripe_url_derivation(monkeypatch):
+    problems = [_problem("au5-402271", 3, cid="cus_ABC"), _problem("eu2-2148", 3, cid="cus_DEF")]
+    roster = {"au5-402271": _roster_acct("AU5 Co"), "eu2-2148": _roster_acct("EU2 Co")}
+    r = _run(monkeypatch, problems, roster)
+    by = {x["name"]: x for x in r["pages"]["payment_failed"]}
     assert by["AU5 Co"]["admin_url"] == "https://au5admin.jobadder.com/accounts/402271"
     assert by["EU2 Co"]["admin_url"] == "https://eu2admin.jobadder.com/accounts/2148"
+    assert by["AU5 Co"]["stripe_url"] == "https://dashboard.stripe.com/customers/cus_ABC"
 
 
-def test_stripe_url_and_billing_contact_precedence(monkeypatch):
-    accts = {
-        # Finance Contact wins over stripe email.
-        "au5-1": _acct("au5-1", "HasFinance", 3, "day_1_14",
-                       cid="cus_ABC", finance_email="finance@co.com", stripe_email="billing@stripe.com"),
-        # No finance role -> falls back to stripe email.
-        "au5-2": _acct("au5-2", "StripeOnly", 3, "day_1_14",
-                       cid="cus_DEF", stripe_email="billing@stripe.com"),
-    }
-    r = _run(monkeypatch, accts)
-    by = {row["name"]: row for row in r["pages"]["payment_failed"]}
-    assert by["HasFinance"]["billing_contact"] == "finance@co.com"
-    assert by["HasFinance"]["stripe_url"] == "https://dashboard.stripe.com/customers/cus_ABC"
-    assert by["StripeOnly"]["billing_contact"] == "billing@stripe.com"
+def test_billing_contact_precedence(monkeypatch):
+    problems = [_problem("au5-1", 3, email="billing@stripe.com"),
+                _problem("au5-2", 3, email="billing@stripe.com")]
+    roster = {"au5-1": _roster_acct("HasFinance", finance_email="finance@co.com"),
+              "au5-2": _roster_acct("StripeOnly")}
+    r = _run(monkeypatch, problems, roster)
+    by = {x["name"]: x for x in r["pages"]["payment_failed"]}
+    assert by["HasFinance"]["billing_contact"] == "finance@co.com"   # Finance Contact wins
+    assert by["StripeOnly"]["billing_contact"] == "billing@stripe.com"  # falls back to Stripe email
 
 
 def test_owner_scoping_limits_report_to_csm_book(monkeypatch):
-    import engine, dataaccess
-    mine = _acct("au5-1", "Mine", 3, "day_1_14")
-    mine["hubspot"]["csm_owner_id"] = "owner-1"
-    theirs = _acct("au5-2", "Theirs", 3, "day_1_14")
-    theirs["hubspot"]["csm_owner_id"] = "owner-2"
-    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"au5-1": mine, "au5-2": theirs})
-    monkeypatch.setattr(dataaccess, "live_sources", lambda: ["HubSpot", "Stripe"])
-    engine.set_principal({"role": "csm", "owner_id": "owner-1"})
-    try:
-        r = engine.payment_risk_report()
-        assert {x["name"] for x in r["pages"]["payment_failed"]} == {"Mine"}
-    finally:
-        engine.set_principal(None)
+    problems = [_problem("au5-1", 3), _problem("au5-2", 3)]
+    roster = {"au5-1": _roster_acct("Mine", owner_id="owner-1"),
+              "au5-2": _roster_acct("Theirs", owner_id="owner-2")}
+    r = _run(monkeypatch, problems, roster, principal={"role": "csm", "owner_id": "owner-1"})
+    assert {x["name"] for x in r["pages"]["payment_failed"]} == {"Mine"}
 
 
-def test_honest_empty_when_no_past_due(monkeypatch):
-    accts = {"au5-1": _acct("au5-1", "Fine", None, "none")}
-    r = _run(monkeypatch, accts)
-    assert r["counts"] == {"payment_failed": 0, "access_risk_7d": 0,
-                           "access_risk_14d": 0, "cancellation_risk": 0}
+def test_honest_empty_when_no_problems(monkeypatch):
+    r = _run(monkeypatch, [], {})
+    assert r["counts"] == {"payment_failed": 0, "access_risk_7d": 0, "access_risk_14d": 0,
+                           "cancellation_risk_7d": 0, "cancellation_risk_14d": 0}
     assert r["stripe_connected"] is True

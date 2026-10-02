@@ -1848,42 +1848,67 @@ def payment_risk_report() -> dict:
     suspend_at, cancel_at = th["access_suspend_days"], th["cancel_days"]
     stripe_live = "Stripe" in set(dataaccess.live_sources())
 
-    def _row(aid: str, a: dict, stripe: dict) -> dict:
+    # Source failed/past-due payments DIRECTLY from Stripe account-wide, so the report is
+    # complete regardless of how the whole-book roster was warmed. Then join to the account
+    # roster (HubSpot) for the billing contact + CSM, and respect the principal's scope.
+    scoped = _scoped_accounts()
+    p = get_principal()
+    admin_scope = (not p) or p.get("role") == "admin"
+    owner_id = (p or {}).get("owner_id")
+
+    problems = []
+    if stripe_live:
+        try:
+            problems = _src.STRIPE.list_payment_problems()
+        except Exception:  # noqa: BLE001
+            problems = []
+
+    def _norm(ref):
+        from adapters import identity as _id
+        return _id.normalise(ref)
+
+    def _row(prob: dict) -> dict:
+        ref = _norm(prob.get("account_ref"))
+        a = scoped.get(ref) or {}
         hs = a.get("hubspot", {}) or {}
+        stripe_for_contact = {"customer_email": prob.get("customer_email")}
         return {
-            "account_id": aid,
-            "name": hs.get("name") or aid,
-            "billing_contact": _billing_contact(hs, stripe),
+            "account_id": ref,
+            "name": hs.get("name") or prob.get("account_ref"),
+            "billing_contact": _billing_contact(hs, stripe_for_contact),
             "csm_owner": hs.get("csm_owner") or None,
-            "days_past_due": stripe.get("days_past_due"),
-            "amount_due_usd": stripe.get("amount_due_usd"),
-            "dunning_stage": stripe.get("dunning_stage"),
-            "stripe_url": (f"https://dashboard.stripe.com/customers/{stripe['customer_id']}"
-                           if stripe.get("customer_id") else None),
-            "admin_url": _admin_url(aid),
+            "days_past_due": prob.get("days_past_due"),
+            "amount_due_usd": prob.get("amount_due_usd"),
+            "dunning_stage": prob.get("dunning_stage"),
+            "failed_attempts": prob.get("failed_attempts"),
+            "past_due_invoices": prob.get("past_due_invoices"),
+            "stripe_url": (f"https://dashboard.stripe.com/customers/{prob['customer_id']}"
+                           if prob.get("customer_id") else None),
+            "admin_url": _admin_url(prob.get("account_ref")),
         }
 
     pages = {"payment_failed": [], "access_risk_7d": [], "access_risk_14d": [],
-             "cancellation_risk": []}
-    for aid, a in _scoped_accounts().items():
-        stripe = a.get("stripe", {}) or {}
-        dd = stripe.get("days_past_due")
-        stage = stripe.get("dunning_stage")
-        if not stage or stage == "none" or dd is None:
-            continue  # no live past-due signal -> not on the report
-        row = _row(aid, a, stripe)
-        # Payment failed: anything currently past due.
+             "cancellation_risk_7d": [], "cancellation_risk_14d": []}
+    for prob in problems:
+        ref = _norm(prob.get("account_ref"))
+        # Owner scope: a CSM only sees payment problems on accounts they own. Admin sees all.
+        if not admin_scope:
+            a = scoped.get(ref)
+            if a is None or not _owns(a, owner_id):
+                continue
+        dd = prob.get("days_past_due") or 0
+        row = _row(prob)
         pages["payment_failed"].append(row)
-        # Access risk: how close the account is to the access-suspension threshold.
         days_to_suspend = suspend_at - dd
         if 0 <= days_to_suspend <= 7:
             pages["access_risk_7d"].append(row)
         elif 7 < days_to_suspend <= 14:
             pages["access_risk_14d"].append(row)
-        # Cancellation risk: within 14 days of the cancellation threshold.
         days_to_cancel = cancel_at - dd
-        if 0 <= days_to_cancel <= 14:
-            pages["cancellation_risk"].append(row)
+        if 0 <= days_to_cancel <= 7:
+            pages["cancellation_risk_7d"].append(row)
+        elif 7 < days_to_cancel <= 14:
+            pages["cancellation_risk_14d"].append(row)
 
     for key in pages:
         pages[key].sort(key=lambda r: -(r.get("days_past_due") or 0))

@@ -2896,7 +2896,8 @@ const PR_PAGES=[
   ['payment_failed','Payment failed'],
   ['access_risk_7d','Access risk · next 7 days'],
   ['access_risk_14d','Access risk · next 14 days'],
-  ['cancellation_risk','Cancellation risk'],
+  ['cancellation_risk_7d','Cancellation risk · next 7 days'],
+  ['cancellation_risk_14d','Cancellation risk · next 14 days'],
 ];
 let _prState={active:'payment_failed', data:null};
 function prSelect(k){ _prState.active=k; _renderPaymentRiskChrome(); }
