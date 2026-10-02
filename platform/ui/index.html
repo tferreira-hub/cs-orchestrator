@@ -1671,11 +1671,14 @@ function renderLagging(){
     const paying=(e.paying_customers!=null)?e.paying_customers:accts.filter(a=>(a.arr_usd||0)>0).length;
     const grr=(e.grr_pct!=null)?e.grr_pct:null;
     const grrTarget=(e.grr_target_pct!=null)?e.grr_target_pct:null;
+    const ndr=(e.ndr_pct!=null)?e.ndr_pct:null;
+    const ndrTarget=(e.ndr_target_pct!=null)?e.ndr_target_pct:100;
     const churnedArr=e.churned_arr_usd!=null?e.churned_arr_usd:null;
     const booked=e.booked_upsell_count!=null?e.booked_upsell_count:null;
     const bookedArr=e.booked_upsell_arr_usd!=null?e.booked_upsell_arr_usd:null;
     const tiles='<div class="mdw-grid">'+
       _widget('Gross Revenue Retention',grr!=null?('<div class="mdw-big '+(grrTarget&&grr>=grrTarget?'good':'warn')+'">'+grr+'%</div>'+(grrTarget!=null?'<div class="mdw-na">Target '+grrTarget+'%</div>':'')):'<div class="mdw-na">GRR needs live contract ARR.</div>')+
+      _widget('Net Revenue Retention',ndr!=null?('<div class="mdw-big '+(ndr>=ndrTarget?'good':'warn')+'">'+ndr+'%</div><div class="mdw-na">Target '+ndrTarget+'%</div>'):'<div class="mdw-na">NDR needs the monthly ARR series (prior period).</div>')+
       _widget('Secured ARR','<div class="mdw-big good">'+fmt(totalArr-atRiskArr)+'</div>')+
       _widget('At-risk ARR','<div class="mdw-big '+(atRiskArr>0?'warn':'')+'">'+fmt(atRiskArr)+'</div>')+
       _widget('Churned ARR',churnedArr!=null?('<div class="mdw-big warn">'+fmt(churnedArr)+'</div>'):'<div class="mdw-big">'+fmt(0)+'</div>')+
@@ -2439,6 +2442,17 @@ function renderCharts(portfolio,kpis,rm){
       : '<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned ARR from Redshift or HubSpot.</span></div></div>';
   }
 
+  // 3b. Net revenue retention (NDR) gauge vs 100% target — from the warehouse ARR series.
+  let c3b;
+  if(ret.ndr_computable&&typeof ret.ndr_pct==='number'){
+    c3b='<div class="chartcard"><h3>Net revenue retention</h3><div class="cc-sub">Target 100% · '+(ret.ndr_accounts||0)+' accounts with history</div><div class="cc-body"><div class="cc-center">'
+      +svgGauge(ret.ndr_pct,100,{w:150})+'<div class="cc-num" style="justify-content:flex-end;padding-bottom:6px"><b>'+ret.ndr_pct+'%</b><span>'+(ret.ndr_pct>=100?'expanding':'contracting')+'</span></div></div></div></div>';
+  }else{
+    c3b=flt
+      ? '<div class="chartcard"><h3>Net revenue retention</h3><div class="cc-sub">Whole-book metric</div><div class="cc-body"><span class="muted" style="font-size:.8em">NDR is a portfolio-wide figure; clear the filter to see it.</span></div></div>'
+      : '<div class="chartcard"><h3>Net revenue retention</h3><div class="cc-sub">Awaiting warehouse history</div><div class="cc-body"><span class="muted" style="font-size:.8em">NDR needs the monthly ARR series (rpt_account_ndr_monthly) with a prior period.</span></div></div>';
+  }
+
   // 4. Revenue at risk vs total ARR.
   const riskPct=arr?Math.round((atRisk/arr)*100):0;
   const c4='<div class="chartcard"><h3>Revenue at risk</h3><div class="cc-sub">In amber and red accounts</div><div class="cc-body"><div class="cc-center">'
@@ -2457,7 +2471,7 @@ function renderCharts(portfolio,kpis,rm){
       +'<div class="rev-cell"><div class="rev-l">Churned ARR</div><div class="rev-v '+(rm.churned_arr_usd>0?'warn':'')+'">'+fmt(rm.churned_arr_usd)+'</div></div>'
       +'</div>';
   }
-  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c4+(flt?'':c5(rm))+'</div>';
+  wrap.innerHTML=strip+'<div class="chartgrid">'+c1+c2+c3+c3b+c4+(flt?'':c5(rm))+'</div>';
   renderRevChange(flt?null:rm);
 }
 function c5(rm){
@@ -4167,8 +4181,14 @@ function _notesRolesPanel(id,d){
         '<button class="btn" style="padding:5px 10px" onclick="applyTagRole(\''+escapeHtml(id)+'\',\''+em+'\',this)">Tag</button>'+
       '</span></div>';
   }).join(''):'<div class="muted">No associated contacts to tag.</div>';
+  // Which of the 3 WoW-required roles are still untagged? Drives the close-gate messaging.
+  const haveRoles=new Set(contacts.map(c=>c.role).filter(Boolean));
+  const missingReq=CS_ROLES.filter(r=>!haveRoles.has(r));
+  const gateLine=missingReq.length
+    ? '<div class="supp" style="margin:0 0 10px">Required for renewal/onboarding tasks to close: <b>'+missingReq.map(escapeHtml).join(', ')+'</b> still untagged.</div>'
+    : '<div class="callout" style="margin:0 0 10px;background:#eefaf0;border-color:#bfe6cb">All three required contact roles are tagged. Renewal and onboarding tasks can close.</div>';
   const rolePanel='<div class="cp-section" data-cpt="planning"><div class="cp-shead"><h2>Contact roles</h2></div>'+
-    '<div class="writeback" style="background:#fff">Tag the required CS roles so renewal/onboarding tasks can close (WoW §5):<div style="margin-top:10px">'+rows+'</div>'+
+    '<div class="writeback" style="background:#fff">'+gateLine+'Tag the required CS roles so renewal/onboarding tasks can close (WoW §5):<div style="margin-top:10px">'+rows+'</div>'+
     '<span class="muted" id="role-status-'+escapeHtml(id)+'" style="font-size:.85em;display:block;margin-top:8px"></span></div></div>';
   return noteBox+rolePanel;
 }

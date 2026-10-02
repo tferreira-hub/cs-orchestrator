@@ -1004,6 +1004,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/tasks/status":
                 try:
+                    # Contact-role hard close-gate (WoW §5): a renewal or onboarding task may
+                    # not be COMPLETED until the 3 required contact roles are tagged. The UI
+                    # sends account_id + gate=renewal|onboarding when applicable.
+                    gate = (body.get("gate") or "").strip().lower()
+                    acct = (body.get("account_id") or "").strip()
+                    if body.get("status") == "completed" and gate in ("renewal", "onboarding") and acct:
+                        if not engine.can_write_account(acct):
+                            self._json(403, {"error": "forbidden",
+                                             "detail": "You can only complete tasks on accounts you own."})
+                            return
+                        missing = engine.required_roles_missing(acct)
+                        if missing:
+                            self._json(409, {"error": "contact_roles_required",
+                                             "detail": "Tag the required contact roles before closing this "
+                                                       + gate + " task.",
+                                             "missing_roles": missing})
+                            return
                     event = _record_task_event(body)
                     try:
                         record_audit("task_status_change", principal, {

@@ -457,13 +457,32 @@ def test_retention_metrics_compute_grr_and_expansion_pipeline():
     r = engine._retention_metrics(accounts, tasks_by_account)
     assert r["computable"] is True
     assert r["grr_pct"] == 80.0            # (500k - 100k) / 500k
-    assert "ndr_pct" not in r              # no inflated NDR published
+    # NDR is only published from the warehouse monthly ARR series; these accounts carry no
+    # metrics, so NDR is honestly None (never an inflated figure from pipeline).
+    assert r["ndr_pct"] is None and r["ndr_computable"] is False
     assert r["base_arr_usd"] == 500000
     assert r["churned_arr_usd"] == 100000
     # Expansion is a separate PIPELINE figure (opportunity), not retention.
     assert r["expansion_pipeline_arr_usd"] == 400000
     assert r["expansion_pipeline_accounts"] == 1
-    assert r["target"] == {"grr_pct": 92}
+    assert r["target"] == {"grr_pct": 92, "ndr_pct": 100}
+
+
+def test_ndr_computed_from_warehouse_monthly_arr():
+    """NDR is dollar-weighted current vs prior-year revenue from rpt_account_ndr_monthly,
+    across accounts that carry both figures."""
+    import engine
+    accounts = {
+        "au1-1": {"hubspot": {"name": "A", "arr_usd": 120000}, "sources": {"hubspot": "live", "metrics": "live"},
+                  "metrics": {"mrr_usd": 120000, "revenue_prev_year_usd": 100000},
+                  "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+        "au1-2": {"hubspot": {"name": "B", "arr_usd": 80000}, "sources": {"hubspot": "live", "metrics": "live"},
+                  "metrics": {"mrr_usd": 60000, "revenue_prev_year_usd": 100000},
+                  "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+    }
+    r = engine._retention_metrics(accounts, {})
+    # (120k + 60k) / (100k + 100k) = 90%
+    assert r["ndr_pct"] == 90.0 and r["ndr_computable"] is True and r["ndr_accounts"] == 2
 
 
 def test_retention_not_computable_without_live_arr():
@@ -566,6 +585,22 @@ def test_tag_contact_role_two_gate_and_validation(monkeypatch):
     r2 = sources.HUBSPOT.tag_contact_role("au1-1", "a@co.com", "Finance Contact", apply=True)
     assert r2["mode"] == "applied" and r2["tagged"] is True
     assert r2["hs_buying_role"] == "BUDGET_HOLDER" and patches
+
+
+def test_required_roles_missing_for_close_gate(monkeypatch):
+    """The contact-role close-gate reports which of the 3 required roles are untagged.
+    Fully tagged -> empty list (task may close); missing -> listed (task blocked)."""
+    import engine, dataaccess
+    tagged = {"au1-ok": {"hubspot": {"name": "OK", "contacts": [
+        {"role": "Executive Sponsor"}, {"role": "Primary Champion / Admin"},
+        {"role": "Finance Contact"}]}}}
+    partial = {"au1-gap": {"hubspot": {"name": "Gap", "contacts": [
+        {"role": "Executive Sponsor"}]}}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {**tagged, **partial})
+    engine.set_principal(None)
+    assert engine.required_roles_missing("au1-ok") == []
+    assert set(engine.required_roles_missing("au1-gap")) == {
+        "Primary Champion / Admin", "Finance Contact"}
 
 
 def test_zendesk_reply_and_status_two_gate(monkeypatch):

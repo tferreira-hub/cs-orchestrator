@@ -98,6 +98,24 @@ def can_write_account(account_id: str) -> bool:
     return can_view_account(account_id)
 
 
+# The three contact roles the WoW framework requires on every account.
+REQUIRED_CONTACT_ROLES = ["Executive Sponsor", "Primary Champion / Admin", "Finance Contact"]
+
+
+def required_roles_missing(account_id: str) -> list:
+    """Return the required contact roles NOT yet tagged on an account's HubSpot contacts.
+    Used by the close-gate: renewal/onboarding tasks cannot be completed until these are
+    tagged (WoW §5). Resolved from the live account; an account with no HubSpot record is
+    treated as missing all roles."""
+    try:
+        a = dataaccess.all_accounts().get(account_id) or dataaccess.account(account_id)
+    except Exception:  # noqa: BLE001
+        a = None
+    hs = (a or {}).get("hubspot", {}) or {}
+    have = {c.get("role") for c in hs.get("contacts", []) if c.get("role")}
+    return [r for r in REQUIRED_CONTACT_ROLES if r not in have]
+
+
 # The rules engine reads accounts through this provider, so scoping is uniform.
 orchestrate.set_account_provider(_scoped_accounts)
 
@@ -600,6 +618,8 @@ def executive_summary() -> dict:
         "at_risk_arr_usd": rm.get("at_risk_arr_usd"),
         "grr_pct": ret.get("grr_pct"),
         "grr_target_pct": (ret.get("target") or {}).get("grr_pct"),
+        "ndr_pct": ret.get("ndr_pct"),
+        "ndr_target_pct": (ret.get("target") or {}).get("ndr_pct"),
         "churned_arr_usd": ret.get("churned_arr_usd"),
         "renewals_90d": renewals_90d,
         "renewal_arr_90d_usd": renewal_arr,
@@ -1297,9 +1317,27 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     churned_arr = 0
     expansion_pipeline_arr = 0
     expansion_accounts = 0
+    # NDR from the warehouse monthly ARR series (rpt_account_ndr_monthly): dollar-weighted
+    # current-period revenue vs the same accounts' prior-year revenue. This is REALISED
+    # net revenue retention (expansion - contraction - churn on the existing base), the
+    # board metric, not pipeline. Only accounts with BOTH figures contribute.
+    ndr_current = 0.0
+    ndr_prior = 0.0
+    ndr_accounts = 0
     for aid, a in accounts.items():
         live = _live_account(a)
         hs = live.get("hubspot", {})
+        m = live.get("metrics", {}) or {}
+        try:
+            cur, prior = m.get("revenue_prev_year_usd"), None
+            # metrics() exposes current revenue as mrr_usd and prior as revenue_prev_year_usd.
+            cur = m.get("mrr_usd"); prior = m.get("revenue_prev_year_usd")
+            if cur not in (None, "") and prior not in (None, "") and float(prior) > 0:
+                ndr_current += float(cur)
+                ndr_prior += float(prior)
+                ndr_accounts += 1
+        except (TypeError, ValueError):
+            pass
         arr = hs.get("arr_usd") or 0
         if not arr:
             continue
@@ -1319,26 +1357,36 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
             expansion_pipeline_arr += arr
             expansion_accounts += 1
 
+    ndr_pct = round(100.0 * ndr_current / ndr_prior, 1) if ndr_prior > 0 else None
+
     if not base_arr:
         return {"computable": False, "grr_pct": None,
+                "ndr_pct": None, "ndr_computable": False, "ndr_accounts": 0,
                 "base_arr_usd": 0, "churned_arr_usd": 0,
                 "expansion_pipeline_arr_usd": 0, "expansion_pipeline_accounts": 0,
-                "target": {"grr_pct": 92},
+                "target": {"grr_pct": 92, "ndr_pct": 100},
                 "note": "No live contract ARR available; retention is not computable."}
 
     grr = round(100 * (base_arr - churned_arr) / base_arr, 1)
     return {
         "computable": True,
         "grr_pct": grr,
+        # NDR (realised net revenue retention) from the warehouse monthly ARR series:
+        # current-period revenue vs the same accounts' prior-year revenue, dollar-weighted.
+        # Honest None when the warehouse has no prior-period data for any account.
+        "ndr_pct": ndr_pct,
+        "ndr_computable": ndr_pct is not None,
+        "ndr_accounts": ndr_accounts,
         "base_arr_usd": base_arr,
         "churned_arr_usd": churned_arr,
-        # Expansion PIPELINE (opportunity), reported separately from retention. Not NDR.
+        # Expansion PIPELINE (opportunity), reported separately from retention.
         "expansion_pipeline_arr_usd": expansion_pipeline_arr,
         "expansion_pipeline_accounts": expansion_accounts,
-        "target": {"grr_pct": 92},
-        "method": "live ARR; GRR from Redshift/HubSpot churned status. Expansion "
-                  "pipeline = active expansion-trigger accounts (opportunity, not booked "
-                  "revenue); no NDR is published until booked expansion data exists.",
+        "target": {"grr_pct": 92, "ndr_pct": 100},
+        "method": "live ARR; GRR from Redshift/HubSpot churned status. NDR from the "
+                  "rpt_account_ndr_monthly warehouse series (current vs prior-year revenue, "
+                  "dollar-weighted). Expansion pipeline = active expansion-trigger accounts "
+                  "(opportunity, separate from retention).",
     }
 
 
