@@ -520,13 +520,20 @@ class Stripe:
             return (i.get("amount_remaining", i.get("amount_due", 0)) or 0) > 0
 
         # Collect problem invoices across all pages (bounded), expanding the customer so we
-        # get ja_account_id + email without a second call per invoice.
+        # get ja_account_id + email without a second call per invoice. A single failing page
+        # must NOT discard everything already collected, so each page is guarded.
         by_cust: dict[str, dict] = {}
         url = ("https://api.stripe.com/v1/invoices?status=open&limit=100"
                "&expand[]=data.customer")
         fetched = 0
         while url and fetched < limit:
-            page = config.http_get(url, headers)
+            try:
+                page = config.http_get(url, headers, timeout=20)
+            except Exception as exc:  # noqa: BLE001
+                import sys as _sys
+                print(f"[stripe] list_payment_problems page failed, returning partial: "
+                      f"{type(exc).__name__}: {exc}", file=_sys.stderr)
+                break
             rows = page.get("data", [])
             fetched += len(rows)
             for i in rows:

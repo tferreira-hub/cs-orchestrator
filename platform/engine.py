@@ -1857,10 +1857,14 @@ def payment_risk_report() -> dict:
     owner_id = (p or {}).get("owner_id")
 
     problems = []
+    source_error = None
     if stripe_live:
         try:
             problems = _src.STRIPE.list_payment_problems()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            source_error = f"{type(exc).__name__}: {exc}"
+            import sys as _sys
+            print(f"[payment-risk] list_payment_problems failed: {source_error}", file=_sys.stderr)
             problems = []
 
     def _norm(ref):
@@ -1918,6 +1922,7 @@ def payment_risk_report() -> dict:
         "thresholds": th,
         "pages": pages,
         "counts": {k: len(v) for k, v in pages.items()},
+        "source_error": source_error,
     }
 
 
