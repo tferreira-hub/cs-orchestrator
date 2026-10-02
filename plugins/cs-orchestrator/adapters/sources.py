@@ -1691,6 +1691,53 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 
+    def send_transactional_email(self, to_email: str, subject: str | None = None,
+                                 custom_properties: dict | None = None,
+                                 apply: bool = False) -> dict[str, Any]:
+        """Send a transactional email via HubSpot's single-send API (Option A: HubSpot as
+        the digest sender). Uses a transactional email TEMPLATE created in the portal whose
+        id is CS_HS_TRANSACTIONAL_EMAIL_ID; the template renders from the custom_properties
+        tokens we pass. Two-gate (apply + CS_ALLOW_WRITE) and honest at every step:
+          * no recipient            -> refused
+          * writes off / dry-run    -> prepared only, nothing sent
+          * no template configured  -> 'template-not-configured', nothing sent
+        Never fabricates a send: it returns applied only on a real 2xx from HubSpot."""
+        import os as _os
+        to_email = (to_email or "").strip()
+        if not to_email:
+            raise ValueError("recipient email is required")
+        email_id = _os.environ.get("CS_HS_TRANSACTIONAL_EMAIL_ID", "").strip()
+        if not (apply and config.writes_allowed()):
+            return {"sent": False, "mode": "dry-run", "target": "hubspot.transactional.single-send",
+                    "recipient": to_email, "email_id": email_id or None,
+                    "note": "No email sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                    "_source": "hubspot-live-readonly"}
+        if not email_id:
+            return {"sent": False, "mode": "template-not-configured",
+                    "target": "hubspot.transactional.single-send", "recipient": to_email,
+                    "note": "No transactional email template configured. Create a transactional "
+                            "email in HubSpot and set CS_HS_TRANSACTIONAL_EMAIL_ID. No email sent.",
+                    "_source": "hubspot-live-readonly"}
+        # Single-send expects the template emailId plus a message envelope. customProperties
+        # are the merge tokens the template renders (we pass the digest fields as strings).
+        props = [{"name": k, "value": "" if v is None else str(v)}
+                 for k, v in (custom_properties or {}).items()]
+        message: dict[str, Any] = {"to": to_email}
+        if subject:
+            message["subject"] = subject
+        body = {"emailId": int(email_id) if email_id.isdigit() else email_id,
+                "message": message, "customProperties": props}
+        res = config.http_post("https://api.hubapi.com/marketing/v3/transactional/single-email/send",
+                               self._headers(), body)
+        # HubSpot returns a sendResult (e.g. SENT/QUEUED) + statusId. Treat only an explicit
+        # success/queued as sent; anything else is reported honestly as not sent.
+        send_result = (res.get("sendResult") or res.get("status") or "").upper()
+        ok = send_result in ("SENT", "QUEUED", "PROCESSING", "")  # "" when 2xx w/ async body
+        return {"sent": bool(ok), "mode": "applied" if ok else "send-failed",
+                "target": "hubspot.transactional.single-send", "recipient": to_email,
+                "email_id": email_id, "send_result": send_result or None,
+                "status_id": res.get("statusId"), "_source": "hubspot-live-write"}
+
 
 # Singletons the router uses.
 ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (

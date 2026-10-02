@@ -1316,10 +1316,35 @@ def send_digest(account_id: str, apply: bool = False) -> dict:
                           "provider is connected (set CS_EMAIL_PROVIDER / provision HubSpot "
                           "marketing send). No email was sent."}
     else:
-        # Real send path (Option A: HubSpot marketing/transactional). The concrete send is
-        # performed by the connected provider; we never fabricate a success.
-        result = {"sent": True, "mode": "applied", "recipient": digest["recipient"],
-                  "provider": os.environ.get("CS_EMAIL_PROVIDER")}
+        # Real send path. Option A: HubSpot transactional single-send. The concrete send is
+        # performed by the connected provider and we surface its honest result verbatim
+        # (template-not-configured / send-failed / applied); we never fabricate a success.
+        provider = (os.environ.get("CS_EMAIL_PROVIDER") or "").strip().lower()
+        if provider == "hubspot" and dataaccess._ADAPTERS and _src.HUBSPOT.live():
+            tokens = {
+                "account_name": digest["name"],
+                "period": digest["period"],
+                "licence_utilization_pct": digest["metrics"].get("licence_utilization_pct"),
+                "active_logins_7d": digest["metrics"].get("active_logins_7d"),
+                "top_feature_adoption_pct": digest["metrics"].get("top_feature_adoption_pct"),
+                "tickets_resolved_30d": digest["metrics"].get("tickets_resolved_30d"),
+                "csat_30d": digest["metrics"].get("csat_30d"),
+                "expansion_cta": "yes" if digest["expansion_cta"] else "no",
+                "recipient_name": digest.get("recipient_name"),
+            }
+            send = _src.HUBSPOT.send_transactional_email(
+                digest["recipient"],
+                subject=f"{digest['name']} - your {digest['period']} JobAdder summary",
+                custom_properties=tokens, apply=True)
+            result = {"sent": bool(send.get("sent")), "mode": send.get("mode"),
+                      "recipient": digest["recipient"], "provider": provider,
+                      "note": send.get("note"), "send_result": send.get("send_result")}
+        else:
+            # Provider named but not usable (unknown provider, or HubSpot not live).
+            result = {"sent": False, "mode": "provider-unavailable",
+                      "recipient": digest["recipient"], "provider": provider,
+                      "note": "The configured CS_EMAIL_PROVIDER is not usable "
+                              "(unknown provider or HubSpot not connected). No email sent."}
     return {
         "audit_id": uuid.uuid4().hex,
         "requested_at": datetime.now(timezone.utc).isoformat(),
@@ -1347,7 +1372,7 @@ def run_monthly_digests(apply: bool = False) -> dict:
     period = datetime.now(timezone.utc).strftime("%B %Y")
     accounts = orchestrate.load_accounts()
     rows: list[dict] = []
-    compiled = sent = missing_admin = no_provider = dry_run = errors = 0
+    compiled = sent = missing_admin = no_provider = dry_run = errors = failed = 0
     for aid in accounts:
         # Owner-scope gate: skip accounts outside the principal's write scope silently so a
         # CSM-scoped scheduled run only touches their book (never raises mid-batch).
@@ -1365,10 +1390,12 @@ def run_monthly_digests(apply: bool = False) -> dict:
             sent += 1
         elif mode == "no-recipient":
             missing_admin += 1
-        elif mode == "no-email-provider":
-            no_provider += 1
+        elif mode in ("no-email-provider", "template-not-configured", "provider-unavailable"):
+            no_provider += 1   # recipient exists but the send path is not usable yet
         elif mode == "dry-run":
             dry_run += 1
+        elif mode == "send-failed":
+            failed += 1
         rows.append({
             "account_id": aid,
             "name": (res.get("digest") or {}).get("name"),
@@ -1390,6 +1417,7 @@ def run_monthly_digests(apply: bool = False) -> dict:
             "dry_run": dry_run,
             "missing_primary_admin": missing_admin,
             "no_email_provider": no_provider,
+            "send_failed": failed,
             "errors": errors,
         },
         "accounts": rows,

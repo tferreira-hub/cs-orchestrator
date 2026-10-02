@@ -689,6 +689,54 @@ def test_run_monthly_digests_batch_summary_is_honest(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
+def test_hubspot_transactional_send_is_two_gated_and_template_aware(monkeypatch):
+    """The HubSpot transactional seam never sends without the two gates and a configured
+    template: writes off -> dry-run; writes on but no template -> template-not-configured."""
+    import importlib
+    sources = importlib.import_module("adapters.sources")
+    hs = sources.HUBSPOT
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = hs.send_transactional_email("a@co.com", custom_properties={"x": 1}, apply=True)
+    assert r["sent"] is False and r["mode"] == "dry-run"
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    monkeypatch.delenv("CS_HS_TRANSACTIONAL_EMAIL_ID", raising=False)
+    r2 = hs.send_transactional_email("a@co.com", custom_properties={"x": 1}, apply=True)
+    assert r2["sent"] is False and r2["mode"] == "template-not-configured"
+
+
+def test_send_digest_hubspot_provider_sends_via_seam(monkeypatch):
+    """With CS_EMAIL_PROVIDER=hubspot + writes on + a (stubbed) template, send_digest routes
+    through the HubSpot transactional seam and reports its real result, not a fake send."""
+    import engine, dataaccess
+    acct = {"hubspot": {"name": "DigestCo", "arr_usd": 50000, "csm_owner": "C",
+                        "contacts": [{"role": "Primary Champion / Admin", "email": "admin@co.com", "name": "Ada"}]},
+            "usage": {"license_utilization_pct": 90}, "zendesk": {},
+            "sources": {"hubspot": "live", "usage": "live"},
+            "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"au1-d": acct})
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: {"au1-d": acct})
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    monkeypatch.setenv("CS_EMAIL_PROVIDER", "hubspot")
+    # Make HubSpot "live" and stub the transactional send so no network call happens.
+    monkeypatch.setattr(engine._src.HUBSPOT, "live", lambda: True)
+    captured = {}
+    def _fake_send(to_email, subject=None, custom_properties=None, apply=False):
+        captured.update(to=to_email, subject=subject, props=custom_properties, apply=apply)
+        return {"sent": True, "mode": "applied", "recipient": to_email, "send_result": "SENT"}
+    monkeypatch.setattr(engine._src.HUBSPOT, "send_transactional_email", _fake_send)
+    monkeypatch.setattr(engine.dataaccess, "_ADAPTERS", True, raising=False)
+    try:
+        r = engine.send_digest("au1-d", apply=True)
+        assert r["result"]["mode"] == "applied" and r["result"]["sent"] is True
+        assert r["result"]["provider"] == "hubspot"
+        assert captured["to"] == "admin@co.com" and captured["apply"] is True
+        assert captured["props"]["account_name"] == "DigestCo"
+        assert captured["props"]["expansion_cta"] == "yes"   # 90% >= 85%
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
 def test_create_csql_two_gate(monkeypatch):
     """Creating an expansion deal (CSQL) is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources

@@ -254,6 +254,18 @@ variable "app_environment" {
     # path form, i.e. the REST contentUrl with "/sheets/" removed). Starter set of the
     # CS/revenue-relevant views discovered on the site; tune with the CS team.
     TABLEAU_VIEWS = "Revenue Dashboard=RevenueDashboard-Recent/RevenueDashboard, Revenue by Customer=RevenueDashboard-Recent/RevenuebyCustomer, NDR Overview Annual=NDRRevenueReporting_17663714097050/NDROverviewAnnual, NDR Summary=NDRRevenueReporting_17663714097050/NDRSummary, Billing Details=BillingDetailsDashboard/BillingDetailsDashboard, Stripe Payout=StripePayoutDashboard/StripePayOut"
+    # Outbound email provider for the monthly digest (Scenario E). Option A = HubSpot
+    # transactional single-send. Leave CS_EMAIL_PROVIDER empty to keep the digest in its
+    # honest 'no-email-provider' state (compile + report, never send). To go live:
+    #   1. Create a TRANSACTIONAL email in HubSpot (needs the transactional-email add-on)
+    #      with merge tokens: account_name, period, licence_utilization_pct,
+    #      active_logins_7d, top_feature_adoption_pct, tickets_resolved_30d, csat_30d,
+    #      expansion_cta, recipient_name.
+    #   2. Set CS_HS_TRANSACTIONAL_EMAIL_ID to that email's id.
+    #   3. Set CS_EMAIL_PROVIDER = "hubspot".
+    # Until (2) is set the adapter reports 'template-not-configured' and sends nothing.
+    CS_EMAIL_PROVIDER            = ""
+    CS_HS_TRANSACTIONAL_EMAIL_ID = ""
   }
 }
 
