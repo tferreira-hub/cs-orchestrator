@@ -2089,17 +2089,53 @@ function renderPooledInbox(){
       const rows=tickets.map(t=>{
         const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':'a';
         const dueTxt=t.sla_breached?'<span class="pill r">SLA breached</span>':(t.needs_reassign?'<span class="pill a">reassign</span>':'<span class="pill g">on track</span>');
+        // Zendesk-handoff items that carry a real ticket id get reply/close actions so a CSM
+        // can resolve them in-platform (increment 3). Gated server-side (dry-run until the
+        // Zendesk write token is live).
+        const tid=(t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute')?String(t.id||''):'';
+        const actions=tid?('<button class="btn" style="padding:4px 9px" onclick="zdReply(\''+escapeHtml(tid)+'\',this)">Reply</button> '+
+          '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):'<span class="muted">-</span>';
         return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.from||'')+' · '+escapeHtml(t.channel||'')+'</div></td>'+
           '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent)+'</span></td>'+
           '<td class="muted">'+escapeHtml(t.destination.replace(/_/g,' '))+'</td>'+
           '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
-          '<td>'+dueTxt+'</td></tr>';
+          '<td>'+dueTxt+'</td>'+
+          '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
       }).join('');
       body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+tickets.length+' items</span></div>'+
-        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
     host.innerHTML=header+body;
   })();
+}
+async function zdReply(ticketId,btn){
+  const reply=prompt('Public reply to send on Zendesk ticket '+ticketId+':');
+  if(reply==null||!reply.trim()) return;
+  const status=document.getElementById('zd-status-'+ticketId);
+  if(btn)btn.disabled=true; if(status)status.textContent='Sending…';
+  try{
+    const r=await api('/api/zendesk/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:ticketId,body:reply.trim(),public:true,apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(res.replied){ if(status)status.textContent='Replied ✓'; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (Zendesk write not enabled yet).'; }
+    else if(res.mode==='not-connected'){ if(status)status.textContent='Zendesk not connected.'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not reply.'; }
+  finally{ if(btn)btn.disabled=false; }
+}
+async function zdClose(ticketId,btn){
+  if(!confirm('Mark Zendesk ticket '+ticketId+' as solved?')) return;
+  const status=document.getElementById('zd-status-'+ticketId);
+  if(btn)btn.disabled=true; if(status)status.textContent='Closing…';
+  try{
+    const r=await api('/api/zendesk/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:ticketId,status:'solved',apply:true})});
+    const j=await r.json(); const res=j.result||{};
+    if(res.updated){ if(status)status.textContent='Solved ✓'; }
+    else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (Zendesk write not enabled yet).'; }
+    else if(res.mode==='not-connected'){ if(status)status.textContent='Zendesk not connected.'; }
+    else { if(status)status.textContent='Prepared (not applied).'; }
+  }catch(e){ if(status)status.textContent='Could not close.'; }
+  finally{ if(btn)btn.disabled=false; }
 }
 function renderPooledEscalations(){_pooledHost().innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email');}
 function renderPooledResponseRates(){

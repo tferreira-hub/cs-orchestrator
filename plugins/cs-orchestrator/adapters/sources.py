@@ -106,6 +106,58 @@ class Zendesk:
             "_org_name": org_name,
         }
 
+    # ---- Writes (increment 3): reply to and close/transfer tickets so a CSM can resolve
+    # inbound items in-platform. Two-gate: dry-run unless apply=true AND CS_ALLOW_WRITE=1.
+    # Uses the same email/token auth; the token must have ticket write scope (otherwise
+    # the live call 403s and we surface it honestly). Nothing is sent in dry-run.
+    def _base_headers(self):
+        auth = config.basic_auth_header(f"{config.env('ZENDESK_EMAIL')}/token", config.env("ZENDESK_TOKEN"))
+        return f"https://{config.env('ZENDESK_SUBDOMAIN')}.zendesk.com/api/v2", \
+               {"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"}
+
+    def reply_ticket(self, ticket_id, body: str, public: bool = True,
+                     apply: bool = False) -> dict[str, Any]:
+        """Add a comment (public reply or internal note) to a Zendesk ticket."""
+        body = (body or "").strip()
+        if not ticket_id:
+            raise ValueError("ticket_id is required")
+        if not body:
+            raise ValueError("reply body is required")
+        if apply and config.writes_allowed():
+            base, headers = self._base_headers()
+            payload = {"ticket": {"comment": {"body": body, "public": bool(public)}}}
+            config.http_patch(f"{base}/tickets/{ticket_id}.json", headers, payload)
+            return {"replied": True, "mode": "applied", "target": "zendesk.tickets",
+                    "ticket_id": ticket_id, "public": bool(public), "_source": "zendesk-live-write"}
+        return {"replied": False, "mode": "dry-run", "target": "zendesk.tickets",
+                "ticket_id": ticket_id, "would_write": {"comment": body, "public": bool(public)},
+                "note": "No Zendesk mutation sent. Set CS_ALLOW_WRITE=1, request apply=true, and "
+                        "use a token with ticket write scope.",
+                "_source": "zendesk-live-readonly"}
+
+    def set_ticket_status(self, ticket_id, status: str = "solved", comment: str | None = None,
+                          apply: bool = False) -> dict[str, Any]:
+        """Set a ticket's status (e.g. 'solved' to close, 'open' to reopen), optionally with
+        a closing comment. Reversible (a solved ticket can be reopened)."""
+        if not ticket_id:
+            raise ValueError("ticket_id is required")
+        status = (status or "").strip().lower()
+        if status not in ("new", "open", "pending", "hold", "solved", "closed"):
+            raise ValueError(f"invalid status {status!r}")
+        if apply and config.writes_allowed():
+            base, headers = self._base_headers()
+            tk = {"status": status}
+            if comment:
+                tk["comment"] = {"body": comment, "public": False}
+            config.http_patch(f"{base}/tickets/{ticket_id}.json", headers, {"ticket": tk})
+            return {"updated": True, "mode": "applied", "target": "zendesk.tickets",
+                    "ticket_id": ticket_id, "status": status, "_source": "zendesk-live-write"}
+        return {"updated": False, "mode": "dry-run", "target": "zendesk.tickets",
+                "ticket_id": ticket_id, "would_write": {"status": status},
+                "note": "No Zendesk mutation sent. Set CS_ALLOW_WRITE=1, request apply=true, and "
+                        "use a token with ticket write scope.",
+                "_source": "zendesk-live-readonly"}
+
 
 # -------------------------------------------------------------------- Pendo ---
 class Pendo:

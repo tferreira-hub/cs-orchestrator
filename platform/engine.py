@@ -1234,6 +1234,41 @@ def tag_contact_role(account_id: str, contact_email: str, role: str, apply: bool
     }
 
 
+def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
+    """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
+    dry-run by default. Resolving inbound in-platform (increment 3)."""
+    if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
+        result = {"replied": False, "mode": "not-connected"}
+    else:
+        result = _src.ZENDESK.reply_ticket(ticket_id, body, public=public, apply=apply)
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "ticket_id": ticket_id,
+        "apply_requested": bool(apply),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
+def zendesk_set_status(ticket_id: str, status: str = "solved", comment: str | None = None,
+                       apply: bool = False) -> dict:
+    """Set a Zendesk ticket's status (close = 'solved') from the inbound queue. Two-gate;
+    dry-run by default; reversible (solved can be reopened)."""
+    if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
+        result = {"updated": False, "mode": "not-connected"}
+    else:
+        result = _src.ZENDESK.set_ticket_status(ticket_id, status=status, comment=comment, apply=apply)
+    return {
+        "audit_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "ticket_id": ticket_id,
+        "apply_requested": bool(apply),
+        "write_enabled": bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on")),
+        "result": result,
+    }
+
+
 def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     """Portfolio revenue retention, computed transparently from LIVE signals only.
 
@@ -1729,9 +1764,13 @@ def integrations() -> dict:
             {"system": "Stripe", "category": "Billing / Finance", "direction": "read-only",
              **status_for("Stripe"),
              "pulls": ["invoice status", "days past due", "ARR"], "pushes": []},
-            {"system": "Zendesk", "category": "Support", "direction": "read-only",
+            {"system": "Zendesk", "category": "Support",
+             "direction": "read + write" if (("Zendesk" in liveset) and writes_on) else "read-only",
              **status_for("Zendesk"),
-             "pulls": ["ticket volume", "CSAT", "Sev-1 flags"], "pushes": []},
+             "pulls": ["ticket volume", "CSAT", "Sev-1 flags"],
+             "pushes": [],
+             "writes": (["reply to ticket", "close/transfer ticket"]
+                        if (("Zendesk" in liveset) and writes_on) else [])},
             {"system": "Product Telemetry", "category": "Usage (Pendo)", "direction": "read-only",
              **status_for("Pendo"),
              "pulls": ["risk advisor", "adoption", "days since last visit", "plan tier"], "pushes": []},

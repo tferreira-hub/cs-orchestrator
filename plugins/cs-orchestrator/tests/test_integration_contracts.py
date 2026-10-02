@@ -568,6 +568,43 @@ def test_tag_contact_role_two_gate_and_validation(monkeypatch):
     assert r2["hs_buying_role"] == "BUDGET_HOLDER" and patches
 
 
+def test_zendesk_reply_and_status_two_gate(monkeypatch):
+    """Zendesk reply/close are dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
+    from adapters import config, sources
+    patches = []
+    monkeypatch.setattr(sources.Zendesk, "_base_headers",
+                        lambda self: ("https://x.zendesk.com/api/v2", {"Authorization": "t"}))
+    monkeypatch.setattr(config, "http_patch", lambda *a, **k: patches.append(a[0]) or {})
+
+    monkeypatch.delenv("CS_ALLOW_WRITE", raising=False)
+    r = sources.ZENDESK.reply_ticket("111", "Thanks, resolving now", apply=True)
+    assert r["mode"] == "dry-run" and r["replied"] is False and not patches
+    s = sources.ZENDESK.set_ticket_status("111", status="solved", apply=True)
+    assert s["mode"] == "dry-run" and s["updated"] is False and not patches
+
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    r2 = sources.ZENDESK.reply_ticket("111", "Thanks, resolving now", apply=True)
+    assert r2["mode"] == "applied" and r2["replied"] is True
+    s2 = sources.ZENDESK.set_ticket_status("111", status="solved", apply=True)
+    assert s2["mode"] == "applied" and s2["updated"] is True
+    assert any("/tickets/111.json" in u for u in patches)
+
+
+def test_zendesk_write_validation(monkeypatch):
+    from adapters import sources
+    monkeypatch.setattr(sources.Zendesk, "_base_headers",
+                        lambda self: ("https://x.zendesk.com/api/v2", {}))
+    for bad in [("", "hi"), ("111", "   ")]:
+        try:
+            sources.ZENDESK.reply_ticket(bad[0], bad[1], apply=False); assert False
+        except ValueError:
+            pass
+    try:
+        sources.ZENDESK.set_ticket_status("111", status="banana", apply=False); assert False
+    except ValueError:
+        pass
+
+
 def test_rocket_lane_adapter_maps_onboarding(monkeypatch):
     from adapters import config, sources
 

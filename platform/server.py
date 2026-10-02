@@ -1085,6 +1085,36 @@ class Handler(BaseHTTPRequestHandler):
                 except (KeyError, ValueError) as exc:
                     self._json(400, {"error": str(exc)})
                 return
+            if path == "/api/zendesk/reply":
+                ticket_id = str(body.get("ticket_id") or "").strip()
+                reply = (body.get("body") or "").strip()
+                public = bool(body.get("public", True))
+                apply_write = bool(body.get("apply", False))
+                try:
+                    record_audit("zendesk_reply", principal,
+                                 {"ticket_id": ticket_id, "public": public, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.zendesk_reply(ticket_id, reply, public=public, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path == "/api/zendesk/status":
+                ticket_id = str(body.get("ticket_id") or "").strip()
+                status = (body.get("status") or "solved").strip()
+                comment = (body.get("comment") or "").strip() or None
+                apply_write = bool(body.get("apply", False))
+                try:
+                    record_audit("zendesk_set_status", principal,
+                                 {"ticket_id": ticket_id, "status": status, "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.zendesk_set_status(ticket_id, status=status, comment=comment, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
             self._json(404, {"error": "not found", "path": path})
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
