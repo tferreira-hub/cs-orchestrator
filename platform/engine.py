@@ -1858,6 +1858,7 @@ def payment_risk_report() -> dict:
 
     problems = []
     source_error = None
+    owner_map = {}
     if stripe_live:
         try:
             problems = _src.STRIPE.list_payment_problems()
@@ -1866,6 +1867,14 @@ def payment_risk_report() -> dict:
             import sys as _sys
             print(f"[payment-risk] list_payment_problems failed: {source_error}", file=_sys.stderr)
             problems = []
+    # CSM owner map for exactly the payment-problem accounts (account_ref -> owner name),
+    # resolved directly from HubSpot by account id so it works for accounts in any lifecycle
+    # stage (not just the customer roster). Batched + cached, so it is a handful of calls.
+    if problems:
+        try:
+            owner_map = _src.HUBSPOT.owners_for_refs([p.get("account_ref") for p in problems])
+        except Exception:  # noqa: BLE001
+            owner_map = {}
 
     def _norm(ref):
         from adapters import identity as _id
@@ -1880,7 +1889,7 @@ def payment_risk_report() -> dict:
             "account_id": ref,
             "name": hs.get("name") or prob.get("account_ref"),
             "billing_contact": _billing_contact(hs, stripe_for_contact),
-            "csm_owner": hs.get("csm_owner") or None,
+            "csm_owner": hs.get("csm_owner") or owner_map.get(ref) or None,
             "days_past_due": prob.get("days_past_due"),
             "amount_due_usd": prob.get("amount_due_usd"),
             "dunning_stage": prob.get("dunning_stage"),

@@ -1373,6 +1373,59 @@ class HubSpot:
     # accounts they own. The SSO email is the join to the HubSpot owner record.
     _OWNER_EMAIL_CACHE: dict[str, str | None] = {}
 
+    def owners_for_refs(self, refs: list[str]) -> dict[str, str]:
+        """Resolve {normalised account_ref -> CSM owner name} for a SPECIFIC set of account
+        refs, directly from the company search (filtered by account_id IN batches of 100).
+        Unlike owner_map(), this does NOT depend on the lifecyclestage-filtered roster, so it
+        covers payment-problem accounts in any lifecycle stage. Owner ids resolve via the
+        cached _owner_name. Returns {} when not live."""
+        if not self.live() or not refs:
+            return {}
+        up = sorted({identity.normalise(r).upper() for r in refs if r})
+        out: dict[str, str] = {}
+        for i in range(0, len(up), 100):
+            batch = up[i:i + 100]
+            body = {
+                "filterGroups": [{"filters": [
+                    {"propertyName": "account_id", "operator": "IN", "values": batch}]}],
+                "properties": ["account_id", "hubspot_owner_id"],
+                "limit": 100,
+            }
+            try:
+                res = config.http_post(
+                    "https://api.hubapi.com/crm/v3/objects/companies/search",
+                    self._headers(), body)
+            except Exception:  # noqa: BLE001
+                continue
+            for r in res.get("results", []):
+                p = r.get("properties", {}) or {}
+                aid = p.get("account_id")
+                oid = p.get("hubspot_owner_id")
+                if aid and oid:
+                    name = self._owner_name(oid)
+                    if name:
+                        out[identity.normalise(aid)] = name
+        return out
+
+    def owner_map(self, limit: int = 5000) -> dict[str, str]:
+        """Whole-book {normalised account_ref -> CSM owner name}, built from the cheap
+        company roster (list_all_companies gives account_id + owner_id) with owner ids
+        resolved to names (cached, so only ~one call per distinct CSM). Used by reports
+        that need the CSM for accounts outside the small enriched slice (e.g. the Payment
+        Risk Report). Returns {} when HubSpot is not live."""
+        if not self.live():
+            return {}
+        out: dict[str, str] = {}
+        for row in self.list_all_companies(limit=limit):
+            aid = row.get("account_id")
+            oid = row.get("owner_id")
+            if not aid or not oid:
+                continue
+            name = self._owner_name(oid)
+            if name:
+                out[identity.normalise(aid)] = name
+        return out
+
     def owner_id_for_email(self, email: str) -> str | None:
         """Resolve a HubSpot owner id from an email address (the SSO identity join).
 
