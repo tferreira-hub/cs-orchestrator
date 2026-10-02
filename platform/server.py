@@ -1017,12 +1017,36 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/accounts/") and path.endswith("/writeback"):
                 account_id = path[len("/api/accounts/"):-len("/writeback")].strip("/")
                 apply_write = bool(body.get("apply", False))
+                # Owner-scope: a CSM may only write back to accounts they own (admin: any).
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only write to accounts you own."})
+                    return
                 try:
                     record_audit("hubspot_writeback", principal,
                                  {"account_id": account_id, "apply": apply_write})
                 except Exception:  # noqa: BLE001
                     pass
                 self._json(200, engine.writeback(account_id, apply=apply_write))
+                return
+            if path.startswith("/api/accounts/") and path.endswith("/enrol-sequence"):
+                account_id = path[len("/api/accounts/"):-len("/enrol-sequence")].strip("/")
+                sequence_id = (body.get("sequence_id") or "").strip()
+                apply_write = bool(body.get("apply", False))
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only enrol accounts you own."})
+                    return
+                try:
+                    record_audit("sequence_enrolment", principal,
+                                 {"account_id": account_id, "sequence_id": sequence_id,
+                                  "apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.enrol_sequence(account_id, sequence_id, apply=apply_write))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
                 return
             self._json(404, {"error": "not found", "path": path})
         except Exception as exc:  # noqa: BLE001

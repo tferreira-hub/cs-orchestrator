@@ -220,7 +220,13 @@ variable "app_environment" {
     # restricted read-only key (rk_...) is issued. Needed by the Payment Risk Report and
     # any live dunning signals. SECURITY: prefer rotating STRIPE_KEY to an rk_ key and
     # removing this override.
-    CS_ALLOW_STRIPE_SECRET_KEY   = "1"
+    CS_ALLOW_STRIPE_SECRET_KEY = "1"
+    # Enable the gated write framework so CSMs can act in-platform (HubSpot CS write-back,
+    # sequence enrolment, and the reversible CRM writes added incrementally). Every write is
+    # STILL gated per request: it requires an explicit apply=true, is owner-scoped (a CSM can
+    # only write accounts they own), and is recorded in the immutable audit log. Nothing is
+    # written autonomously.
+    CS_ALLOW_WRITE               = "1"
     CS_BEDROCK_REGION            = "ap-southeast-2"
     CS_BEDROCK_MODEL             = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
     ZENDESK_SUBDOMAIN            = "jobadder"

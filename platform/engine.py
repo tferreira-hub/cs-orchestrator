@@ -91,6 +91,13 @@ def can_view_account(account_id: str) -> bool:
     return _owns(a, p.get("owner_id"))
 
 
+def can_write_account(account_id: str) -> bool:
+    """Whether the current principal may WRITE to a specific account. Same owner-scope as
+    read (admin writes any; a CSM writes only accounts they own), named separately so write
+    call-sites are explicit and the policy can diverge later if needed."""
+    return can_view_account(account_id)
+
+
 # The rules engine reads accounts through this provider, so scoping is uniform.
 orchestrate.set_account_provider(_scoped_accounts)
 

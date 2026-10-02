@@ -185,6 +185,19 @@ def test_admin_can_view_any_account(monkeypatch):
     engine.set_principal(None)
 
 
+def test_can_write_account_is_owner_scoped(monkeypatch):
+    """Write access (write-back, sequence enrol) is restricted to accounts the CSM owns;
+    admin may write any. This gates the 'CSMs work in one place' write actions."""
+    import engine, dataaccess
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    engine.set_principal({"email": "a@x.com", "name": "A", "role": "csm", "owner_id": "owner-A"})
+    assert engine.can_write_account("au1-1") is True    # owns it -> may write
+    assert engine.can_write_account("au1-3") is False   # owned by B -> may not write
+    engine.set_principal({"email": "boss@x.com", "name": "Boss", "role": "admin", "owner_id": None})
+    assert engine.can_write_account("au1-3") is True     # admin may write any
+    engine.set_principal(None)
+
+
 def test_portfolio_summary_reports_scope(monkeypatch):
     import engine, dataaccess
     monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
