@@ -656,6 +656,39 @@ def test_send_digest_is_gated_and_honest(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
+def test_run_monthly_digests_batch_summary_is_honest(monkeypatch):
+    """The batch run compiles across the book, preserves per-account honesty gates, and
+    reports a summary without fabricating any send (no email provider -> no_email_provider)."""
+    import engine, dataaccess
+    with_admin = {"hubspot": {"name": "HasAdmin", "arr_usd": 50000, "csm_owner": "C",
+                              "contacts": [{"role": "Primary Champion / Admin", "email": "a@co.com", "name": "Ada"}]},
+                  "usage": {"license_utilization_pct": 90}, "zendesk": {},
+                  "sources": {"hubspot": "live", "usage": "live"},
+                  "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    no_admin = {"hubspot": {"name": "NoAdmin", "arr_usd": 20000, "csm_owner": "C", "contacts": []},
+                "usage": {"license_utilization_pct": 40}, "zendesk": {},
+                "sources": {"hubspot": "live", "usage": "live"},
+                "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    book = {"au1-a": with_admin, "au1-b": no_admin}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: book)
+    try:
+        # Writes enabled, apply requested, but no email provider -> nothing is sent.
+        monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+        monkeypatch.delenv("CS_EMAIL_PROVIDER", raising=False)
+        res = engine.run_monthly_digests(apply=True)
+        s = res["summary"]
+        assert s["accounts_in_scope"] == 2
+        assert s["compiled"] == 2
+        assert s["sent"] == 0                       # never a fake send
+        assert s["missing_primary_admin"] == 1      # the no-admin account
+        assert s["no_email_provider"] == 1          # the with-admin account, blocked on provider
+        assert res["email_provider"] is None
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
 def test_create_csql_two_gate(monkeypatch):
     """Creating an expansion deal (CSQL) is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources

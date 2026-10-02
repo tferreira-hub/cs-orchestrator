@@ -1335,6 +1335,67 @@ def _write_enabled() -> bool:
     return bool(os.environ.get("CS_ALLOW_WRITE", "").lower() in ("1", "true", "yes", "on"))
 
 
+def run_monthly_digests(apply: bool = False) -> dict:
+    """Batch monthly-digest run across the current principal's named-account book (the
+    1st-of-month scheduler calls this). Compiles each account's digest and performs the
+    gated send through send_digest, so every honesty gate is preserved: writes-off/no
+    recipient/no email provider never send. Returns a summary only (counts + per-account
+    outcome), never customer prose. Owner-scoped: iterates only accounts the principal can
+    write, so a scheduled run on a service principal (admin) covers the whole book while a
+    CSM-scoped run covers theirs. Idempotent to re-run: a second run with no provider just
+    re-reports 'prepared'."""
+    period = datetime.now(timezone.utc).strftime("%B %Y")
+    accounts = orchestrate.load_accounts()
+    rows: list[dict] = []
+    compiled = sent = missing_admin = no_provider = dry_run = errors = 0
+    for aid in accounts:
+        # Owner-scope gate: skip accounts outside the principal's write scope silently so a
+        # CSM-scoped scheduled run only touches their book (never raises mid-batch).
+        if not can_write_account(aid):
+            continue
+        try:
+            res = send_digest(aid, apply=apply)
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            rows.append({"account_id": aid, "mode": "error", "error": str(exc)})
+            continue
+        mode = (res.get("result") or {}).get("mode")
+        compiled += 1
+        if mode == "applied":
+            sent += 1
+        elif mode == "no-recipient":
+            missing_admin += 1
+        elif mode == "no-email-provider":
+            no_provider += 1
+        elif mode == "dry-run":
+            dry_run += 1
+        rows.append({
+            "account_id": aid,
+            "name": (res.get("digest") or {}).get("name"),
+            "mode": mode,
+            "recipient": (res.get("digest") or {}).get("recipient"),
+            "expansion_cta": (res.get("digest") or {}).get("expansion_cta"),
+        })
+    return {
+        "run_id": uuid.uuid4().hex,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "period": period,
+        "apply_requested": bool(apply),
+        "write_enabled": _write_enabled(),
+        "email_provider": (os.environ.get("CS_EMAIL_PROVIDER") or "").strip() or None,
+        "summary": {
+            "accounts_in_scope": len(rows),
+            "compiled": compiled,
+            "sent": sent,
+            "dry_run": dry_run,
+            "missing_primary_admin": missing_admin,
+            "no_email_provider": no_provider,
+            "errors": errors,
+        },
+        "accounts": rows,
+    }
+
+
 def create_csql(account_id: str, name: str, amount_usd=None, note: str | None = None,
                 apply: bool = False) -> dict:
     """Create an expansion deal (CSQL) in HubSpot for an account. Two-gate; dry-run by

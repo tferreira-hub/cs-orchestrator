@@ -262,3 +262,36 @@ variable "redshift_assume_role_arn" {
   type        = string
   default     = "arn:aws:iam::503561421603:role/cs-platform-churn-reader"
 }
+
+# ---------------------------------------------------------------------------
+# Monthly digest scheduler (Scenario E auto-run)
+# ---------------------------------------------------------------------------
+# A 1st-of-month EventBridge Scheduler that starts a one-shot ECS task from the SAME
+# task definition, overriding the command to run platform/digest_runner.py. It inherits
+# the app's task role + SSM secrets, so adapters are live with no new auth surface and
+# no ALB exposure. OFF by default so no scheduled run exists until an outbound email
+# provider (CS_EMAIL_PROVIDER) is connected; even when on, the per-account honesty gates
+# mean nothing sends until the provider is set and digest_apply is true.
+variable "digest_schedule_enabled" {
+  description = "Create the 1st-of-month monthly-digest scheduler. Keep false until an outbound email provider is connected; a dry-run schedule can be enabled earlier to validate the batch compile in CloudWatch."
+  type        = bool
+  default     = false
+}
+
+variable "digest_schedule_expression" {
+  description = "EventBridge Scheduler expression for the monthly digest run (default: 08:00 on the 1st, Sydney time via schedule_timezone)."
+  type        = string
+  default     = "cron(0 8 1 * ? *)"
+}
+
+variable "digest_schedule_timezone" {
+  description = "IANA timezone the schedule expression is evaluated in."
+  type        = string
+  default     = "Australia/Sydney"
+}
+
+variable "digest_apply" {
+  description = "Whether the scheduled run requests apply=true (gated send). Even true is a no-op until CS_EMAIL_PROVIDER is connected and CS_ALLOW_WRITE=1. Keep false for a compile-only dry-run schedule."
+  type        = bool
+  default     = false
+}

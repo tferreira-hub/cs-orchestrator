@@ -1129,6 +1129,21 @@ class Handler(BaseHTTPRequestHandler):
                 except KeyError:
                     self._json(404, {"error": "account not found"})
                 return
+            if path == "/api/digests/run":
+                # Batch monthly-digest run (the 1st-of-month scheduler target). Owner-scoped
+                # inside the engine: iterates only accounts the principal can write, so an
+                # admin/service run covers the book and a CSM run covers theirs. Honesty
+                # gates are preserved per account (dry-run / no recipient / no provider).
+                apply_write = bool(body.get("apply", False))
+                try:
+                    record_audit("run_monthly_digests", principal, {"apply": apply_write})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.run_monthly_digests(apply=apply_write))
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": str(exc)})
+                return
             if path.startswith("/api/accounts/") and path.endswith("/create-csql"):
                 account_id = path[len("/api/accounts/"):-len("/create-csql")].strip("/")
                 name = (body.get("name") or "").strip()
