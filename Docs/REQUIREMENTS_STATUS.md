@@ -35,7 +35,7 @@ CSMs from activity originators to workflow orchestrators.
 | 13 | Strategic vs Scaled segmentation; owner-scoped books | WoW, Tech Touch | **Built** | `rbac.py` (admin/csm), cohort filter, pooled cohort views |
 | 14 | Executive governance: SLA, capacity, GRR | WoW | **Built** | `engine.kpis`, `_capacity_per_csm`, `_retention_metrics` (GRR) |
 | 15 | Contact role architecture (Exec Sponsor, Champion/Admin, Finance) | WoW | **Partial** | Surfaced on **Data Gaps**; spec wants a *hard close-gate* on renewal/onboarding tasks — not yet blocking |
-| 16 | NDR > 100% reporting | Brief, WoW | **Partial** | GRR computed; **NDR needs prior-period ARR history** (warehouse `rpt_account_ndr_monthly`) — not yet wired as a time series |
+| 16 | NDR > 100% reporting | Brief, WoW | **Partial (blocked on cross-account trust)** | NDR compute is **implemented and correct** (`_retention_metrics` reads current vs prior-year revenue from `rpt_account_ndr_monthly`). Verified 2026-10 via a one-shot ECS task: the platform **cannot reach the warehouse** because the Data Platform role `cs-platform-churn-reader` (acct `503561421603`) does **not trust the current task role** `arn:aws:iam::350067031910:role/cs-platform-task` (its trust still names the old DevOps account). Same blocker as live churn. Fix = update that role's trust policy; then NDR shows a real number if the table carries a prior-year revenue. Platform shows honest "no data" until then. |
 | 17 | Tableau embedded reporting (keep Tableau, surface in-tool, SSO) | (ops decision) | **Built** | `tableau.py` connected-app JWT; Reports page; Integrations entry |
 | 18 | **5-channel inbound ingestion** (Zendesk misroute, Slack call-log, mailbox, campaign replies, high-intent forms) | Tech Touch | **Planned** | No channel adapters yet; biggest Phase-1 gap |
 | 19 | **Automated triage** (technical→Zendesk, billing→CS ticket, expansion→CSQL) | Tech Touch | **Partial → in progress** | `inbound.py` keyword/intent classifier (this change); channel wiring still Planned |
@@ -68,8 +68,12 @@ CSMs from activity originators to workflow orchestrators.
 2. **Real-time CSM availability feed** — round-robin (#20) needs an "Available/OOO" status
    source (Help Desk presence). Until then the engine round-robins across a configured
    roster and treats everyone as available.
-3. **Monthly ARR history** — for NDR (#16); the warehouse table exists in config but is not
-   yet read as a time series.
+3. **Cross-account warehouse trust** — for NDR (#16) **and** live ML churn. The compute is
+   implemented and the table/columns are configured correctly; verified 2026-10 that the
+   only blocker is the Data Platform role `cs-platform-churn-reader` (acct `503561421603`)
+   not trusting the current task role `arn:aws:iam::350067031910:role/cs-platform-task`.
+   Owner action: add that principal to the role's trust policy (the task-side
+   `sts:AssumeRole` permission already exists). No code change needed.
 
 ---
 
