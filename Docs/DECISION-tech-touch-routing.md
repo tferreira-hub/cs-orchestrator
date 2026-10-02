@@ -2,10 +2,15 @@
 
 | | |
 |---|---|
-| **Status** | Open — awaiting CS Leadership / RevOps decision |
+| **Status** | **Decided — Option A** (HubSpot Service Hub is the Help Desk; CS Platform is surface + act). Decided 2 October 2026 by CS Leadership / RevOps. Remaining gate: confirm the Service Hub Pro licence is within the 50–60k budget, then configure channel routing in HubSpot. |
 | **Date raised** | 2 October 2026 |
 | **Owners** | RevOps / CS Engineering |
 | **Affects** | Tech Touch for CS V3 (Phase-1, sub-$10k segment), the 50–60k platform budget, and the inbound/round-robin build |
+
+> **Decision note (2 Oct 2026):** Option A chosen. The deterministic triage/round-robin
+> engine already built (`inbound.py`) is retained to validate/mirror HubSpot's routing for
+> auditability in the CS Platform's own audit log. See `SCENARIOS-SLACK-INBOUND.md` for the
+> end-to-end scenarios under this model.
 
 ## Summary
 
