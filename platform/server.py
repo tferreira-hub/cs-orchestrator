@@ -842,6 +842,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Preview the 1-20 Agency + Corporate cohort (count + ARR + owners) that the
                 # move-to-pooled action would touch. Owner-scoped inside the engine.
                 self._json(200, engine.pooled_cohort()); return
+            if path == "/api/csm/availability":
+                # Live pooled CSM presence (Available/OOO) feeding the round-robin.
+                self._json(200, engine.pooled_roster()); return
             if path == "/api/daily-brief":
                 self._json(200, engine.daily_brief()); return
             if path == "/api/accounts":
@@ -945,13 +948,25 @@ class Handler(BaseHTTPRequestHandler):
                 items = body.get("items") if isinstance(body.get("items"), list) else []
                 roster = body.get("roster") if isinstance(body.get("roster"), list) else None
                 if not roster:
-                    owners = sorted({
-                        (a.get("csm_owner") or "").strip()
-                        for a in engine.portfolio().get("accounts", [])
-                        if (a.get("pooled") or a.get("cohort") == "pooled") and a.get("csm_owner")
-                    })
-                    roster = [{"name": o, "available": True} for o in owners if o]
+                    # Live pooled roster with real availability (presence feed).
+                    roster = engine.pooled_roster().get("roster", [])
                 self._json(200, _inbound.triage_inbound(items, roster=roster))
+                return
+            if path == "/api/csm/availability":
+                # Set a pooled CSM's Available/OOO status (the Help Desk presence feed).
+                name = (body.get("name") or "").strip()
+                available = bool(body.get("available", True))
+                until = body.get("until")
+                note = (body.get("note") or "").strip() or None
+                try:
+                    record_audit("csm_availability", principal,
+                                 {"name": name, "available": available})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.set_csm_availability(name, available, until=until, note=note))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
                 return
             if path == "/api/agent":
                 question = (body.get("question") or "").strip() or "What are my top CS actions today?"

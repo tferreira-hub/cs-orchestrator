@@ -1497,7 +1497,29 @@ function renderPooledDashboard(){
     '<div class="cc-big"><div class="cc-big-l">Pooled Customers</div><div class="cc-big-v">'+pool.length+'</div></div>'+
     '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v good">'+(pool.length?Math.round(pool.reduce((s,a)=>s+((a.health&&a.health.computable)?a.health.score:0),0)/pool.length):0)+'</div></div>'+
   '</div>'+
-  '<div class="panel"><div class="head"><h2>Pooled Customers by Phase</h2></div><div class="body pad"><div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div></div></div>';
+  '<div class="panel"><div class="head"><h2>Pooled Customers by Phase</h2></div><div class="body pad"><div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div></div></div>'+
+  '<div class="panel" id="csm-presence-panel" style="margin-top:16px"><div class="head"><h2>Pooled team availability</h2><span class="note">Feeds the inbound round-robin</span></div><div class="body pad" id="csm-presence-body"><span class="muted">Loading…</span></div></div>';
+  loadCsmPresence();
+}
+// CSM presence feed — Available/OOO toggles that drive the inbound round-robin (WoW §3).
+function loadCsmPresence(){
+  const b=document.getElementById('csm-presence-body'); if(!b)return;
+  fetch('/api/csm/availability').then(r=>r.json()).then(d=>{
+    const roster=d.roster||[];
+    if(!roster.length){ b.innerHTML='<span class="muted">No pooled CSMs resolved from the book yet.</span>'; return; }
+    b.innerHTML='<div class="muted" style="margin-bottom:10px">Source: '+(d.presence_source==='live'?'live presence':'default (all available)')+' · '+(d.available||[]).length+' available / '+(d.unavailable||[]).length+' OOO</div>'+
+      '<div style="display:grid;gap:8px">'+roster.map(c=>
+        '<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid var(--line);border-radius:9px">'+
+          '<span class="live-dot" style="width:9px;height:9px;border-radius:50%;background:'+(c.available?'var(--good,#16a34a)':'var(--muted)')+'"></span>'+
+          '<strong style="flex:1">'+escapeHtml(c.name)+'</strong>'+
+          (c.note?'<span class="muted" style="font-size:.8em">'+escapeHtml(c.note)+'</span>':'')+
+          '<button class="btn btn-ghost" style="padding:5px 10px" onclick="setCsmPresence(\''+escapeHtml(c.name).replace(/'/g,"\\'")+'\','+(c.available?'false':'true')+')">'+(c.available?'Mark OOO':'Mark available')+'</button>'+
+        '</div>').join('')+'</div>';
+  }).catch(()=>{ b.innerHTML='<span class="muted">Availability unavailable.</span>'; });
+}
+function setCsmPresence(name,available){
+  fetch('/api/csm/availability',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,available:available,note:available?null:'OOO'})})
+    .then(()=>loadCsmPresence()).catch(()=>loadCsmPresence());
 }
 
 // ===== CS Day to Day: personal Dashboard (two-level nav) =====

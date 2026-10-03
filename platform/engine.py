@@ -1544,6 +1544,74 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
     }
 
 
+# --- CSM availability / presence feed (Tech-Touch round-robin, WoW §3) -------
+# Real-time Available/OOO status for pooled CSMs. Backed by an in-process store that the
+# platform updates via POST /api/csm/availability (the "Help Desk presence" source the
+# spec calls for). Honest fallback: a CSM with no explicit status is treated as available,
+# so round-robin still distributes before anyone sets presence. A status can carry an
+# optional 'until' epoch (auto-expire back to available) and a short note (e.g. "OOO").
+_CSM_PRESENCE: dict[str, dict] = {}
+
+
+def set_csm_availability(name: str, available: bool, until: int | None = None,
+                         note: str | None = None) -> dict:
+    """Set a pooled CSM's presence. Returns the updated entry. Owner/admin gated at the
+    endpoint. available=False marks OOO so round-robin skips them and assigned-but-now-
+    unavailable items flag for reassignment."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("csm name is required")
+    entry = {"name": name, "available": bool(available),
+             "until": int(until) if until else None,
+             "note": (note or "").strip() or None,
+             "updated_at": datetime.now(timezone.utc).isoformat()}
+    _CSM_PRESENCE[name] = entry
+    return entry
+
+
+def _presence_for(name: str) -> bool:
+    """Resolve current availability for a CSM, honouring an expired 'until' (back to
+    available) and defaulting to available when no status has ever been set."""
+    e = _CSM_PRESENCE.get(name)
+    if not e:
+        return True
+    if not e["available"] and e.get("until"):
+        try:
+            if datetime.now(timezone.utc).timestamp() >= float(e["until"]):
+                return True  # OOO window elapsed
+        except (TypeError, ValueError):
+            pass
+    return bool(e["available"])
+
+
+def pooled_roster(with_availability: bool = True) -> dict:
+    """The pooled CSM roster (distinct owners of pooled accounts) with live availability,
+    so the inbound round-robin and the governance view share one source of truth."""
+    try:
+        owners = sorted({
+            (a.get("csm_owner") or "").strip()
+            for a in portfolio().get("accounts", [])
+            if (a.get("pooled") or a.get("cohort") == "pooled") and a.get("csm_owner")
+        })
+    except Exception:  # noqa: BLE001
+        owners = []
+    roster = []
+    for o in owners:
+        if not o:
+            continue
+        row = {"name": o, "available": _presence_for(o) if with_availability else True}
+        e = _CSM_PRESENCE.get(o)
+        if e:
+            row["note"] = e.get("note")
+            row["until"] = e.get("until")
+        roster.append(row)
+    return {"roster": roster,
+            "available": [r["name"] for r in roster if r["available"]],
+            "unavailable": [r["name"] for r in roster if not r["available"]],
+            "presence_source": "live" if _CSM_PRESENCE else "default-all-available"}
+
+
+
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
     dry-run by default. Resolving inbound in-platform (increment 3)."""
