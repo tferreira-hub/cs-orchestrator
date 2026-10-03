@@ -163,3 +163,23 @@ def test_summary_counts_are_consistent():
     assert s["zendesk_handoffs"] == 1 and s["csqls"] == 1
     # Technical not assigned; the other 3 distributed across 2 CSMs.
     assert sum(s["load_per_csm"].values()) == 3
+
+
+def test_five_channels_normalise_and_route():
+    """The 5 Option-A channels route by intent: technical->zendesk, expansion->CSQL,
+    billing/general->pooled queue. (Mirrors /api/inbound/hubspot normalisation.)"""
+    roster = [{"name": "Ann", "available": True}, {"name": "Bob", "available": True}]
+    items = [
+        {"id": "z1", "channel": "zendesk_misroute", "from": "u@co.com", "subject": "500 error", "body": "crash on login", "received_at": NOW},
+        {"id": "s1", "channel": "slack_call", "from": "v@co.com", "subject": "call", "body": "wants to add seats", "received_at": NOW},
+        {"id": "m1", "channel": "mailbox", "from": "w@co.com", "subject": "invoice", "body": "billing question", "received_at": NOW},
+        {"id": "f1", "channel": "high_intent_form", "from": "x@co.com", "subject": "upgrade", "body": "license upgrade please", "received_at": NOW},
+        {"id": "c1", "channel": "campaign_reply", "from": "y@co.com", "subject": "re: renewal", "body": "just checking in", "received_at": NOW},
+    ]
+    r = inbound.triage_inbound(items, roster=roster, now=NOW)
+    dest = {t["id"]: t["destination"] for t in r["tickets"]}
+    assert dest["z1"] == "zendesk_handoff"      # technical
+    assert dest["s1"] == "expansion_queue"       # expansion (add seats)
+    assert dest["m1"] == "cs_pooled_queue"       # billing
+    assert dest["f1"] == "expansion_queue"       # expansion (upgrade)
+    assert dest["c1"] == "cs_pooled_queue"       # general

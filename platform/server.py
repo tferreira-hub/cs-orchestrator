@@ -960,6 +960,44 @@ class Handler(BaseHTTPRequestHandler):
                     roster = engine.pooled_roster().get("roster", [])
                 self._json(200, _inbound.triage_inbound(items, roster=roster))
                 return
+            if path == "/api/inbound/hubspot":
+                # Option A intake seam: a HubSpot Service Hub ticket (or batch) lands here,
+                # is normalised to the inbound-item shape, and runs through the same triage +
+                # round-robin as /triage with the LIVE pooled roster. The actual HubSpot
+                # Service Hub channel wiring + Service Hub Pro licence are RevOps config; this
+                # endpoint is the platform-side contract that config posts to.
+                raw = body.get("tickets") if isinstance(body.get("tickets"), list) else (
+                    [body.get("ticket")] if isinstance(body.get("ticket"), dict) else
+                    ([body] if (body.get("subject") or body.get("body") or body.get("from")) else []))
+                VALID_CHANNELS = {"zendesk_misroute", "slack_call", "mailbox",
+                                  "campaign_reply", "high_intent_form"}
+                items = []
+                for i, t in enumerate(raw):
+                    if not isinstance(t, dict):
+                        continue
+                    ch = str(t.get("channel") or "mailbox").strip()
+                    items.append({
+                        "id": str(t.get("id") or t.get("ticket_id") or f"hs-{i}"),
+                        "channel": ch if ch in VALID_CHANNELS else "mailbox",
+                        "from": (t.get("from") or t.get("email") or "").strip(),
+                        "subject": (t.get("subject") or "").strip(),
+                        "body": (t.get("body") or t.get("message") or "").strip(),
+                        "account_ref": (t.get("account_ref") or t.get("account_id") or None),
+                        "received_at": t.get("received_at"),
+                    })
+                if not items:
+                    self._json(400, {"error": "no tickets",
+                                     "detail": "Post a HubSpot Service Hub ticket (channel, from, "
+                                               "subject, body, account_ref, received_at) or a list in 'tickets'."})
+                    return
+                try:
+                    record_audit("inbound_hubspot", principal,
+                                 {"count": len(items), "channels": sorted({i["channel"] for i in items})})
+                except Exception:  # noqa: BLE001
+                    pass
+                roster = engine.pooled_roster().get("roster", [])
+                self._json(200, _inbound.triage_inbound(items, roster=roster))
+                return
             if path == "/api/csm/availability":
                 # Set a pooled CSM's Available/OOO status (the Help Desk presence feed).
                 name = (body.get("name") or "").strip()
