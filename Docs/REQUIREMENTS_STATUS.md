@@ -37,15 +37,15 @@ CSMs from activity originators to workflow orchestrators.
 | 15 | Contact role architecture (Exec Sponsor, Champion/Admin, Finance) | WoW | **Built** | Surfaced on Data Gaps **and** enforced as a hard close-gate: `engine.required_roles_missing` + `/api/tasks/status` returns 409 when completing a renewal/onboarding task with untagged roles |
 | 16 | NDR > 100% reporting | Brief, WoW | **Built (live)** | `_retention_metrics` computes NDR from `rpt_account_ndr_monthly` (current vs prior-year revenue). Cross-account warehouse access **provisioned + verified 2026-10**: created the `cs-platform-churn-reader` role in the Data Platform account (`503561421603`) trusting `cs-platform-task`, granted least-privilege reads on `rpt`/`marts`/`stg`. Verified real NDR flowing (e.g. 91% sample) and 10,278 churn-scored accounts. |
 | 17 | Tableau embedded reporting (keep Tableau, surface in-tool, SSO) | (ops decision) | **Built** | `tableau.py` connected-app JWT; Reports page; Integrations entry |
-| 18 | **5-channel inbound ingestion** (Zendesk misroute, Slack call-log, mailbox, campaign replies, high-intent forms) | Tech Touch | **Planned (Option A)** | Decided routing model = Option A: channels land in HubSpot Service Hub (RevOps config); the platform surfaces + acts. The platform-side triage/queue is built; the HubSpot channel wiring + Service Hub Pro licence is the remaining config. |
-| 19 | **Automated triage** (technical→Zendesk, billing→CS ticket, expansion→CSQL) | Tech Touch | **Built** | `inbound.py` deterministic intent classifier + route map (expansion→CSQL, technical→Zendesk handoff, billing→pooled); tested |
-| 20 | **Round-robin allocation + availability + 24h SLA + 20h reassign** | Tech Touch | **Built (engine); availability feed pending** | `inbound.py` rotate/availability/SLA/20h-reassign/dedupe; a real-time CSM presence feed (Help Desk status) is the remaining live input |
-| 21 | Programmatic monthly account performance digest (1st-of-month, 85% CTA, reply→CSQL) | Tech Touch, Brief | **Built (dry-run-safe); live send pending email template** | `engine.monthly_digest` compiles the digest (utilisation, logins, adoption, tickets, CSAT, 85% CTA, Primary-Admin recipient, missing-admin flag); `send_digest` gated/honest; `run_monthly_digests` batch + EventBridge 1st-of-month scheduler (`infra/scheduler.tf`, off by default); HubSpot transactional send seam. Live send needs a HubSpot transactional-email template id (`CS_HS_TRANSACTIONAL_EMAIL_ID`). |
-| 22 | Strategic monthly draft/review/approve (28th–31st; auto-send baseline if unreviewed) | Tech Touch | **Partial** | Digest compile + gated send exist (#21); the 28th–31st review/approve workflow + auto-send-baseline is the remaining piece |
+| 18 | **5-channel inbound ingestion** (Zendesk misroute, Slack call-log, mailbox, campaign replies, high-intent forms) | Tech Touch | **Built (platform seam); channel config = Option A** | `POST /api/inbound/hubspot` normalises the 5 channels + runs triage/round-robin with the live roster. HubSpot Service Hub channel wiring + Service Hub Pro licence are RevOps config (`PROVISIONING-CHECKLIST.md`). |
+| 19 | **Automated triage** (technical→Zendesk, billing→CS ticket, expansion→CSQL) | Tech Touch | **Built** | `inbound.py` deterministic intent classifier + route map; tested |
+| 20 | **Round-robin allocation + availability + 24h SLA + 20h reassign** | Tech Touch | **Built** | `inbound.py` rotate/SLA/20h-reassign/dedupe + `engine.pooled_roster()` live CSM presence feed (`set_csm_availability`, GET/POST `/api/csm/availability`, UI toggle). Optional: native Help Desk presence sync. |
+| 21 | Programmatic monthly account performance digest (1st-of-month, 85% CTA, reply→CSQL) | Tech Touch, Brief | **Built (dry-run-safe); live send pending email template** | `monthly_digest`/`send_digest`/`run_monthly_digests` + EventBridge scheduler + HubSpot transactional seam. Live send needs `CS_HS_TRANSACTIONAL_EMAIL_ID`. |
+| 22 | Strategic monthly draft/review/approve (28th–31st; auto-send baseline if unreviewed) | Tech Touch | **Built** | `monthly_review_queue`/`add_review_comment`/`approve_digest`/`dispatch_reviewed_digests` (approved→send, draft→auto-baseline, commented→held); endpoints + UI panel on Portfolio Reviews |
 | 23 | Duplicate ticket merging (same user, 2h window) | Tech Touch | **Built** | `inbound.py` dedupe (2h window, same sender) |
-| 24 | Onboarding stagnation alert | Tech Touch | **Partial (Rocket Lane live)** | Rocket Lane adapter is live (key provisioned); the deeper stagnation-alert rule + unified lifecycle view remain (Phase-2 scope per Meeting Notes) |
-| 25 | Weekly time-blocked operating rhythm (Mon review, daily P1) | WoW | **Partial** | Prioritised queue + Command Center exist; explicit day-block scheduling view not built |
-| 26 | Move 1–20 Agency + Corporate to pooled structure (platform-executed) | WoW, Tech Touch | **Built** | `engine.pooled_cohort` + `move_to_pooled` + `HubSpot.set_customer_tier` (sets cs_customer_tier=Pooled, assigns pooled team, clears owner); gated/owner-scoped/audited/reversible; UI on Scaled → The Pool |
+| 24 | Onboarding stagnation alert | Tech Touch | **Built** | `orchestrate.RULE_ONBOARDING_STAGNATION` (P3) off the live Rocket Lane signal (stalled/blocked/red/past-due); flows into the queue + account 360. Deeper lifecycle view = Phase 2. |
+| 25 | Weekly time-blocked operating rhythm (Mon review, daily P1) | WoW | **Built** | `engine.operating_rhythm()` groups the queue into Monday review / daily P1 risk / weekly renewals+expansion / weekly adoption+QBR; `/api/operating-rhythm` + 'Operating Rhythm' page |
+| 26 | Move 1–20 Agency + Corporate to pooled structure (platform-executed) | WoW, Tech Touch | **Built** | `engine.pooled_cohort` + `move_to_pooled` + `HubSpot.set_customer_tier` (tier=Pooled, pooled-team, clear owner); gated/owner-scoped/audited/reversible; UI with per-account selection + team picker on Scaled → The Pool |
 
 ---
 
@@ -67,8 +67,9 @@ CSMs from activity originators to workflow orchestrators.
    (`infra/scheduler.tf`, gated off until ready) + HubSpot transactional single-send seam
    (`HubSpot.send_transactional_email`). Live send needs a HubSpot transactional-email
    template id (`CS_HS_TRANSACTIONAL_EMAIL_ID`) — an account-side config, not code.
-2. **Real-time CSM availability feed** — still pending. Round-robin (#20) treats the
-   configured roster as available until a Help Desk presence source is connected.
+2. **Real-time CSM availability feed** — **built** (in-platform Available/OOO presence feed
+   drives round-robin via `pooled_roster()`; `/api/csm/availability` + UI toggle). Optional
+   upgrade: sync native HubSpot Help Desk status to replace the manual toggle.
 3. **Cross-account warehouse trust** — **resolved.** The `cs-platform-churn-reader` role was
    created in the Data Platform account (`503561421603`) trusting `cs-platform-task`, with
    least-privilege reads on `rpt`/`marts`/`stg`. NDR (#16) and live ML churn (#5) now flow
