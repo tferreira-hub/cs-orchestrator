@@ -1414,13 +1414,16 @@ function _renderPooledMove(d){
   const b=document.getElementById('pooled-move-body'); if(!b) return;
   window._poolCohort=d.accounts||[];
   const movable=(d.accounts||[]).filter(a=>!a.already_pooled && a.writable!==false);
+  // State-driven selection: a Set of selected account ids, initialised to ALL movable.
+  window._poolSel=new Set(movable.map(a=>a.account_id));
   const owners=[...new Set((d.accounts||[]).map(a=>a.csm_owner).filter(Boolean))];
   const teams=['Pooled Team A','Pooled Team B','APAC Pool','EMEA Pool','Americas Pool'];
   const rows=(d.accounts||[]).map(a=>{
     const locked=(a.already_pooled||a.writable===false);
+    const checked=window._poolSel.has(a.account_id);
     const tag=a.already_pooled?'<span class="mp-tag">already pooled</span>':(a.writable===false?'<span class="mp-tag">not yours</span>':'');
     return '<tr class="'+(locked?'locked':'')+'">'+
-      '<td style="width:38px;text-align:center"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'"'+(locked?' disabled':' checked')+'></td>'+
+      '<td style="width:38px;text-align:center"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'" onchange="_poolPick(this)"'+(locked?' disabled':(checked?' checked':''))+'></td>'+
       '<td><span class="mp-co">'+escapeHtml(a.name||a.account_id)+'</span>'+tag+'</td>'+
       '<td style="color:var(--ink2)">'+escapeHtml(a.segment||'—')+'</td>'+
       '<td style="color:var(--ink2)">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span style="color:var(--muted)">unassigned</span>')+'</td>'+
@@ -1438,7 +1441,7 @@ function _renderPooledMove(d){
       '<div class="mp-toolbar">'+
         '<div class="mp-field"><label for="pool-team">Assign to pooled team</label>'+
           '<select id="pool-team">'+teams.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select></div>'+
-        '<label class="mp-selall"><input type="checkbox" id="pool-selall" checked onchange="_poolToggleAll(this.checked)"> Select all movable</label>'+
+        '<label class="mp-selall"><input type="checkbox" id="pool-selall"'+(movable.length?' checked':'')+' onchange="_poolToggleAll(this.checked)"> Select all movable</label>'+
         '<span class="mp-selcount" id="pool-selcount"></span>'+
       '</div>'+
       '<div class="mp-list"><div class="mp-scroll"><table>'+
@@ -1450,12 +1453,15 @@ function _renderPooledMove(d){
       '</div>'+
       '<div class="mp-result" id="pooled-move-result"></div>'+
     '</div>';
-  document.querySelectorAll('#pooled-move-panel .pool-pick').forEach(c=>c.addEventListener('change',_poolUpdateCount));
   _poolUpdateCount();
 }
-function _poolSelectedIds(){ return [...document.querySelectorAll('#pooled-move-panel .pool-pick:checked:not(:disabled)')].map(c=>c.value); }
-function _poolToggleAll(on){ document.querySelectorAll('#pooled-move-panel .pool-pick:not(:disabled)').forEach(c=>c.checked=on); _poolUpdateCount(); }
-function _poolUpdateCount(){ const n=_poolSelectedIds().length; const el=document.getElementById('pool-selcount'); if(el)el.textContent=n+' selected'; const mv=document.querySelector('#pooled-move-panel .mp-actions .btn:not(.btn-ghost)'); if(mv)mv.textContent='Move '+n+' to pooled'; }
+function _poolPick(cb){ if(cb.checked)window._poolSel.add(cb.value); else window._poolSel.delete(cb.value); _poolUpdateCount(); }
+function _poolSelectedIds(){ return [...(window._poolSel||[])]; }
+function _poolToggleAll(on){
+  document.querySelectorAll('#pooled-move-panel .pool-pick:not(:disabled)').forEach(c=>{ c.checked=on; if(on)window._poolSel.add(c.value); else window._poolSel.delete(c.value); });
+  _poolUpdateCount();
+}
+function _poolUpdateCount(){ const n=_poolSelectedIds().length; const el=document.getElementById('pool-selcount'); if(el)el.textContent=n+' selected'; const mv=document.querySelector('#pooled-move-panel .mp-actions .btn:not(.btn-ghost)'); if(mv){ mv.textContent='Move '+n+' to pooled'; mv.disabled=(n===0); } }
 function runMoveToPooled(apply,btn){
   const res=document.getElementById('pooled-move-result');
   const ids=_poolSelectedIds();
