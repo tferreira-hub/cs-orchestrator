@@ -6,14 +6,27 @@
 # model via the Redshift Data API. Rename to cs-platform-churn-reader.tf and apply
 # it with Data Platform credentials (e.g. AWS_PROFILE=DataPlatform).
 #
-# Verified live: the role does NOT yet exist in 503561421603, and the target
-# workgroup `data-platform-redshift-warehouse-wg-prod` DOES exist. Until this role
-# and its trust are in place, the CS Platform churn adapter reports not-live and the
-# platform falls back to the transparent computed-risk score (no code change needed).
+# Status (2026-10): the role AND the Redshift SELECT grants were applied IMPERATIVELY this
+# session (role created in 503561421603 trusting cs-platform-task; grants via the Data API).
+# NDR + live ML churn are flowing (verified: 91% NDR sample, 10,278 churn-scored accounts).
+# This stack + the GRANTS runbook below CODIFY that live state so a future Terraform baseline
+# does not drift it away. Rename to cs-platform-churn-reader.tf and apply with Data Platform
+# credentials (AWS_PROFILE=DataPlatform) to bring it under IaC; it is idempotent with the
+# already-created role.
 #
 # The CS Platform task role ARN comes from the infra/ stack:
 #   terraform -chdir=infra output -raw task_role_arn
 #   => arn:aws:iam::350067031910:role/cs-platform-task
+#
+# GRANTS (NOT managed by Terraform — Redshift object grants live in the DB, applied once via
+# the Data API as a Data Platform admin; captured here + in GRANTS-RUNBOOK.md):
+#   GRANT USAGE ON SCHEMA rpt   TO "IAMR:cs-platform-churn-reader";
+#   GRANT SELECT ON TABLE rpt.rpt_account_ndr_monthly        TO "IAMR:cs-platform-churn-reader";
+#   GRANT USAGE ON SCHEMA marts TO "IAMR:cs-platform-churn-reader";
+#   GRANT SELECT ON TABLE marts.int_ds_account_churn_scoring TO "IAMR:cs-platform-churn-reader";
+#   GRANT USAGE ON SCHEMA stg   TO "IAMR:cs-platform-churn-reader";
+#   GRANT SELECT ON TABLE stg.stg_jobadder_all_accounts      TO "IAMR:cs-platform-churn-reader";
+# (The IAMR:cs-platform-churn-reader DB user is auto-created by Redshift on first assume.)
 # =============================================================================
 
 terraform {
@@ -40,10 +53,8 @@ variable "cs_platform_task_role_arn" {
 variable "redshift_workgroup_arn" {
   description = "ARN of the churn Redshift Serverless workgroup."
   type        = string
-  # data-platform-redshift-warehouse-wg-prod (confirmed to exist). Replace <id> with
-  # the real workgroup id: aws redshift-serverless get-workgroup \
-  #   --workgroup-name data-platform-redshift-warehouse-wg-prod --query workgroup.workgroupArn
-  default = "arn:aws:redshift-serverless:ap-southeast-2:503561421603:workgroup/<workgroup-id>"
+  # data-platform-redshift-warehouse-wg-prod. Workgroup id confirmed live 2026-10.
+  default = "arn:aws:redshift-serverless:ap-southeast-2:503561421603:workgroup/96c87b2d-6d6d-4003-b919-f5b8d0ee39d0"
 }
 
 # Trust policy: only the CS Platform task role may assume this reader.
