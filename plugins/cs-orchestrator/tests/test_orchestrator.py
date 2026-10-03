@@ -113,6 +113,34 @@ def test_must_use_creates_adoption_intervention():
     assert adoption[0]["due_on"]
 
 
+def test_onboarding_stagnation_fires_a_dedicated_p3_task():
+    """A stalled Rocket Lane onboarding (matched + status stalled) raises a dedicated P3
+    MUST_USE onboarding-stagnation task, separate from the general adoption rule."""
+    account = {
+        "hubspot": {"name": "Stuck Onboarding", "segment": "Scaled", "contacts": []},
+        "usage": {}, "churn": {}, "zendesk": {}, "stripe": {},
+        "onboarding": {"_matched": True, "status": "stalled", "health": "red",
+                       "project_name": "Implementation", "due_date": "2026-01-01",
+                       "archived": False},
+    }
+    tasks, _ = orchestrate.evaluate("au1-ob1", account)
+    stag = [t for t in tasks if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
+    assert stag and stag[0]["priority"] == 3 and stag[0]["mandate"] == "MUST_USE"
+    assert "status=stalled" in stag[0]["evidence"]["reasons"]
+
+
+def test_onboarding_not_matched_or_completed_does_not_fire():
+    """No stagnation task when onboarding is unmatched, or completed/live."""
+    base = {"hubspot": {"name": "X", "segment": "Scaled", "contacts": []},
+            "usage": {}, "churn": {}, "zendesk": {}, "stripe": {}}
+    # Not matched -> no task.
+    t1, _ = orchestrate.evaluate("au1-ob2", {**base, "onboarding": {"_matched": False, "status": "stalled"}})
+    assert not [t for t in t1 if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
+    # Completed -> no task even if past due.
+    t2, _ = orchestrate.evaluate("au1-ob3", {**base, "onboarding": {"_matched": True, "status": "completed", "due_date": "2026-01-01", "archived": False}})
+    assert not [t for t in t2 if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
+
+
 def test_protect_suppresses_duplicate_adoption_and_hygiene_tasks():
     account = {
         "hubspot": {"name": "At Risk Adoption Gap", "segment": "Strategic", "contacts": []},

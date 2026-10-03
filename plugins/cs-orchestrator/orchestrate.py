@@ -66,6 +66,7 @@ RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
 RULE_RENEWAL_CADENCE = "proactive_renewal_cadence"       # P4 MUST_EXPAND (T-120/90/60/30)
 RULE_ADOPTION_INTERVENTION = "adoption_onboarding_intervention"  # P5 MUST_USE
+RULE_ONBOARDING_STAGNATION = "onboarding_stagnation"     # P3 MUST_USE (stalled onboarding)
 RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategic)
 
 # Expected priority per rule_id. The judge uses this instead of prose matching.
@@ -80,6 +81,7 @@ RULE_PRIORITY = {
     RULE_EXPANSION_ADOPTION: 3,
     RULE_RENEWAL_CADENCE: 4,
     RULE_ADOPTION_INTERVENTION: 5,
+    RULE_ONBOARDING_STAGNATION: 3,
     RULE_CONTACT_HYGIENE: 5,
 }
 
@@ -322,6 +324,42 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
              "onboarding_status": onboarding.get("status"),
              "onboarding_health": onboarding.get("health")},
             adoption_action)
+
+    # --- MUST_USE: onboarding stagnation (dedicated alert, Tech-Touch #24) ---
+    # Fires when an onboarding project has clearly stalled: explicit stalled/blocked status,
+    # a red health, or the project is past its due date while still open. Separate from the
+    # adoption rule so a stuck onboarding surfaces as its own P3 task (not folded into
+    # general adoption), for both Strategic and Scaled. Only when onboarding is actually
+    # matched/live (never fabricated).
+    if onboarding.get("_matched") and not onboarding.get("archived"):
+        ob_due = onboarding.get("due_date")
+        past_due_days = None
+        if ob_due:
+            try:
+                past_due_days = -_days_to(ob_due)  # positive = days past due
+            except Exception:  # noqa: BLE001
+                past_due_days = None
+        stalled = (onboarding_status in {"stalled", "blocked", "at_risk", "on_hold"}
+                   or onboarding_health in {"red", "at_risk"}
+                   or (isinstance(past_due_days, (int, float)) and past_due_days > 0
+                       and onboarding_status not in {"completed", "complete", "done", "live"}))
+        if stalled and churn_status != "churned":
+            reasons = []
+            if onboarding_status in {"stalled", "blocked", "at_risk", "on_hold"}:
+                reasons.append(f"status={onboarding.get('status')}")
+            if onboarding_health in {"red", "at_risk"}:
+                reasons.append(f"health={onboarding.get('health')}")
+            if isinstance(past_due_days, (int, float)) and past_due_days > 0:
+                reasons.append(f"{int(past_due_days)}d past due")
+            add(RULE_ONBOARDING_STAGNATION, 3, "MUST_USE", "Onboarding stagnation",
+                {"onboarding_status": onboarding.get("status"),
+                 "onboarding_health": onboarding.get("health"),
+                 "project_name": onboarding.get("project_name"),
+                 "due_date": ob_due, "days_past_due": past_due_days,
+                 "reasons": reasons, "_source": "rocket-lane-live"},
+                "Onboarding has stalled: review the Rocket Lane project blockers, contact the "
+                "Primary Champion / Admin to unblock the next milestone, and escalate to the "
+                "implementation team if it remains stuck.")
 
     # --- MUST_EXPAND: renewal cadence ---
     if hs.get("renewal_date"):
