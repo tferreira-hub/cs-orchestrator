@@ -904,6 +904,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <div class="nav">
         <button data-v="mydash" onclick="go('mydash')" title="Dashboard"><span class="ico">◱</span> <span class="label">Dashboard</span></button>
         <button class="active" data-v="dash" onclick="go('dash')" title="Command Center"><span class="ico">▚</span> <span class="label">Command Center</span></button>
+        <button data-v="rhythm" onclick="go('rhythm')" title="Operating Rhythm"><span class="ico">◴</span> <span class="label">Operating Rhythm</span></button>
       </div>
     </div>
 
@@ -1036,6 +1037,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <section class="view" id="v-lagging"><div id="lagging-body"></div></section>
       <section class="view" id="v-reviews"><div id="reviews-body"></div></section>
       <section class="view" id="v-calendar"><div id="calendar-body"></div></section>
+      <section class="view" id="v-rhythm"><div id="rhythm-body"></div></section>
       <section class="view" id="v-notifications"><div id="notifications-body"></div></section>
       <section class="view" id="v-datamodel"><div id="datamodel-body"></div></section>
       <section class="view" id="v-dataexplorer"><div id="dataexplorer-body"></div></section>
@@ -1123,6 +1125,7 @@ const meta={
   company:['Company','Full customer profile'],
   scaled:['Scaled Customer Success','Pooled and low-touch customers'],
   mydash:['Dashboard','Your personal CS dashboard'],
+  rhythm:['Operating Rhythm','Your week, time-blocked by Ways of Working'],
   leading:['Leading Indicators','Forward-looking portfolio signals'],
   lagging:['Lagging Indicators','Realised retention and revenue outcomes'],
   reviews:['Portfolio Reviews','Structured account review cadence'],
@@ -1902,6 +1905,42 @@ function reviewDispatch(){
   fetch('/api/strategic/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})})
     .then(r=>r.json()).then(d=>{ const s=d.summary||{}; if(st)st.textContent='Dispatched: approved '+(s.approved_dispatched||0)+' · auto-baseline '+(s.auto_baseline||0)+' · held '+(s.held_commented||0)+(s.errors?(' · errors '+s.errors):''); loadMonthlyReview(); })
     .catch(()=>{ if(st)st.textContent='Dispatch failed.'; });
+}
+
+// ===== Operating Rhythm: WoW time-blocked week =====
+function renderOperatingRhythm(){
+  const host=document.getElementById('rhythm-body'); if(!host)return;
+  host.innerHTML='<div class="panel"><div class="head"><h2>Operating Rhythm</h2><span class="note">Your week, time-blocked by the Ways of Working</span></div><div class="body pad" id="rhythm-inner"><span class="muted">Loading…</span></div></div>';
+  fetch('/api/operating-rhythm').then(r=>r.json()).then(d=>_renderRhythm(d)).catch(()=>{
+    const i=document.getElementById('rhythm-inner'); if(i)i.innerHTML='<span class="muted">Operating rhythm unavailable.</span>';
+  });
+}
+function _renderRhythm(d){
+  const i=document.getElementById('rhythm-inner'); if(!i)return;
+  const b=d.blocks||{};
+  const taskRows=(tasks)=>(tasks||[]).slice(0,25).map(t=>
+    '<tr class="click" onclick="openAccount(\''+escapeHtml(t.account_id)+'\')">'+
+      '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">P'+(t.priority||'-')+'</span></td>'+
+      '<td><strong>'+escapeHtml(t.account||t.account_id)+'</strong></td>'+
+      '<td style="color:var(--ink2)">'+escapeHtml(t.trigger||'')+'</td>'+
+      '<td class="muted" style="white-space:nowrap">'+(t.due_on?escapeHtml(String(t.due_on).slice(0,10)):'—')+'</td></tr>').join('');
+  const block=(key)=>{
+    const bl=b[key]; if(!bl)return '';
+    if(key==='monday_review'){
+      const s=bl.summary||{};
+      const worst=(s.worst_health||[]).slice(0,8).map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><span class="hcircle '+hband(a.band)+'">'+a.score+'</span></td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td></tr>').join('');
+      return '<div class="panel"><div class="head"><h2>'+escapeHtml(bl.title)+'</h2><span class="note">'+escapeHtml(bl.cadence)+'</span></div><div class="body pad">'+
+        '<p class="muted" style="margin:0 0 10px">'+escapeHtml(bl.focus)+'</p>'+
+        '<div class="mp-chips" style="margin-bottom:12px"><span class="mp-chip">Open tasks: <strong>'+(s.open_tasks||0)+'</strong></span><span class="mp-chip">P1: <strong>'+(s.p1_count||0)+'</strong></span></div>'+
+        '<div class="muted" style="font-size:.8em;margin-bottom:6px">Worst health this week</div>'+
+        '<table class="acct-list"><tbody>'+(worst||'<tr><td class="muted">No computable health yet.</td></tr>')+'</tbody></table></div></div>';
+    }
+    return '<div class="panel"><div class="head"><h2>'+escapeHtml(bl.title)+' <span class="count">'+(bl.count||0)+'</span></h2><span class="note">'+escapeHtml(bl.cadence)+'</span></div><div class="body">'+
+      '<p class="muted" style="padding:0 16px;margin:10px 0">'+escapeHtml(bl.focus)+'</p>'+
+      '<table class="acct-list"><thead><tr><th>Pri</th><th>Account</th><th>Trigger</th><th>Due</th></tr></thead><tbody>'+
+      (taskRows(bl.tasks)||'<tr><td colspan="4" class="empty" style="padding:18px">Nothing in this block right now.</td></tr>')+'</tbody></table></div></div>';
+  };
+  i.parentElement.innerHTML=block('monday_review')+block('daily_p1_risk')+block('weekly_renewals_expansion')+block('weekly_adoption_qbr');
 }
 
 // ===== Calendar: weekly task/meeting view =====
@@ -3236,6 +3275,7 @@ function render(v){
   if(v==='lagging') renderLagging();
   if(v==='reviews') renderReviews();
   if(v==='calendar') renderCalendar();
+  if(v==='rhythm') renderOperatingRhythm();
   if(v==='notifications') renderNotifications();
   if(v==='datamodel') renderDataModel();
   if(v==='dataexplorer') renderDataExplorer();

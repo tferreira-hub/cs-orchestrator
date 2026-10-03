@@ -1966,3 +1966,27 @@ def test_hubspot_ingest_lifecycle_stages_default_and_configurable(monkeypatch):
     # Whitespace and empty entries are tolerated.
     monkeypatch.setenv("CS_HUBSPOT_LIFECYCLE_STAGES", " customer , onboarding , ")
     assert sources.HubSpot._ingest_lifecycle_stages() == ["customer", "onboarding"]
+
+
+def test_operating_rhythm_groups_tasks_into_wow_blocks(monkeypatch):
+    """operating_rhythm buckets the live queue into the WoW day-blocks by mandate/priority."""
+    import engine
+    monkeypatch.setattr(engine, "portfolio", lambda: {
+        "accounts": [{"account_id": "au1-a", "name": "A",
+                      "health": {"computable": True, "score": 40, "band": "red"}}],
+        "tasks": [
+            {"account_id": "au1-a", "account": "A", "priority": 1, "mandate": "MUST_PROTECT",
+             "rule_id": engine.orchestrate.RULE_PREDICTIVE_RISK, "trigger": "ML risk", "due_on": "2026-10-04"},
+            {"account_id": "au1-a", "account": "A", "priority": 4, "mandate": "MUST_EXPAND",
+             "rule_id": engine.orchestrate.RULE_RENEWAL_CADENCE, "trigger": "T-90", "due_on": "2026-11-01"},
+            {"account_id": "au1-a", "account": "A", "priority": 3, "mandate": "MUST_USE",
+             "rule_id": engine.orchestrate.RULE_ONBOARDING_STAGNATION, "trigger": "Onboarding stalled", "due_on": "2026-10-10"},
+        ],
+    })
+    r = engine.operating_rhythm()
+    b = r["blocks"]
+    assert b["daily_p1_risk"]["count"] == 1
+    assert b["weekly_renewals_expansion"]["count"] == 1
+    assert b["weekly_adoption_qbr"]["count"] == 1
+    assert b["monday_review"]["summary"]["p1_count"] == 1
+    assert b["monday_review"]["summary"]["worst_health"][0]["account_id"] == "au1-a"

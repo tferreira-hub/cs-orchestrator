@@ -1682,6 +1682,70 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
     }
 
 
+# --- Weekly time-blocked operating rhythm (WoW §3, UC2) ----------------------
+# Groups the live prioritised task queue into the WoW operating blocks so a CSM sees the
+# week the way the Ways-of-Working framework prescribes, instead of one flat list:
+#   Monday Analytics & Portfolio Review  — the week's review (worst-health + all open tasks count)
+#   Daily P1 Defensive Risk (Must Protect) — ML churn / usage drop / Sev-1 (priority 1-2 PROTECT)
+#   Weekly Renewals & Expansion (Must Expand) — T-cadence + expansion triggers
+#   Weekly Adoption & QBR (Must Use) — adoption / onboarding
+# Built from engine.portfolio() tasks (rule_id/mandate/priority), owner-scoped already.
+def operating_rhythm() -> dict:
+    p = portfolio()
+    tasks = p.get("tasks", [])
+    blocks = {
+        "monday_review": {"title": "Monday · Analytics & Portfolio Review",
+                          "focus": "Review health shifts, open risk playbooks, and the week's priorities.",
+                          "cadence": "Monday morning", "tasks": []},
+        "daily_p1_risk": {"title": "Daily · Defensive Risk (Must Protect)",
+                          "focus": "ML churn >70%, sudden usage drops, Sev-1 incidents. Acknowledge within the 24h SLA.",
+                          "cadence": "Daily (Priority 1)", "tasks": []},
+        "weekly_renewals_expansion": {"title": "Weekly · Renewals & Expansion (Must Expand)",
+                          "focus": "T-120/90/60/30 renewal cadence and expansion triggers.",
+                          "cadence": "Dedicated weekly blocks", "tasks": []},
+        "weekly_adoption_qbr": {"title": "Weekly · Adoption & QBR (Must Use)",
+                          "focus": "Drive sticky adoption, unblock onboarding, prepare QBRs.",
+                          "cadence": "Dedicated weekly blocks", "tasks": []},
+    }
+    protect_rules = {orchestrate.RULE_PREDICTIVE_RISK, orchestrate.RULE_CHURNED_RECOVERY,
+                     orchestrate.RULE_SCALED_EXCEPTION, orchestrate.RULE_DAY15_PAYMENT,
+                     orchestrate.RULE_OVERDUE_RENEWAL}
+    expand_rules = {orchestrate.RULE_EXPANSION_UTILIZATION, orchestrate.RULE_EXPANSION_API_SURGE,
+                    orchestrate.RULE_EXPANSION_ADOPTION, orchestrate.RULE_RENEWAL_CADENCE}
+    use_rules = {orchestrate.RULE_ADOPTION_INTERVENTION, orchestrate.RULE_ONBOARDING_STAGNATION,
+                 orchestrate.RULE_CONTACT_HYGIENE}
+    for t in tasks:
+        rid = t.get("rule_id")
+        mandate = t.get("mandate")
+        pri = t.get("priority")
+        row = {"account_id": t.get("account_id"), "account": t.get("account"),
+               "priority": pri, "mandate": mandate, "rule_id": rid,
+               "trigger": t.get("trigger"), "due_on": t.get("due_on"), "segment": t.get("segment")}
+        if rid in protect_rules or mandate == "MUST_PROTECT" or pri == 1:
+            blocks["daily_p1_risk"]["tasks"].append(row)
+        elif rid in expand_rules or mandate == "MUST_EXPAND":
+            blocks["weekly_renewals_expansion"]["tasks"].append(row)
+        elif rid in use_rules or mandate == "MUST_USE":
+            blocks["weekly_adoption_qbr"]["tasks"].append(row)
+        else:
+            blocks["weekly_adoption_qbr"]["tasks"].append(row)
+    # Monday review is a summary block (not a 4th copy of tasks): the week at a glance.
+    accts = p.get("accounts", [])
+    worst = sorted((a for a in accts if a.get("health", {}).get("computable")),
+                   key=lambda a: a["health"]["score"])[:10]
+    blocks["monday_review"]["summary"] = {
+        "open_tasks": len(tasks),
+        "p1_count": sum(1 for t in tasks if t.get("priority") == 1),
+        "worst_health": [{"account_id": a["account_id"], "name": a.get("name"),
+                          "score": a["health"]["score"], "band": a["health"]["band"]} for a in worst],
+    }
+    for b in blocks.values():
+        if "tasks" in b:
+            b["tasks"].sort(key=lambda r: (r["priority"] or 9))
+            b["count"] = len(b["tasks"])
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "blocks": blocks}
+
+
 # --- CSM availability / presence feed (Tech-Touch round-robin, WoW §3) -------
 # Real-time Available/OOO status for pooled CSMs. Backed by an in-process store that the
 # platform updates via POST /api/csm/availability (the "Help Desk presence" source the

@@ -851,6 +851,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.monthly_review_queue(period=period)); return
             if path == "/api/daily-brief":
                 self._json(200, engine.daily_brief()); return
+            if path == "/api/operating-rhythm":
+                # Weekly time-blocked operating rhythm (WoW §3): the queue grouped into
+                # Monday review / daily P1 risk / weekly renewals+expansion / weekly adoption.
+                self._json(200, engine.operating_rhythm()); return
             if path == "/api/accounts":
                 self._json(200, engine.portfolio()["accounts"]); return
             if path == "/api/tasks":
