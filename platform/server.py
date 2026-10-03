@@ -845,6 +845,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/csm/availability":
                 # Live pooled CSM presence (Available/OOO) feeding the round-robin.
                 self._json(200, engine.pooled_roster()); return
+            if path == "/api/strategic/review-queue":
+                # Strategic monthly draft/review/approve queue (28th-31st window).
+                period = (query.get("period") or [None])[0]
+                self._json(200, engine.monthly_review_queue(period=period)); return
             if path == "/api/daily-brief":
                 self._json(200, engine.daily_brief()); return
             if path == "/api/accounts":
@@ -1184,6 +1188,49 @@ class Handler(BaseHTTPRequestHandler):
                                                            clear_owner=clear_owner,
                                                            pooled_team=pooled_team,
                                                            apply=apply_write))
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": str(exc)})
+                return
+            if path == "/api/strategic/review-comment":
+                account_id = (body.get("account_id") or "").strip()
+                comment = body.get("comment") or ""
+                period = (body.get("period") or "").strip() or None
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only review accounts you own."}); return
+                try:
+                    record_audit("digest_review_comment", principal,
+                                 {"account_id": account_id, "period": period})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.add_review_comment(account_id, comment, period=period))
+                except (KeyError, ValueError) as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path == "/api/strategic/approve":
+                account_id = (body.get("account_id") or "").strip()
+                period = (body.get("period") or "").strip() or None
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only approve accounts you own."}); return
+                try:
+                    record_audit("digest_approve", principal,
+                                 {"account_id": account_id, "period": period})
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(200, engine.approve_digest(account_id, period=period))
+                return
+            if path == "/api/strategic/dispatch":
+                # 1st-of-month dispatch: send approved, auto-baseline unreviewed. Gated.
+                apply_write = bool(body.get("apply", False))
+                period = (body.get("period") or "").strip() or None
+                try:
+                    record_audit("digest_dispatch", principal, {"apply": apply_write, "period": period})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.dispatch_reviewed_digests(period=period, apply=apply_write))
                 except Exception as exc:  # noqa: BLE001
                     self._json(500, {"error": str(exc)})
                 return

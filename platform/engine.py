@@ -1423,6 +1423,144 @@ def run_monthly_digests(apply: bool = False) -> dict:
         "accounts": rows,
     }
 
+# --- Strategic monthly review / approve window (Tech-Touch §3, UC2) ----------
+# The high-touch monthly rhythm: on/after the 28th the platform pre-populates a DRAFT
+# monthly report per strategic (named) account; 28th-31st the CSM reviews, adds executive
+# comments, and approves; on the 1st approved reports dispatch, and any still-unreviewed
+# auto-send the baseline (edge case: "unreviewed drafts auto-send baseline on the 1st").
+# Review state is keyed by (account_id, period) in an in-process store (survives the month;
+# a durable store can replace it later without changing the workflow).
+_DIGEST_REVIEWS: dict[str, dict] = {}
+
+
+def _review_key(account_id: str, period: str) -> str:
+    return f"{account_id}::{period}"
+
+
+def _is_named_account(a: dict) -> bool:
+    """Strategic/named = not pooled. Mirrors the portfolio pooled/managed split."""
+    hs = (a.get("hubspot") or a) if isinstance(a, dict) else {}
+    seg = hs.get("segment_label") or hs.get("segment")
+    if hs.get("pooled") is not None:
+        return not bool(hs.get("pooled"))
+    return seg not in POOLED_SEGMENTS
+
+
+def monthly_review_queue(period: str | None = None) -> dict:
+    """The strategic monthly-report review queue: a draft digest + review status for every
+    owner-scoped NAMED account. Statuses: draft (pre-populated) | commented | approved.
+    Reusable 28th-31st; owner-scoped (a CSM sees their named book, admin sees all)."""
+    period = period or datetime.now(timezone.utc).strftime("%B %Y")
+    accounts = orchestrate.load_accounts()
+    rows = []
+    counts = {"draft": 0, "commented": 0, "approved": 0}
+    for aid, a in accounts.items():
+        if not can_view_account(aid):
+            continue
+        if not _is_named_account(a):
+            continue
+        try:
+            digest = monthly_digest(aid)
+        except Exception:  # noqa: BLE001
+            continue
+        rv = _DIGEST_REVIEWS.get(_review_key(aid, period))
+        status = (rv or {}).get("status", "draft")
+        counts[status] = counts.get(status, 0) + 1
+        rows.append({
+            "account_id": aid,
+            "name": digest["name"],
+            "period": period,
+            "recipient": digest["recipient"],
+            "missing_primary_admin": digest["missing_primary_admin"],
+            "expansion_cta": digest["expansion_cta"],
+            "metrics": digest["metrics"],
+            "status": status,
+            "comment": (rv or {}).get("comment"),
+            "reviewer": (rv or {}).get("reviewer"),
+            "updated_at": (rv or {}).get("updated_at"),
+        })
+    rows.sort(key=lambda r: (r["status"] != "draft", r["name"] or ""))
+    return {"period": period, "count": len(rows), "status_counts": counts, "accounts": rows}
+
+
+def add_review_comment(account_id: str, comment: str, period: str | None = None) -> dict:
+    """Add/replace the CSM's executive comment on a strategic account's monthly draft.
+    Moves status draft -> commented. Owner-scope enforced at the endpoint."""
+    period = period or datetime.now(timezone.utc).strftime("%B %Y")
+    comment = (comment or "").strip()
+    if not comment:
+        raise ValueError("comment text is required")
+    p = get_principal() or {}
+    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry.update({"status": "commented" if entry.get("status") != "approved" else "approved",
+                  "comment": comment,
+                  "reviewer": p.get("name") or p.get("email"),
+                  "updated_at": datetime.now(timezone.utc).isoformat()})
+    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    return {"account_id": account_id, "period": period, **entry}
+
+
+def approve_digest(account_id: str, period: str | None = None) -> dict:
+    """Approve a strategic account's monthly report for dispatch on the 1st."""
+    period = period or datetime.now(timezone.utc).strftime("%B %Y")
+    p = get_principal() or {}
+    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry.update({"status": "approved",
+                  "reviewer": p.get("name") or p.get("email"),
+                  "approved_at": datetime.now(timezone.utc).isoformat(),
+                  "updated_at": datetime.now(timezone.utc).isoformat()})
+    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    return {"account_id": account_id, "period": period, **entry}
+
+
+def dispatch_reviewed_digests(period: str | None = None, apply: bool = False) -> dict:
+    """The 1st-of-month dispatch for strategic accounts: send APPROVED reports, and
+    auto-send the BASELINE for any still-unreviewed (draft) account so the monthly cadence
+    is never missed (spec edge case). Commented-but-not-approved are held (the CSM intended
+    to finish). Honest + gated: all honesty gates in send_digest are preserved. Returns a
+    summary. Owner-scoped."""
+    period = period or datetime.now(timezone.utc).strftime("%B %Y")
+    q = monthly_review_queue(period)
+    sent = baseline = held = errors = 0
+    rows = []
+    for acc in q["accounts"]:
+        aid = acc["account_id"]
+        status = acc["status"]
+        if status == "commented":
+            held += 1
+            rows.append({"account_id": aid, "name": acc["name"], "action": "held",
+                         "note": "Commented but not approved; not dispatched."})
+            continue
+        # approved -> dispatch; draft -> auto baseline.
+        try:
+            res = send_digest(aid, apply=apply)
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            rows.append({"account_id": aid, "name": acc["name"], "action": "error", "error": str(exc)})
+            continue
+        mode = (res.get("result") or {}).get("mode")
+        did_send = mode == "applied"
+        if status == "approved":
+            sent += 1 if did_send else 0
+        else:
+            baseline += 1 if did_send else 0
+        rows.append({"account_id": aid, "name": acc["name"],
+                     "action": "approved-dispatch" if status == "approved" else "auto-baseline",
+                     "mode": mode})
+    return {
+        "period": period,
+        "apply_requested": bool(apply),
+        "summary": {
+            "named_accounts": q["count"],
+            "approved_dispatched": sent,
+            "auto_baseline": baseline,
+            "held_commented": held,
+            "errors": errors,
+        },
+        "accounts": rows,
+    }
+
+
 
 def create_csql(account_id: str, name: str, amount_usd=None, note: str | None = None,
                 apply: bool = False) -> dict:

@@ -1848,6 +1848,60 @@ function renderReviews(){
   host.innerHTML='<div class="panel"><div class="head"><h2>Portfolio Reviews</h2><span class="note">Structured review cadence · worst health first</span></div>'+_mdFilterBar(accts.length+' companies')+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Renewal (in days)</th><th>Review Status</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
   _enrichAndRerender(accts);
+  loadMonthlyReview();
+}
+// Strategic monthly review window (28th-31st): draft -> comment -> approve; dispatch on the 1st.
+function loadMonthlyReview(){
+  const host=document.getElementById('reviews-body'); if(!host)return;
+  let box=document.getElementById('monthly-review-panel');
+  if(!box){ box=document.createElement('div'); box.id='monthly-review-panel'; box.className='panel'; box.style.marginBottom='16px'; host.insertBefore(box,host.firstChild); }
+  box.innerHTML='<div class="head"><h2>Monthly report review window</h2><span class="note">Strategic accounts · 28th–31st draft → comment → approve</span></div><div class="body pad" id="monthly-review-body"><span class="muted">Loading…</span></div>';
+  fetch('/api/strategic/review-queue').then(r=>r.json()).then(d=>_renderMonthlyReview(d)).catch(()=>{
+    const b=document.getElementById('monthly-review-body'); if(b)b.innerHTML='<span class="muted">Review queue unavailable.</span>';
+  });
+}
+function _renderMonthlyReview(d){
+  const b=document.getElementById('monthly-review-body'); if(!b)return;
+  const sc=d.status_counts||{};
+  if(!d.count){ b.innerHTML='<span class="muted">No strategic (named) accounts in your book for '+escapeHtml(d.period||'')+'.</span>'; return; }
+  const statusPill=s=>'<span class="pill '+(s==='approved'?'pln':'')+'" style="background:var(--surface);border:1px solid var(--line);padding:3px 9px;border-radius:12px">'+s+'</span>';
+  const rows=(d.accounts||[]).map(a=>
+    '<tr><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong>'+(a.missing_primary_admin?' <span class="mp-tag">no admin</span>':'')+'</td>'+
+    '<td class="mono" style="text-align:right">'+(a.metrics&&a.metrics.licence_utilization_pct!=null?a.metrics.licence_utilization_pct+'%':'—')+'</td>'+
+    '<td>'+statusPill(a.status)+'</td>'+
+    '<td style="color:var(--ink2);max-width:260px">'+(a.comment?escapeHtml(a.comment):'<span class="muted">—</span>')+'</td>'+
+    '<td style="text-align:right;white-space:nowrap">'+
+      '<button class="btn btn-ghost" style="padding:4px 9px" onclick="reviewComment(\''+escapeHtml(a.account_id)+'\')">Comment</button> '+
+      '<button class="btn" style="padding:4px 9px"'+(a.status==='approved'?' disabled':'')+' onclick="reviewApprove(\''+escapeHtml(a.account_id)+'\')">Approve</button>'+
+    '</td></tr>').join('');
+  b.innerHTML=
+    '<div class="mp-chips" style="margin-bottom:12px">'+
+      '<span class="mp-chip">Period: <strong>'+escapeHtml(d.period||'')+'</strong></span>'+
+      '<span class="mp-chip">Draft: <strong>'+(sc.draft||0)+'</strong></span>'+
+      '<span class="mp-chip">Commented: <strong>'+(sc.commented||0)+'</strong></span>'+
+      '<span class="mp-chip">Approved: <strong>'+(sc.approved||0)+'</strong></span>'+
+    '</div>'+
+    '<div class="mp-list"><div class="mp-scroll"><table><thead><tr><th>Account</th><th style="text-align:right">Util</th><th>Status</th><th>Exec comment</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
+    '<div class="mp-actions" style="margin-top:12px"><button class="btn" onclick="reviewDispatch()">Dispatch now (approved + auto-baseline)</button><span id="monthly-review-status" class="muted" style="margin-left:10px"></span></div>'+
+    '<p class="muted" style="margin-top:8px;font-size:.8em">On the 1st, approved reports dispatch and any still-draft accounts auto-send the baseline. Commented-but-not-approved are held.</p>';
+}
+function reviewComment(aid){
+  const c=prompt('Executive comment / strategic note for this account’s monthly report:');
+  if(!c)return;
+  fetch('/api/strategic/review-comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:aid,comment:c})})
+    .then(()=>loadMonthlyReview());
+}
+function reviewApprove(aid){
+  fetch('/api/strategic/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:aid})})
+    .then(()=>loadMonthlyReview());
+}
+function reviewDispatch(){
+  const st=document.getElementById('monthly-review-status');
+  if(!confirm('Dispatch the monthly reports now? Approved accounts send; still-draft accounts auto-send the baseline; commented-but-unapproved are held.')) return;
+  if(st)st.textContent='Dispatching…';
+  fetch('/api/strategic/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})})
+    .then(r=>r.json()).then(d=>{ const s=d.summary||{}; if(st)st.textContent='Dispatched: approved '+(s.approved_dispatched||0)+' · auto-baseline '+(s.auto_baseline||0)+' · held '+(s.held_commented||0)+(s.errors?(' · errors '+s.errors):''); loadMonthlyReview(); })
+    .catch(()=>{ if(st)st.textContent='Dispatch failed.'; });
 }
 
 // ===== Calendar: weekly task/meeting view =====

@@ -689,6 +689,71 @@ def test_run_monthly_digests_batch_summary_is_honest(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
+def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
+    """The strategic review window: named accounts get drafts; comment -> commented;
+    approve -> approved; dispatch sends approved + auto-baselines unreviewed, holds commented."""
+    import engine, dataaccess
+    named = {"hubspot": {"name": "NamedCo", "segment_label": "Enterprise", "arr_usd": 90000,
+                         "csm_owner": "C", "pooled": False,
+                         "contacts": [{"role": "Primary Champion / Admin", "email": "a@co.com", "name": "Ada"}]},
+             "usage": {"license_utilization_pct": 60}, "zendesk": {},
+             "sources": {"hubspot": "live", "usage": "live"},
+             "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    pooled = {"hubspot": {"name": "SmallCo", "segment_label": "Agency 1-2 Users", "pooled": True,
+                          "arr_usd": 2000, "csm_owner": "C", "contacts": []},
+              "usage": {}, "zendesk": {}, "sources": {"hubspot": "live"},
+              "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    book = {"au1-named": named, "au1-pooled": pooled}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: book)
+    engine._DIGEST_REVIEWS.clear()
+    try:
+        q = engine.monthly_review_queue(period="October 2026")
+        # Only the NAMED account is in the strategic review queue.
+        assert q["count"] == 1 and q["accounts"][0]["account_id"] == "au1-named"
+        assert q["accounts"][0]["status"] == "draft"
+
+        engine.add_review_comment("au1-named", "Exec sponsor aligned on expansion.", period="October 2026")
+        assert engine.monthly_review_queue(period="October 2026")["status_counts"]["commented"] == 1
+
+        # Dispatch while only commented -> held (not sent).
+        d1 = engine.dispatch_reviewed_digests(period="October 2026", apply=True)
+        assert d1["summary"]["held_commented"] == 1 and d1["summary"]["approved_dispatched"] == 0
+
+        # Approve -> dispatch attempts send (dry-run/no-provider still 'not applied', but it is
+        # routed as approved-dispatch, not held).
+        engine.approve_digest("au1-named", period="October 2026")
+        d2 = engine.dispatch_reviewed_digests(period="October 2026", apply=True)
+        actions = {r["account_id"]: r["action"] for r in d2["accounts"]}
+        assert actions["au1-named"] == "approved-dispatch"
+    finally:
+        engine._DIGEST_REVIEWS.clear()
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
+def test_dispatch_auto_baselines_unreviewed(monkeypatch):
+    """Unreviewed (draft) named accounts auto-baseline on dispatch (spec edge case)."""
+    import engine, dataaccess
+    named = {"hubspot": {"name": "NamedCo", "segment_label": "Enterprise", "arr_usd": 90000,
+                         "csm_owner": "C", "pooled": False,
+                         "contacts": [{"role": "Primary Champion / Admin", "email": "a@co.com", "name": "Ada"}]},
+             "usage": {"license_utilization_pct": 60}, "zendesk": {},
+             "sources": {"hubspot": "live", "usage": "live"},
+             "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    book = {"au1-named": named}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: book)
+    engine._DIGEST_REVIEWS.clear()
+    try:
+        d = engine.dispatch_reviewed_digests(period="October 2026", apply=True)
+        assert d["accounts"][0]["action"] == "auto-baseline"
+    finally:
+        engine._DIGEST_REVIEWS.clear()
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+
+
 def test_hubspot_transactional_send_is_two_gated_and_template_aware(monkeypatch):
     """The HubSpot transactional seam never sends without the two gates and a configured
     template: writes off -> dry-run; writes on but no template -> template-not-configured."""
