@@ -1104,10 +1104,18 @@ def run(question: str, account_id: str | None = None,
         # Greetings, identity and other social/non-portfolio messages are answered
         # conversationally and must not require the task queue.
         ql_s = q_low.strip()
-        social = (len(ql_s) <= 40 and any(t in ql_s for t in
-                  ("hi", "hello", "hey", "thanks", "thank", "who are you", "what are you",
-                   "how are you", "your name", "good morning", "good afternoon",
-                   "good evening", "help", "ok", "cool", "great", "nice"))) or not accounts
+        # Social detection must use WORD-BOUNDARY matching, not substring: a bare
+        # "hi"/"ok"/"nice" in a longer word ("which", "broken", "service") must NOT
+        # mark a substantive question as social and skip numeric grounding. Single
+        # tokens are matched on word boundaries; multi-word phrases as substrings.
+        _social_tokens = {"hi", "hello", "hey", "thanks", "thank", "help",
+                          "ok", "okay", "cool", "great", "nice", "yo", "sup"}
+        _social_phrases = ("who are you", "what are you", "how are you", "your name",
+                           "good morning", "good afternoon", "good evening")
+        _words = set(re.findall(r"[a-z']+", ql_s))
+        social = (len(ql_s) <= 40 and (
+            bool(_words & _social_tokens) or any(p in ql_s for p in _social_phrases)
+        )) or not accounts
         if social:
             account_focus = True
             # A greeting is not a request for the whole book. Tell Jane to answer like a

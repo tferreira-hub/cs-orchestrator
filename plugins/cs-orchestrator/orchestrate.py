@@ -31,7 +31,22 @@ FIXTURES = os.environ.get(
     "CS_FIXTURES",
     str(Path(__file__).resolve().parent / "mcp-servers" / "fixtures" / "accounts.json"),
 )
-TODAY = date.fromisoformat(os.environ.get("CS_TODAY", "2026-09-23"))
+def _today() -> date:
+    """The platform's business date, resolved PER CALL (never frozen at import).
+
+    Reads CS_TODAY (the demo/business-date anchor) when set, otherwise the real
+    current date. This mirrors engine.py's date handling exactly, so the rules
+    engine and the platform's renewal forecast always agree on "today" — a module
+    constant resolved at import time would freeze the date for the life of a
+    long-running server and, with CS_TODAY unset, silently use a stale default.
+    """
+    today_env = os.environ.get("CS_TODAY")
+    if today_env:
+        try:
+            return date.fromisoformat(today_env)
+        except ValueError:
+            pass
+    return date.today()
 
 CHURN_RISK = 0.70
 CHURN_SCALED_EXCEPTION = 0.85
@@ -125,7 +140,7 @@ def load_accounts() -> dict:
 
 
 def _days_to(d: str) -> int:
-    return (date.fromisoformat(d) - TODAY).days
+    return (date.fromisoformat(d) - _today()).days
 
 
 def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
@@ -135,6 +150,9 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     arr = hs.get("arr_usd", 0)
     name = hs.get("name", account_id)
     primary_ids = primary_instance_ids(hs)
+    # Resolve the business date ONCE per evaluation so every task created in this call
+    # shares one consistent created_on/due_on (and matches _days_to()'s view of today).
+    today = _today()
 
     tasks: list[dict] = []
 
@@ -144,9 +162,9 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
              "mandate": mandate, "rule_id": rule_id, "trigger": trigger, "evidence": evidence,
              "recommended_action": action,
              "task_id": hashlib.sha256(f"{account_id}:{trigger}".encode()).hexdigest()[:16],
-             "created_on": TODAY.isoformat(),
+             "created_on": today.isoformat(),
              "sla_hours": sla_hours,
-             "due_on": (TODAY + timedelta(hours=sla_hours)).isoformat() if sla_hours else None}
+             "due_on": (today + timedelta(hours=sla_hours)).isoformat() if sla_hours else None}
         if draft:
             t["draft_message"] = draft
         tasks.append(t)
@@ -311,11 +329,12 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         adoption_drivers.append(f"onboarding_{onboarding_status or onboarding_health}")
     # Protect is the owning intervention when the same inactivity signal is also
     # driving churn risk. Keep the queue actionable instead of duplicating work.
+    # This block is Strategic-only (guarded below), so the task is always P5 with the
+    # Strategic adoption action — no Scaled branch is reachable here.
     if adoption_drivers and segment == "Strategic" and not risk_fired and stage != "day_15_plus":
-        adoption_priority = 5 if segment == "Strategic" else 6
+        adoption_priority = 5
         adoption_action = ("Initiate the adoption playbook: review activation blockers, contact the Primary Champion / Admin, "
-                           "and schedule a value check-in." if segment == "Strategic" else
-                           "Route to the automated adoption program and escalate only if the exception persists.")
+                           "and schedule a value check-in.")
         add(RULE_ADOPTION_INTERVENTION, adoption_priority, "MUST_USE", "Adoption / onboarding intervention",
             {"drivers": adoption_drivers,
              "days_since_last_visit": days_since_visit,

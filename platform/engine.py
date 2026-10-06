@@ -5,6 +5,39 @@ Wraps the WoW orchestration (orchestrate.py) and adds the account **health score
 and portfolio roll-up the single-pane-of-glass UI needs. Kept dependency-free and
 importable so both the API and the CLI/agent use the same logic (single source of
 truth, WoW §1).
+
+Module map
+----------
+This is a large single module BY DESIGN: the server, CLI, and agent all import it
+as one `engine` namespace, and the test suite patches many of its internals by that
+name (e.g. engine._src, engine._scoped_accounts, engine._INBOUND_QUEUE). Splitting it
+into packages would break those import/patch call-sites for no behavioural gain, so it
+stays one file. Use this map to navigate it:
+
+  1. Identity scoping & RBAC         set/get_principal, _scoped_accounts, can_view_account,
+                                     can_write_account, required_roles_missing, ForbiddenError
+  2. Live-only data projection       _is_live, _live_block, _live_account, _connected
+  3. Scoring (deterministic)         health_score, renewal_forecast, adoption_score,
+                                     expansion_score, _roster_band
+  4. Portfolio / roster / detail     portfolio, full_roster, executive_summary,
+                                     account_detail, enrich_rows, daily_brief, why_not,
+                                     trend_risks, _health_* trajectory helpers
+  5. Write actions (two-gated)       writeback, enrol_sequence, log_note, tag_contact_role,
+                                     monthly_digest/send_digest/run_monthly_digests,
+                                     create_csql, move_to_pooled, dispatch_reviewed_digests
+  6. Zendesk ticket writes           _ticket_account_ref, _authorise_ticket_write,
+                                     zendesk_reply, zendesk_set_status
+  7. Inbound / pooled / presence     record_inbound, inbound_queue, resolve_inbound,
+                                     pooled_roster/cohort, set_csm_availability, _presence_for
+  8. Strategic monthly review        monthly_review_queue, add_review_comment, approve_digest
+  9. KPIs / retention / capacity     kpis, _retention_metrics, _task_metrics, _capacity_per_csm
+ 10. Lifecycle / integrations / gaps lifecycle(_state), integrations, datagaps,
+                                     revenue_motion, expansion_opportunities, payment_risk_report
+
+Shared module state (why this is one module): the request-scoped principal
+(_REQUEST thread-local), the in-process inbound queue (_INBOUND_QUEUE) and CSM
+presence (_CSM_PRESENCE), and the import-time installation of _scoped_accounts as
+orchestrate's account provider.
 """
 
 from __future__ import annotations
@@ -627,6 +660,100 @@ def executive_summary() -> dict:
         "booked_upsell_count": (rc.get("upsell_count") if rc.get("upsell_computable") else None),
         "booked_upsell_arr_usd": (rc.get("upsell_arr_usd") if rc.get("upsell_computable") else None),
         "by_segment": rm.get("by_segment", []),
+    }
+
+
+def _primary_risk_driver(la: dict) -> tuple[str, str]:
+    """Classify an at-risk account's PRIMARY churn driver into one of the matrix buckets
+    the spec names (usage drop, ticket spike, billing issue), plus the other live risk
+    signals the engine actually fires on. Returns (driver_key, human_label).
+
+    Precedence reflects severity/actionability: an open Sev-1 or a ticket-spike+usage-drop
+    multi-signal outranks a slow-burn usage decline, which outranks a billing issue, which
+    outranks a generic high ML score with no single dominant signal. Deterministic and
+    grounded only in live signals present on the account.
+    """
+    usage = la.get("usage", {}) or {}
+    zd = la.get("zendesk", {}) or {}
+    stripe = la.get("stripe", {}) or {}
+
+    logins_now = usage.get("logins_last_7d") or 0
+    logins_prev = usage.get("logins_prev_7d") or 0
+    usage_drop = logins_prev > 0 and logins_now <= orchestrate.USAGE_DROP * logins_prev
+    last7 = zd.get("tickets_last_7d") or 0
+    prev7 = zd.get("tickets_prev_7d") or 0
+    ticket_spike = prev7 > 0 and last7 >= 2 * prev7
+    sev1 = (zd.get("sev1_open") or 0) > 0
+    pendo_high = str(usage.get("pendo_risk_score") or "").lower() == "high"
+    dsv = usage.get("days_since_last_visit")
+    long_dormant = isinstance(dsv, (int, float)) and dsv >= 180
+    billing = stripe.get("dunning_stage") in {"day_1_14", "day_15_plus"} or (stripe.get("past_due_invoices") or 0) > 0
+
+    if sev1:
+        return "sev1", "Critical support incident (Sev-1)"
+    if ticket_spike and usage_drop:
+        return "ticket_spike", "Ticket spike + usage drop"
+    if ticket_spike:
+        return "ticket_spike", "Support ticket spike"
+    if usage_drop or long_dormant:
+        return "usage_drop", "Usage drop / product disengagement"
+    if billing:
+        return "billing", "Billing / payment issue"
+    if pendo_high:
+        return "product_risk", "Pendo risk advisor: High"
+    return "ml_score", "High ML churn score (no single dominant signal)"
+
+
+def churn_risk_matrix(threshold: float | None = None) -> dict:
+    """ML Churn Risk Matrix (UC3): the cohort of accounts at or above the ML churn
+    threshold (default 70%), grouped by PRIMARY risk driver with the total ARR impact and
+    account list per driver. Scoped to the caller (admins all, CSM own book).
+
+    Only genuine ML churn scores count toward the cohort — a computed (signals-based)
+    fallback score is never treated as the ML >70% threshold (same guard as the P1 rule),
+    so the matrix cannot over-report. Each account's ARR is the 'impact' it contributes.
+    """
+    threshold = orchestrate.CHURN_RISK if threshold is None else threshold
+    accounts = orchestrate.load_accounts()
+    buckets: dict[str, dict] = {}
+    cohort_arr = 0
+    cohort_count = 0
+    for aid, a in accounts.items():
+        la = _live_account(a)
+        churn = la.get("churn", {}) or {}
+        score = churn.get("ml_churn_score")
+        is_ml = churn.get("ml_churn_score") is not None and not churn.get("computed")
+        churned = str(churn.get("churn_status") or "").lower() == "churned"
+        # Cohort = genuine ML score >= threshold (never the computed fallback), OR an
+        # explicitly churned account (ARR already lost, still a driver to attribute).
+        if not ((is_ml and isinstance(score, (int, float)) and score >= threshold) or churned):
+            continue
+        hs = la.get("hubspot", {}) or {}
+        arr = hs.get("arr_usd") if isinstance(hs.get("arr_usd"), (int, float)) else 0
+        driver_key, driver_label = ("churned", "Churned account") if churned else _primary_risk_driver(la)
+        b = buckets.setdefault(driver_key, {"driver": driver_key, "label": driver_label,
+                                            "accounts": 0, "arr_usd": 0, "members": []})
+        b["accounts"] += 1
+        b["arr_usd"] += arr
+        b["members"].append({
+            "account_id": aid, "name": hs.get("name") or aid,
+            "segment": hs.get("segment_label") or hs.get("segment") or "Unsegmented",
+            "owner": hs.get("csm_owner") or "Unassigned",
+            "arr_usd": arr,
+            "ml_churn_score": score if is_ml else None,
+            "churned": churned,
+        })
+        cohort_arr += arr
+        cohort_count += 1
+    for b in buckets.values():
+        b["members"].sort(key=lambda m: -(m["arr_usd"] or 0))
+    return {
+        "threshold_pct": int(threshold * 100),
+        "cohort_accounts": cohort_count,
+        "cohort_arr_usd": cohort_arr,
+        "by_driver": sorted(buckets.values(), key=lambda x: -x["arr_usd"]),
+        "note": "Accounts at or above the ML churn threshold (genuine ML scores only; "
+                "computed fallback excluded), grouped by primary risk driver with ARR impact.",
     }
 
 
@@ -1274,6 +1401,9 @@ def monthly_digest(account_id: str) -> dict:
     contacts = hs.get("contacts", []) or []
     admin = next((c for c in contacts
                   if c.get("role") == "Primary Champion / Admin" and c.get("email")), None)
+    # The spec's 1st-of-month dispatch goes to the Primary Admin AND the Executive Sponsor.
+    exec_sponsor = next((c for c in contacts
+                         if c.get("role") == "Executive Sponsor" and c.get("email")), None)
 
     metrics_block = {
         "licence_utilization_pct": util,
@@ -1284,12 +1414,28 @@ def monthly_digest(account_id: str) -> dict:
         "csat_30d": zd.get("csat_30d"),
     }
     expansion_cta = isinstance(util, (int, float)) and util >= 85
+    # Combined, de-duplicated recipient list (Primary Admin + Executive Sponsor), each
+    # with the role it was reached by so the dispatch log is auditable.
+    recipients = []
+    seen_emails = set()
+    for contact, role in ((admin, "Primary Champion / Admin"), (exec_sponsor, "Executive Sponsor")):
+        email = (contact or {}).get("email")
+        if email and email.lower() not in seen_emails:
+            seen_emails.add(email.lower())
+            recipients.append({"email": email, "name": contact.get("name"), "role": role})
     return {
         "account_id": account_id,
         "name": hs.get("name") or account_id,
+        # Primary recipient kept for backward compatibility (Primary Admin).
         "recipient": (admin or {}).get("email"),
         "recipient_name": (admin or {}).get("name"),
+        # Executive Sponsor as a named second recipient (spec: dispatch to both).
+        "exec_sponsor": (exec_sponsor or {}).get("email"),
+        "exec_sponsor_name": (exec_sponsor or {}).get("name"),
+        # Full de-duplicated recipient set the send iterates over.
+        "recipients": recipients,
         "missing_primary_admin": admin is None,  # -> data-cleanup task (spec edge case)
+        "missing_exec_sponsor": exec_sponsor is None,
         "metrics": metrics_block,
         "expansion_cta": expansion_cta,  # inline 'Add Seats / Upgrade' when utilisation >= 85%
         "period": datetime.now(timezone.utc).strftime("%B %Y"),
@@ -1297,11 +1443,14 @@ def monthly_digest(account_id: str) -> dict:
 
 
 def send_digest(account_id: str, apply: bool = False) -> dict:
-    """Send the monthly digest to the account's Primary Admin. Two-gate (apply +
-    CS_ALLOW_WRITE), dry-run by default. Customer-facing send, so even with both gates it
-    only sends when an outbound email capability is connected (CS_EMAIL_PROVIDER); otherwise
-    it honestly reports 'prepared, no email provider connected' — never a fake send. When no
-    Primary Admin is tagged it refuses and flags the data-cleanup need."""
+    """Send the monthly digest to the account's Primary Admin AND Executive Sponsor, and
+    log a copy to the HubSpot record timeline (spec UC2: 1st-of-month dispatch to both,
+    copy on the timeline). Two-gate (apply + CS_ALLOW_WRITE), dry-run by default.
+    Customer-facing send, so even with both gates it only sends when an outbound email
+    capability is connected (CS_EMAIL_PROVIDER); otherwise it honestly reports 'prepared,
+    no email provider connected' — never a fake send. When no Primary Admin is tagged it
+    refuses and flags the data-cleanup need. The timeline copy is logged only after a
+    successful send and never fails the send if the note-log itself fails."""
     digest = monthly_digest(account_id)
     if digest["missing_primary_admin"]:
         result = {"sent": False, "mode": "no-recipient",
@@ -1332,13 +1481,49 @@ def send_digest(account_id: str, apply: bool = False) -> dict:
                 "expansion_cta": "yes" if digest["expansion_cta"] else "no",
                 "recipient_name": digest.get("recipient_name"),
             }
-            send = _src.HUBSPOT.send_transactional_email(
-                digest["recipient"],
-                subject=f"{digest['name']} - your {digest['period']} JobAdder summary",
-                custom_properties=tokens, apply=True)
-            result = {"sent": bool(send.get("sent")), "mode": send.get("mode"),
-                      "recipient": digest["recipient"], "provider": provider,
-                      "note": send.get("note"), "send_result": send.get("send_result")}
+            # Dispatch to EVERY resolved recipient (Primary Admin AND Executive Sponsor,
+            # per the spec), surfacing each send's honest result. Falls back to the single
+            # primary recipient if the recipients list is somehow empty.
+            recipient_list = digest.get("recipients") or (
+                [{"email": digest["recipient"], "name": digest.get("recipient_name"),
+                  "role": "Primary Champion / Admin"}] if digest.get("recipient") else [])
+            sends = []
+            for r in recipient_list:
+                send = _src.HUBSPOT.send_transactional_email(
+                    r["email"],
+                    subject=f"{digest['name']} - your {digest['period']} JobAdder summary",
+                    custom_properties={**tokens, "recipient_name": r.get("name")}, apply=True)
+                sends.append({"email": r["email"], "role": r.get("role"),
+                              "sent": bool(send.get("sent")), "mode": send.get("mode"),
+                              "note": send.get("note"), "send_result": send.get("send_result")})
+            all_sent = bool(sends) and all(s["sent"] for s in sends)
+            # Log a copy to the HubSpot record timeline (spec: "a copy logged to the HubSpot
+            # record timeline"). Non-fatal: a timeline-log failure never fails the send.
+            timeline = {"logged": False, "mode": "not-attempted"}
+            if all_sent:
+                try:
+                    recips = ", ".join(f"{s['role']} <{s['email']}>" for s in sends)
+                    note = (f"Monthly performance report ({digest['period']}) dispatched to {recips}. "
+                            f"Licence utilisation {digest['metrics'].get('licence_utilization_pct')}%, "
+                            f"CSAT {digest['metrics'].get('csat_30d')}, "
+                            f"expansion CTA {'included' if digest['expansion_cta'] else 'not included'}.")
+                    tl = _src.HUBSPOT.log_note(account_id, note, apply=True)
+                    timeline = {"logged": bool(tl.get("logged")), "mode": tl.get("mode"),
+                                "note_preview": note[:160]}
+                except Exception as exc:  # noqa: BLE001
+                    timeline = {"logged": False, "mode": "log-failed", "error": f"{type(exc).__name__}: {exc}"}
+            # `mode` mirrors the provider's own send mode for the primary recipient
+            # (back-compat: callers/tests read 'applied'); 'recipients' carries the full
+            # per-recipient detail for the Admin + Exec Sponsor dispatch.
+            primary_mode = sends[0]["mode"] if sends else "no-recipient"
+            result = {"sent": all_sent,
+                      "mode": primary_mode if all_sent else "partial-or-failed",
+                      "recipient": digest["recipient"],      # primary (back-compat)
+                      "recipients": sends,                    # per-recipient results (Admin + Exec Sponsor)
+                      "provider": provider,
+                      "timeline_logged": timeline,
+                      "note": f"Dispatched to {len(sends)} recipient(s): "
+                              + ", ".join(s["role"] for s in sends) + "."}
         else:
             # Provider named but not usable (unknown provider, or HubSpot not live).
             result = {"sent": False, "mode": "provider-unavailable",
@@ -1874,9 +2059,41 @@ def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
 
 
 
+def _ticket_account_ref(ticket_id: str) -> str | None:
+    """Resolve the account a Zendesk ticket belongs to, via the inbound queue row the
+    pooled team works from. Returns the normalised account id/ref, or None when the
+    ticket is not in the queue (no known account linkage)."""
+    row = _INBOUND_QUEUE.get(ticket_id) or {}
+    ref = row.get("account_ref")
+    return str(ref).strip() if ref else None
+
+
+def _authorise_ticket_write(ticket_id: str, action: str) -> None:
+    """Owner-scope a Zendesk write to the account the ticket belongs to.
+
+    Admins (or open/legacy mode with no principal) may act on any ticket. A scoped CSM
+    may only reply to / close tickets on accounts they own. A ticket with no resolvable
+    account (not in the inbound queue) is denied for a scoped CSM — fail closed — so a
+    CSM cannot act on an arbitrary ticket_id outside their book. Raises ForbiddenError
+    (-> 403) when not permitted.
+    """
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return
+    account_ref = _ticket_account_ref(ticket_id)
+    if account_ref and can_write_account(account_ref):
+        return
+    raise ForbiddenError(
+        f"You can only {action} tickets on accounts you own"
+        + ("" if account_ref else " (this ticket is not linked to an account in your queue)")
+    )
+
+
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
-    dry-run by default. Resolving inbound in-platform (increment 3)."""
+    dry-run by default. Owner-scoped: a CSM may only reply to tickets on accounts they
+    own (admins any). Resolving inbound in-platform (increment 3)."""
+    _authorise_ticket_write(ticket_id, "reply to")
     if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
         result = {"replied": False, "mode": "not-connected"}
     else:
@@ -1894,7 +2111,9 @@ def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = 
 def zendesk_set_status(ticket_id: str, status: str = "solved", comment: str | None = None,
                        apply: bool = False) -> dict:
     """Set a Zendesk ticket's status (close = 'solved') from the inbound queue. Two-gate;
-    dry-run by default; reversible (solved can be reopened)."""
+    dry-run by default; reversible (solved can be reopened). Owner-scoped: a CSM may only
+    change the status of tickets on accounts they own (admins any)."""
+    _authorise_ticket_write(ticket_id, "change the status of")
     if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
         result = {"updated": False, "mode": "not-connected"}
     else:
@@ -1916,17 +2135,28 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     from real churn: (base_arr - churned_arr) / base_arr, capped at 100% (no upside
     counted). It tracks the CS brief's GRR >= 92% goal.
 
-    We deliberately DO NOT publish an NDR percentage here. True NDR requires *booked*
-    expansion/contraction revenue, which this platform does not yet have. Reporting an
-    NDR inflated by unrealised opportunity would be misleading for a board-level metric.
-    Instead we surface the expansion PIPELINE separately: the ARR of healthy accounts
-    carrying an active expansion trigger (license utilization / API surge / strong
-    adoption). This is opportunity, not retention — labelled as such.
+    NDR (Net Revenue Retention) is REALISED net revenue retention computed from the
+    warehouse monthly ARR series (`rpt_account_ndr_monthly`): dollar-weighted
+    current-period revenue (`mrr_usd`) over the same accounts' prior-year revenue
+    (`revenue_prev_year_usd`). This captures expansion, contraction, and churn on the
+    existing base — the board metric — NOT unrealised pipeline. Only accounts that have
+    BOTH a current and a prior figure contribute, so the number is never inflated by
+    opportunity. `ndr_pct` is an honest None (and `ndr_computable` False) when the
+    warehouse has no prior-period revenue for any in-scope account, so the UI shows
+    "no data" rather than a misleading percentage. It tracks the CS brief's NDR > 100% goal.
+
+    Expansion PIPELINE is reported SEPARATELY from retention (never folded into NDR):
+    the ARR of healthy accounts carrying an active expansion trigger (license
+    utilization / API surge / strong adoption). This is opportunity, not revenue —
+    labelled as such.
 
     Definitions (annualised, book-level):
       base_arr          = sum of live contract ARR across the book
       churned_arr       = ARR of accounts flagged churned (Redshift status or HubSpot
                           lifecycle) — revenue lost
+      grr_pct           = (base_arr - churned_arr) / base_arr, capped at 100%
+      ndr_pct           = sum(current revenue) / sum(prior-year revenue) over accounts
+                          with both figures — realised net retention, or None if none
       expansion_pipeline_arr = ARR of healthy accounts with an active expansion trigger
                           (pipeline/opportunity, NOT booked expansion)
 

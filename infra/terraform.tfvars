@@ -20,10 +20,15 @@ saml_metadata_url = "https://portal.sso.us-east-1.amazonaws.com/saml/metadata/OD
 # Group IDs (UUIDs from Identity Center) govern access + admin. Fill these once the
 # CS-Platform-Admins group ID is known: both grant access, admin set grants admin.
 # CS-Platform-Admins Identity Center group ID. Admins see all accounts; being in this
-# group also passes the access gate. (Add a separate CS-team group to cs_user_group_ids
-# later if scoped-CSM-only access is wanted for non-admins.)
+# group also passes the access gate.
 cs_admin_group_ids = "0438d458-2041-7005-fa47-ba96ef0a5e10"
-cs_user_group_ids  = "0438d458-2041-7005-fa47-ba96ef0a5e10"
+# Scoped-CSM (own-book) access group. MUST be the CS *team* group, NOT the admins group:
+# every member of cs_admin_group_ids already resolves to admin (sees ALL accounts), so
+# pointing this at the same UUID collapses per-CSM scoping and makes everyone an admin.
+# Leave empty until the real CS-team Identity Center group ID is wired; while empty,
+# only admins (and the break-glass email) can enter, which is secure-by-default. To
+# enable scoped CSMs, set this to the CS-team group UUID (NOT the admin UUID above).
+cs_user_group_ids = ""
 # Break-glass retained as a backup during cutover; can be cleared once group access is confirmed.
 auth_admin_emails = "tferreira@jobadder.com"
 
