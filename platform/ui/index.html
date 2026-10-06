@@ -515,16 +515,24 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .cc-big .cc-big-v.warn{color:var(--red)}.cc-big .cc-big-v.good{color:var(--green)}
 .cc-big .cc-big-s{font-size:.75em;color:var(--muted);margin-top:6px}
 .v5-hero{margin-bottom:18px}
-.cc-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;margin-bottom:16px;align-items:start}
+.cc-grid{display:grid;grid-template-columns:1.4fr .6fr;gap:16px;margin-bottom:16px;align-items:start}
 .cc-left{display:flex;flex-direction:column;gap:16px;min-width:0}
-.cc-headline{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.cc-headline{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+/* The 4 Command-Center charts: an even 2x2 grid with EQUAL-HEIGHT cards so bar charts,
+   the month strip and the forecast mix all line up cleanly instead of ragged heights. */
 .cc-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.cc-charts .panel{margin-bottom:0}
-.cc-charts .panel .body.pad{padding:14px 16px 16px}
+/* Full-width charts row: 4 even columns on wide screens, degrading to 2 then 1.
+   margin-bottom spaces it from the meeting-prep table below. */
+.cc-charts-full{grid-template-columns:repeat(4,1fr);margin-bottom:16px}
+@media(max-width:1200px){.cc-charts-full{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:640px){.cc-charts-full{grid-template-columns:1fr}}
+.cc-charts .panel{margin-bottom:0;display:flex;flex-direction:column}
+.cc-charts .panel .body.pad{padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-height:190px}
 .cc-right{min-width:0}
 .cc-right .panel{margin-bottom:0}
-@media(max-width:1050px){.cc-grid{grid-template-columns:1fr}.cc-charts{grid-template-columns:1fr 1fr}}
-@media(max-width:640px){.cc-headline,.cc-charts{grid-template-columns:1fr}}
+@media(max-width:1200px){.cc-grid{grid-template-columns:1fr}}
+@media(max-width:720px){.cc-charts{grid-template-columns:1fr}.cc-headline{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:460px){.cc-headline,.cc-charts{grid-template-columns:1fr}}
 .cc-big{padding:16px 14px}
 .cc-big .cc-big-v{font-size:1.9em;margin-top:6px}
 .cc-dist{display:flex;align-items:flex-end;justify-content:space-around;height:150px;gap:14px;width:100%}
@@ -3267,10 +3275,9 @@ async function renderCommandCenter(){
   const renewalsPanel='<div class="panel"><div class="head"><h2>Upcoming Renewals</h2><span class="note'+(overdueRen.length?' warn':'')+'">'+renNote+'</span></div>'+
     '<div class="body">'+((overdueRen.length||upcomingRen.length)?('<table class="acct-list"><thead><tr><th>Name</th><th>Company</th><th>ARR</th><th>End Date</th><th>AI Forecast ARR</th><th>AI Forecast</th><th>AI Forecast Summary</th></tr></thead><tbody>'+renBody+'</tbody></table>'):'<div class="empty">No accounts carry a renewal date in HubSpot yet. Renewals appear here once a renewal date is set.</div>')+'</div></div>';
   host.innerHTML=
-    '<div class="cc-grid">'+
-      '<div class="cc-left">'+headline+'<div class="cc-charts">'+dist+growth+renByMonth+forecastMix+'</div></div>'+
-      '<div class="cc-right">'+meetingsPanel+'</div>'+
-    '</div>'+
+    headline+
+    '<div class="cc-charts cc-charts-full">'+dist+growth+renByMonth+forecastMix+'</div>'+
+    meetingsPanel+
     renewalsPanel;
   // The Command Center shows ONLY the above. Hide the legacy portfolio blocks that were
   // part of the old dashboard so this tab matches the reference exactly.
