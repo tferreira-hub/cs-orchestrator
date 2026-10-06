@@ -81,19 +81,21 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 /* Planhat "Sections" heading + collapsible section groups with colored icons */
 .side-sections-lbl{font-size:.62em;text-transform:uppercase;letter-spacing:.12em;color:var(--side-ink2);font-weight:700;padding:14px 10px 4px;white-space:nowrap;overflow:hidden}
 .side-top{margin-top:4px;padding-bottom:6px;border-bottom:1px solid var(--side-line)}
-.navsection{margin-top:2px}
-.navsection>.ns-head{display:flex;align-items:center;gap:9px;width:100%;background:transparent;border:0;color:var(--side-ink);padding:7px 10px;border-radius:8px;font:inherit;font-size:.86em;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;transition:background .12s}
+.navsection{margin-top:3px}
+.navsection>.ns-head{display:flex;align-items:center;gap:10px;width:100%;background:transparent;border:0;color:var(--side-ink);padding:8px 10px;border-radius:9px;font:inherit;font-size:.84em;font-weight:650;letter-spacing:.005em;cursor:pointer;white-space:nowrap;overflow:hidden;transition:background .12s,box-shadow .12s}
 .navsection>.ns-head:hover{background:var(--side-hover)}
 .navsection>.ns-head:hover .ns-caret{color:var(--side-ink)}
 /* When a collapsed section contains the active page, mark its header so the user can
    see where they are without expanding every group - standard product-sidebar behaviour. */
 .navsection.has-active>.ns-head{color:var(--side-active-ink);font-weight:700}
 .navsection.has-active>.ns-head .ns-ico{box-shadow:0 0 0 2px var(--side-bg),0 0 0 4px rgba(91,91,240,.35)}
-.navsection>.ns-head .ns-ico{width:20px;height:20px;flex:0 0 20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.72em;color:#fff;font-weight:800}
+.navsection>.ns-head .ns-ico{width:22px;height:22px;flex:0 0 22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.74em;color:#fff;font-weight:800;box-shadow:0 1px 2px rgba(16,24,40,.18);background-image:linear-gradient(160deg,rgba(255,255,255,.22),rgba(255,255,255,0))}
 .navsection>.ns-head .ns-caret{margin-left:auto;color:var(--side-ink2);font-size:.7em;transition:transform .15s;flex:0 0 auto}
 .navsection.collapsed>.ns-head .ns-caret{transform:rotate(-90deg)}
 .navsection.collapsed>.nav{display:none}
-.navsection>.nav{padding-left:6px;margin-top:1px}
+.navsection>.nav{padding-left:6px;margin-top:1px;position:relative}
+/* Faint guide rail connecting a section's child items — reads as a real nested nav. */
+.navsection>.nav::before{content:"";position:absolute;left:20px;top:2px;bottom:4px;width:1px;background:var(--side-line)}
 .navsection>.nav button{padding-left:34px}
 /* Section icon colors (Planhat's small colored section glyphs) */
 .ns-ico.ns-daily{background:#5b5bf0}
@@ -125,6 +127,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .app.side-collapsed .side-toggle{position:absolute;top:-2px;right:-4px}
 .app.side-collapsed .nav button{justify-content:center;padding:9px 0}
 .app.side-collapsed .navsection>.nav button{padding-left:0}
+.app.side-collapsed .navsection>.nav::before{display:none}
 .app.side-collapsed .navsection>.ns-head{justify-content:center;padding:7px 0}
 .app.side-collapsed .navgroup .lbl{padding:0;height:8px}
 
