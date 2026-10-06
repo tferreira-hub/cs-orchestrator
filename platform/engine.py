@@ -95,22 +95,23 @@ def _owns(account: dict, owner_id: str | None) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Short-TTL memo cache for expensive, read-only live reports
+# TTL memo cache with stale-while-revalidate for expensive live reports
 # --------------------------------------------------------------------------- #
 # Reports like the payment-risk and onboarding-governance views each fan out to a vendor
-# (Stripe / Rocket Lane) on every request, which made the pages take a few seconds EVERY
-# load. We memoise the result per (report, principal-scope) for a short TTL so repeat
-# views are instant while the data still refreshes. Keyed by scope so a CSM can never be
-# served another principal's cached data. Default 60s; tune via CS_REPORT_CACHE_TTL;
-# set 0 to disable (tests set 0 for determinism).
+# (Stripe / Rocket Lane), which is slow. We cache the result per (report, scope) for a
+# long TTL (default 600s, matching the roster cache) and serve STALE results instantly
+# while refreshing in the background, so the page is NEVER slow after the initial warm.
+# Keyed by scope so a CSM is never served another's data. CS_REPORT_CACHE_TTL tunes it;
+# set 0 to disable for tests.
 _REPORT_CACHE: dict = {}
+_REPORT_REFRESHING: set = set()
 
 
 def _report_cache_ttl() -> float:
     try:
-        return float(os.environ.get("CS_REPORT_CACHE_TTL", "60"))
+        return float(os.environ.get("CS_REPORT_CACHE_TTL", "600"))
     except ValueError:
-        return 60.0
+        return 600.0
 
 
 def _scope_key() -> str:
@@ -122,17 +123,46 @@ def _scope_key() -> str:
 
 
 def _cached_report(name: str, build):
-    """Return build() memoised per (name, scope) for CS_REPORT_CACHE_TTL seconds. TTL<=0
-    disables caching (always rebuild). Only successful dict results are cached."""
+    """Return build() memoised per (name, scope) for CS_REPORT_CACHE_TTL seconds.
+
+    STALE-WHILE-REVALIDATE: when the cache is stale (age > TTL) but a previous result
+    exists, the stale result is returned IMMEDIATELY and a background thread refreshes
+    the cache for the next request. This means the page is NEVER slow after the initial
+    warm. Only the very first cold call blocks. TTL<=0 disables caching entirely
+    (tests set this for determinism).
+    """
     import time
+    import threading
     ttl = _report_cache_ttl()
     if ttl <= 0:
         return build()
     key = (name, _scope_key())
     now = time.time()
     hit = _REPORT_CACHE.get(key)
+
+    # Fresh cache: serve immediately.
     if hit and (now - hit[0]) < ttl:
         return hit[1]
+
+    # Stale cache exists: return it NOW, refresh in the background so the user never waits.
+    if hit and hit[1] is not None:
+        if key not in _REPORT_REFRESHING:
+            _REPORT_REFRESHING.add(key)
+            # Capture the current principal so the bg thread builds with the right scope.
+            principal = get_principal()
+            def _bg():
+                try:
+                    set_principal(principal)
+                    result = build()
+                    if isinstance(result, dict):
+                        _REPORT_CACHE[key] = (time.time(), result)
+                finally:
+                    _REPORT_REFRESHING.discard(key)
+                    set_principal(None)
+            threading.Thread(target=_bg, daemon=True).start()
+        return hit[1]  # stale but instant
+
+    # Cold (no cached data at all): build synchronously (the one slow path).
     result = build()
     if isinstance(result, dict):
         _REPORT_CACHE[key] = (now, result)
