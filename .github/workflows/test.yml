@@ -1,0 +1,37 @@
+name: test
+
+# Runs the deterministic test suite on every push and pull request. No AWS, no
+# secrets, no deploy — so it runs identically on the canonical repo and on any fork
+# (unlike build-and-deploy.yml / infra.yml, which need OIDC + Tooling-account secrets).
+# This is the meaningful green check for code changes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Runtime dep (boto3) is imported by some adapter/integration tests; dev dep
+          # is the pinned pytest. The app itself is otherwise stdlib-only.
+          pip install -r requirements-runtime.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: python3 -m pytest plugins/cs-orchestrator/tests/ -q

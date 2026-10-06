@@ -33,6 +33,11 @@ env:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    # Only the canonical JobAdder repo can deploy: it holds the GitHub OIDC trust and
+    # the ECR_PUSH_ROLE_ARN_TOOLING secret for the Tooling AWS account. On a fork these
+    # are absent, so the AWS credentials step would always fail; skip the whole job there
+    # instead of showing a spurious red X. (Forks still get the test workflow.)
+    if: github.repository == 'JobAdder/cs-orchestrator'
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
