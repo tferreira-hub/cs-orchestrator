@@ -216,6 +216,13 @@ variable "app_environment" {
     CS_PENDO_ACTIVITY   = "1"
     CS_STALE_REVALIDATE = "1"
     CS_CACHE_TTL        = "600"
+    # Enriched/health-scored roster size. This is how many accounts get the full
+    # multi-vendor signal fan-out + a computable health score per refresh (the deeply
+    # scored slice behind the dashboard health mix). Unset defaults to 25 in code, which
+    # left ~1,276 of the book "not scored yet"; 150 widens real coverage while keeping the
+    # per-refresh fan-out bounded (each account = several live vendor calls, run with
+    # CS_FETCH_WORKERS concurrency). Raise further only with an eye on vendor rate limits.
+    CS_ROSTER_LIMIT = "150"
     # Stripe is accessed with the live SECRET key currently in SSM; permit it until a
     # restricted read-only key (rk_...) is issued. Needed by the Payment Risk Report and
     # any live dunning signals. SECURITY: prefer rotating STRIPE_KEY to an rk_ key and
