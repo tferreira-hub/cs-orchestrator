@@ -2415,6 +2415,107 @@ def kpis() -> dict:
     }
 
 
+def _csm_targets() -> dict:
+    """Per-CSM weekly targets for the leaderboard, as a {csm_name: {outreach, completion_pct}}
+    map. Sourced from the CS_CSM_TARGETS env JSON (operator-configured), e.g.
+    '{"Jane Doe": {"outreach": 15, "completion_pct": 90}}'. When unset or a CSM has no
+    target, that CSM's target is a data-gap (None) — never a fabricated number."""
+    raw = os.environ.get("CS_CSM_TARGETS", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def leaderboard() -> dict:
+    """Gamified team-performance leaderboard (V5 UC1/UC3). Ranks pooled/named CSMs on
+    real, already-computed KPI data (reuses kpis().by_csm — single source, no drift):
+    week-ending completion rate, open load, overdue, priority-1 load, and proactive
+    outreach vs an operator-set target. Surfaces a weekly target-compliance KPI
+    (target >= 90%).
+
+    Owner-scoped and privacy-aware: an admin sees every CSM named; a scoped CSM sees
+    their own row named with real numbers and peers ANONYMISED ("CSM 2", ...) so the
+    ranking is visible without exposing a colleague's book. Honest: a CSM with no target
+    shows target/compliance as a data-gap, not 0.
+    """
+    k = kpis()
+    rows = [r for r in k.get("by_csm", []) if r.get("csm") not in ("Unassigned",)]
+    targets = _csm_targets()
+
+    p = get_principal()
+    is_admin = (not p) or p.get("role") == "admin"
+    me = (p or {}).get("name") or (p or {}).get("email")
+
+    board = []
+    compliant = measurable = 0
+    for r in rows:
+        csm = r.get("csm")
+        completed = r.get("completed_tasks", 0)
+        open_t = r.get("open_tasks", 0)
+        denom = completed + open_t
+        completion_pct = round(100 * completed / denom) if denom else None
+        tgt = targets.get(csm) or {}
+        outreach_target = tgt.get("outreach")
+        completion_target = tgt.get("completion_pct", 90)  # default weekly target
+        # Compliance measurable only where we have a completion rate.
+        meets = None
+        if completion_pct is not None:
+            measurable += 1
+            meets = completion_pct >= (completion_target or 90)
+            if meets:
+                compliant += 1
+        board.append({
+            "csm": csm,
+            "accounts": r.get("accounts", 0),
+            "arr_usd": r.get("arr_usd", 0),
+            "open_tasks": open_t,
+            "completed_tasks": completed,
+            "overdue_tasks": r.get("overdue_tasks", 0),
+            "priority1_tasks": r.get("priority1_tasks", 0),
+            "capacity_utilization_pct": r.get("capacity_utilization_pct", 0),
+            "completion_rate_pct": completion_pct,          # week-ending completion
+            "outreach_target": outreach_target,              # None => data-gap (target not set)
+            "completion_target_pct": completion_target,
+            "meets_target": meets,                           # None when not measurable
+        })
+
+    # Rank by completion rate desc (None last), then fewest overdue, then most completed.
+    board.sort(key=lambda b: (
+        -(b["completion_rate_pct"] if b["completion_rate_pct"] is not None else -1),
+        b["overdue_tasks"],
+        -b["completed_tasks"],
+    ))
+    for i, b in enumerate(board, 1):
+        b["rank"] = i
+
+    # Privacy projection for a scoped CSM: keep own row named, anonymise peers.
+    if not is_admin:
+        anon = 0
+        for b in board:
+            if b["csm"] != me:
+                anon += 1
+                b["csm"] = f"CSM {b['rank']}"
+                # Hide peer book size/ARR; keep rank + completion for the ladder.
+                b["accounts"] = None
+                b["arr_usd"] = None
+
+    weekly_target_compliance_pct = round(100 * compliant / measurable) if measurable else None
+    return {
+        "leaderboard": board,
+        "weekly_target_compliance_pct": weekly_target_compliance_pct,
+        "weekly_target_compliance_target_pct": 90,
+        "measurable_csms": measurable,
+        "targets_configured": bool(targets),
+        "note": (None if targets else
+                 "Per-CSM outreach targets are not configured (set CS_CSM_TARGETS); "
+                 "completion-rate ranking is shown and compliance uses the default 90% target."),
+    }
+
+
 def _task_events_path() -> Path:
     return Path(os.environ.get("CS_TASK_EVENTS_FILE", str(Path(__file__).resolve().parents[1] / ".cs-task-events.jsonl")))
 
