@@ -5,6 +5,39 @@ Wraps the WoW orchestration (orchestrate.py) and adds the account **health score
 and portfolio roll-up the single-pane-of-glass UI needs. Kept dependency-free and
 importable so both the API and the CLI/agent use the same logic (single source of
 truth, WoW §1).
+
+Module map
+----------
+This is a large single module BY DESIGN: the server, CLI, and agent all import it
+as one `engine` namespace, and the test suite patches many of its internals by that
+name (e.g. engine._src, engine._scoped_accounts, engine._INBOUND_QUEUE). Splitting it
+into packages would break those import/patch call-sites for no behavioural gain, so it
+stays one file. Use this map to navigate it:
+
+  1. Identity scoping & RBAC         set/get_principal, _scoped_accounts, can_view_account,
+                                     can_write_account, required_roles_missing, ForbiddenError
+  2. Live-only data projection       _is_live, _live_block, _live_account, _connected
+  3. Scoring (deterministic)         health_score, renewal_forecast, adoption_score,
+                                     expansion_score, _roster_band
+  4. Portfolio / roster / detail     portfolio, full_roster, executive_summary,
+                                     account_detail, enrich_rows, daily_brief, why_not,
+                                     trend_risks, _health_* trajectory helpers
+  5. Write actions (two-gated)       writeback, enrol_sequence, log_note, tag_contact_role,
+                                     monthly_digest/send_digest/run_monthly_digests,
+                                     create_csql, move_to_pooled, dispatch_reviewed_digests
+  6. Zendesk ticket writes           _ticket_account_ref, _authorise_ticket_write,
+                                     zendesk_reply, zendesk_set_status
+  7. Inbound / pooled / presence     record_inbound, inbound_queue, resolve_inbound,
+                                     pooled_roster/cohort, set_csm_availability, _presence_for
+  8. Strategic monthly review        monthly_review_queue, add_review_comment, approve_digest
+  9. KPIs / retention / capacity     kpis, _retention_metrics, _task_metrics, _capacity_per_csm
+ 10. Lifecycle / integrations / gaps lifecycle(_state), integrations, datagaps,
+                                     revenue_motion, expansion_opportunities, payment_risk_report
+
+Shared module state (why this is one module): the request-scoped principal
+(_REQUEST thread-local), the in-process inbound queue (_INBOUND_QUEUE) and CSM
+presence (_CSM_PRESENCE), and the import-time installation of _scoped_accounts as
+orchestrate's account provider.
 """
 
 from __future__ import annotations
@@ -1874,9 +1907,41 @@ def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
 
 
 
+def _ticket_account_ref(ticket_id: str) -> str | None:
+    """Resolve the account a Zendesk ticket belongs to, via the inbound queue row the
+    pooled team works from. Returns the normalised account id/ref, or None when the
+    ticket is not in the queue (no known account linkage)."""
+    row = _INBOUND_QUEUE.get(ticket_id) or {}
+    ref = row.get("account_ref")
+    return str(ref).strip() if ref else None
+
+
+def _authorise_ticket_write(ticket_id: str, action: str) -> None:
+    """Owner-scope a Zendesk write to the account the ticket belongs to.
+
+    Admins (or open/legacy mode with no principal) may act on any ticket. A scoped CSM
+    may only reply to / close tickets on accounts they own. A ticket with no resolvable
+    account (not in the inbound queue) is denied for a scoped CSM — fail closed — so a
+    CSM cannot act on an arbitrary ticket_id outside their book. Raises ForbiddenError
+    (-> 403) when not permitted.
+    """
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return
+    account_ref = _ticket_account_ref(ticket_id)
+    if account_ref and can_write_account(account_ref):
+        return
+    raise ForbiddenError(
+        f"You can only {action} tickets on accounts you own"
+        + ("" if account_ref else " (this ticket is not linked to an account in your queue)")
+    )
+
+
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
-    dry-run by default. Resolving inbound in-platform (increment 3)."""
+    dry-run by default. Owner-scoped: a CSM may only reply to tickets on accounts they
+    own (admins any). Resolving inbound in-platform (increment 3)."""
+    _authorise_ticket_write(ticket_id, "reply to")
     if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
         result = {"replied": False, "mode": "not-connected"}
     else:
@@ -1894,7 +1959,9 @@ def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = 
 def zendesk_set_status(ticket_id: str, status: str = "solved", comment: str | None = None,
                        apply: bool = False) -> dict:
     """Set a Zendesk ticket's status (close = 'solved') from the inbound queue. Two-gate;
-    dry-run by default; reversible (solved can be reopened)."""
+    dry-run by default; reversible (solved can be reopened). Owner-scoped: a CSM may only
+    change the status of tickets on accounts they own (admins any)."""
+    _authorise_ticket_write(ticket_id, "change the status of")
     if not (dataaccess._ADAPTERS and _src.ZENDESK.live()):
         result = {"updated": False, "mode": "not-connected"}
     else:
@@ -1916,17 +1983,28 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     from real churn: (base_arr - churned_arr) / base_arr, capped at 100% (no upside
     counted). It tracks the CS brief's GRR >= 92% goal.
 
-    We deliberately DO NOT publish an NDR percentage here. True NDR requires *booked*
-    expansion/contraction revenue, which this platform does not yet have. Reporting an
-    NDR inflated by unrealised opportunity would be misleading for a board-level metric.
-    Instead we surface the expansion PIPELINE separately: the ARR of healthy accounts
-    carrying an active expansion trigger (license utilization / API surge / strong
-    adoption). This is opportunity, not retention — labelled as such.
+    NDR (Net Revenue Retention) is REALISED net revenue retention computed from the
+    warehouse monthly ARR series (`rpt_account_ndr_monthly`): dollar-weighted
+    current-period revenue (`mrr_usd`) over the same accounts' prior-year revenue
+    (`revenue_prev_year_usd`). This captures expansion, contraction, and churn on the
+    existing base — the board metric — NOT unrealised pipeline. Only accounts that have
+    BOTH a current and a prior figure contribute, so the number is never inflated by
+    opportunity. `ndr_pct` is an honest None (and `ndr_computable` False) when the
+    warehouse has no prior-period revenue for any in-scope account, so the UI shows
+    "no data" rather than a misleading percentage. It tracks the CS brief's NDR > 100% goal.
+
+    Expansion PIPELINE is reported SEPARATELY from retention (never folded into NDR):
+    the ARR of healthy accounts carrying an active expansion trigger (license
+    utilization / API surge / strong adoption). This is opportunity, not revenue —
+    labelled as such.
 
     Definitions (annualised, book-level):
       base_arr          = sum of live contract ARR across the book
       churned_arr       = ARR of accounts flagged churned (Redshift status or HubSpot
                           lifecycle) — revenue lost
+      grr_pct           = (base_arr - churned_arr) / base_arr, capped at 100%
+      ndr_pct           = sum(current revenue) / sum(prior-year revenue) over accounts
+                          with both figures — realised net retention, or None if none
       expansion_pipeline_arr = ARR of healthy accounts with an active expansion trigger
                           (pipeline/opportunity, NOT booked expansion)
 

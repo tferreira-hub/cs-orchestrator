@@ -210,3 +210,38 @@ def test_portfolio_summary_reports_scope(monkeypatch):
     assert summary["accounts"] == 2
     assert summary["principal"]["role"] == "csm"
     engine.set_principal(None)
+
+
+# --------------------------------------------------------------------------- #
+# Zendesk ticket writes are owner-scoped (reply / set-status)
+# --------------------------------------------------------------------------- #
+def test_zendesk_ticket_writes_are_owner_scoped(monkeypatch):
+    """A CSM may only reply to / close Zendesk tickets on accounts they own; admins
+    may act on any. A ticket with no resolvable account (not in the inbound queue) is
+    denied for a scoped CSM (fail closed), so a CSM cannot act on an arbitrary ticket_id
+    outside their book. Open/legacy mode (no principal) is unrestricted."""
+    import engine, dataaccess, pytest
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    # Seed the inbound queue: one ticket on an owner-A account, one on owner-B's.
+    monkeypatch.setitem(engine._INBOUND_QUEUE, "t-owned", {"id": "t-owned", "account_ref": "au1-1", "status": "open"})
+    monkeypatch.setitem(engine._INBOUND_QUEUE, "t-other", {"id": "t-other", "account_ref": "au1-3", "status": "open"})
+
+    # CSM owner-A
+    engine.set_principal({"email": "a@x.com", "name": "A", "role": "csm", "owner_id": "owner-A"})
+    assert engine.zendesk_reply("t-owned", "hi")["ticket_id"] == "t-owned"          # owns it -> allowed
+    with pytest.raises(engine.ForbiddenError):
+        engine.zendesk_reply("t-other", "hi")                                        # owner-B's -> denied
+    with pytest.raises(engine.ForbiddenError):
+        engine.zendesk_set_status("t-other", status="solved")                        # owner-B's -> denied
+    with pytest.raises(engine.ForbiddenError):
+        engine.zendesk_set_status("t-unknown", status="solved")                      # not in queue -> fail closed
+
+    # Admin may act on any ticket, including one with no known account linkage.
+    engine.set_principal({"email": "boss@x.com", "name": "Boss", "role": "admin", "owner_id": None})
+    assert engine.zendesk_reply("t-other", "hi")["ticket_id"] == "t-other"
+    assert engine.zendesk_set_status("t-unknown", status="solved")["ticket_id"] == "t-unknown"
+
+    # Open/legacy mode (no principal) is unrestricted (unchanged behaviour).
+    engine.set_principal(None)
+    assert engine.zendesk_reply("t-other", "hi")["ticket_id"] == "t-other"
+    engine.set_principal(None)
