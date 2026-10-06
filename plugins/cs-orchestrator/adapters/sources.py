@@ -238,8 +238,15 @@ class Pendo:
         # velocity relies solely on explicit metadata mappings (data gap if unmapped).
         if config.env("CS_PENDO_ACTIVITY") == "1":
             activity_last7, activity_prev7 = self._activity_velocity(ref, headers)
+            # Also derive real adoption signals from the aggregation API: the account
+            # metadata carries no adoption/engagement scores (pendo_predict is empty on
+            # this install), but featureEvents DO expose genuine usage. We count distinct
+            # active visitors and distinct features used over a 30-day window. These are
+            # real, not fabricated; an idle account correctly yields 0.
+            active_users_30d, features_used_30d = self._adoption_signals(ref, headers)
         else:
             activity_last7, activity_prev7 = None, None
+            active_users_30d, features_used_30d = None, None
 
         mapped_api_last = configured_metric("api_calls_last_7d")
         mapped_api_prev = configured_metric("api_calls_prev_7d")
@@ -253,6 +260,13 @@ class Pendo:
             "active_users_pct": configured_metric("active_users_pct"),
             "license_utilization_pct": configured_metric("license_utilization_pct"),
             "key_feature_adoption_pct": configured_metric("key_feature_adoption_pct"),
+            # Derived from the Aggregation API (real usage, not metadata). Raw counts
+            # over a 30-day window: distinct active visitors and distinct features used.
+            # These are honest absolute counts (an idle account yields 0); they are NOT
+            # percentages because Pendo gives us no licensed-seat / total-feature
+            # denominator here, so we never fabricate a %.
+            "active_users_30d": active_users_30d,
+            "features_used_30d": features_used_30d,
             # Explicit metadata mapping wins; else the derived aggregation activity count.
             "api_calls_last_7d": mapped_api_last if mapped_api_last is not None else activity_last7,
             "api_calls_prev_7d": mapped_api_prev if mapped_api_prev is not None else activity_prev7,
@@ -304,6 +318,39 @@ class Pendo:
         if last7 is None and prev7 is None:
             return None, None
         return last7, prev7
+
+    def _adoption_signals(self, ref: str, headers: dict) -> tuple[int | None, int | None]:
+        """Real adoption signals from the Pendo Aggregation API over a 30-day window:
+        (active_users, features_used) = the number of DISTINCT visitors who generated
+        feature events, and the number of DISTINCT features touched, for this account.
+
+        The account-metadata endpoint has no adoption scores (pendo_predict is empty on
+        this install), but featureEvents expose genuine usage. We group by visitorId /
+        featureId and count the resulting rows (= distinct values). Returns (None, None)
+        on any failure; an idle account legitimately returns (0, 0). Never fabricated."""
+        day = 86400 * 1000
+        import time as _time
+        first = int(_time.time() * 1000) - 30 * day
+
+        def _distinct(group_field: str) -> int | None:
+            pipeline = [
+                {"source": {"featureEvents": {"featureId": None},
+                            "timeSeries": {"period": "dayRange", "first": first, "count": 30}}},
+                {"filter": f'accountId == "{ref}"'},
+                {"group": {"group": [group_field], "fields": [{"ev": {"sum": "numEvents"}}]}},
+            ]
+            try:
+                res = self._aggregation(pipeline, headers)
+            except Exception:  # noqa: BLE001 - best-effort; absence = data gap
+                return None
+            rows = res.get("results") if isinstance(res, dict) else None
+            return len(rows) if rows is not None else None
+
+        active_users = _distinct("visitorId")
+        features_used = _distinct("featureId")
+        if active_users is None and features_used is None:
+            return None, None
+        return active_users, features_used
 
     @staticmethod
     def _aggregation(pipeline: list, headers: dict) -> dict:
