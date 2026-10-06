@@ -4889,19 +4889,26 @@ function _notesRolesPanel(id,d){
       '<button class="btn" onclick="applyLogNote(\''+escapeHtml(id)+'\',this)">Log note</button>'+
       '<span class="muted" id="note-status-'+escapeHtml(id)+'" style="font-size:.85em"></span>'+
     '</div></div>';
-  const roleOpts=CS_ROLES.map(r=>'<option value="'+escapeHtml(r)+'">'+escapeHtml(r)+'</option>').join('');
+  // Which of the 3 WoW-required roles are still untagged? (computed first so the
+  // per-contact dropdown can pre-select the next missing role, making the intent clear.)
+  const haveRoles=new Set(contacts.map(c=>c.role).filter(Boolean));
+  const missingReq=CS_ROLES.filter(r=>!haveRoles.has(r));
+  // The dropdown defaults to the FIRST still-missing required role (or Exec Sponsor if
+  // all are tagged), so a CSM is nudged toward completing the role architecture rather
+  // than defaulting every contact to the same role.
+  const defaultRole=missingReq.length?missingReq[0]:CS_ROLES[0];
+  const roleOptsFor=sel=>CS_ROLES.map(r=>'<option value="'+escapeHtml(r)+'"'+(r===sel?' selected':'')+'>'+escapeHtml(r)+(haveRoles.has(r)?' (tagged)':'')+'</option>').join('');
   const rows=contacts.length?contacts.map(c=>{
     const em=escapeHtml(c.email||'');
     if(!em) return '';
+    // Pre-select: if this contact already has a required role, show it; else the next missing one.
+    const preset=(c.role&&CS_ROLES.includes(c.role))?c.role:defaultRole;
     return '<div class="dc-row" style="gap:10px;align-items:center"><span>'+escapeHtml(c.name||c.email)+(c.role?' <span class="pill g" style="font-size:.72em">'+escapeHtml(c.role)+'</span>':'')+'</span>'+
       '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
-        '<select class="role-sel" data-email="'+em+'">'+roleOpts+'</select>'+
+        '<select class="role-sel" data-email="'+em+'">'+roleOptsFor(preset)+'</select>'+
         '<button class="btn" style="padding:5px 10px" onclick="applyTagRole(\''+escapeHtml(id)+'\',\''+em+'\',this)">Tag</button>'+
       '</span></div>';
   }).join(''):'<div class="muted">No associated contacts to tag.</div>';
-  // Which of the 3 WoW-required roles are still untagged? Drives the close-gate messaging.
-  const haveRoles=new Set(contacts.map(c=>c.role).filter(Boolean));
-  const missingReq=CS_ROLES.filter(r=>!haveRoles.has(r));
   const gateLine=missingReq.length
     ? '<div class="supp" style="margin:0 0 10px">Required for renewal/onboarding tasks to close: <b>'+missingReq.map(escapeHtml).join(', ')+'</b> still untagged.</div>'
     : '<div class="callout" style="margin:0 0 10px;background:#eefaf0;border-color:#bfe6cb">All three required contact roles are tagged. Renewal and onboarding tasks can close.</div>';

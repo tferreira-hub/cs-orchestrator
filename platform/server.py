@@ -1257,6 +1257,14 @@ def main() -> int:
             engine.portfolio()
         except Exception:  # noqa: BLE001
             pass
+        # Warm the two TTL-cached reports so the first page load after deploy is instant.
+        # These run with no principal -> scope_key="admin", which is the same key the admin
+        # user reads. CSM-scoped users will still have a one-time cold build for their key.
+        for _warm_fn in (engine.onboarding_governance, engine.payment_risk_report):
+            try:
+                _warm_fn()
+            except Exception:  # noqa: BLE001
+                pass
     import threading as _thr
     _thr.Thread(target=_warm, daemon=True).start()
     try:
