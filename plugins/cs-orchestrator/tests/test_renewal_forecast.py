@@ -46,7 +46,7 @@ def test_forecast_churn_risk_from_ml_score():
     fc = engine.renewal_forecast(acct, health, expansion_qualified=False)
     assert fc["applicable"] is True
     assert fc["label"] == "Churn Risk"
-    assert fc["rationale"].startswith("Churn Risk —")
+    assert fc["rationale"].startswith("Churn Risk,")
     # Grounded: the rationale is built from real health reasons (traceable to engine).
     assert any(r in fc["rationale"] for r in health["reasons"])
 
@@ -109,7 +109,7 @@ def test_forecast_plain_renewal():
     health = engine.health_score(acct)
     fc = engine.renewal_forecast(acct, health, expansion_qualified=False)
     assert fc["label"] == "Renewal"
-    assert fc["rationale"].startswith("Renewal —")
+    assert fc["rationale"].startswith("Renewal,")
 
 
 # --------------------------------------------------------------------------- #

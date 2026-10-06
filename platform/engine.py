@@ -233,7 +233,7 @@ _PENDO_UNAVAILABLE_FIELDS = {
 
 def _is_live(sources: dict, block: str) -> bool:
     """True if the source feeding this block is real: either genuinely 'live', or
-    'computed' (transparently derived from live signals — never fixture/sample)."""
+    'computed' (transparently derived from live signals, never fixture/sample)."""
     src_key = _SIGNAL_SOURCE.get(block, block)
     return sources.get(src_key) in ("live", "computed", "live_no_record")
 
@@ -346,7 +346,7 @@ def health_score(account: dict) -> dict:
         reasons.append("Pendo risk advisor: Medium (-8)")
 
     # Live Jiminny conversational intelligence: negative call sentiment is a real
-    # relationship-health signal. Weighted modestly — it colours the score but does
+    # relationship-health signal. Weighted modestly, it colours the score but does
     # not, on its own, dominate hard risk signals like churn or an open Sev-1.
     sentiment = str(jiminny.get("sentiment") or "").lower()
     if sentiment == "negative":
@@ -454,14 +454,14 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
         return {
             "applicable": True,
             "label": "Churn Risk",
-            "rationale": "Churn Risk — " + ", ".join(detail),
+            "rationale": "Churn Risk, " + ", ".join(detail),
             "evidence": churn_signals + reasons,
         }
 
     # --- Expansion (opportunity) ---
     if expansion_qualified:
         detail = reasons[:1] if reasons else []
-        rationale = "Expansion — qualifies for an expansion trigger"
+        rationale = "Expansion, qualifies for an expansion trigger"
         if detail:
             rationale += " (" + ", ".join(detail) + ")"
         return {
@@ -473,9 +473,9 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
 
     # --- Renewal (on track) ---
     if computable:
-        rationale = "Renewal — " + (reasons[0] if reasons else f"health {health.get('score')}, on track")
+        rationale = "Renewal, " + (reasons[0] if reasons else f"health {health.get('score')}, on track")
     else:
-        rationale = "Renewal — on track (no adverse signal)"
+        rationale = "Renewal, on track (no adverse signal)"
     return {
         "applicable": True,
         "label": "Renewal",
@@ -771,7 +771,7 @@ def churn_risk_matrix(threshold: float | None = None) -> dict:
     threshold (default 70%), grouped by PRIMARY risk driver with the total ARR impact and
     account list per driver. Scoped to the caller (admins all, CSM own book).
 
-    Only genuine ML churn scores count toward the cohort — a computed (signals-based)
+    Only genuine ML churn scores count toward the cohort, a computed (signals-based)
     fallback score is never treated as the ML >70% threshold (same guard as the P1 rule),
     so the matrix cannot over-report. Each account's ARR is the 'impact' it contributes.
     """
@@ -894,17 +894,48 @@ def _onboarding_governance_build() -> dict:
     except Exception:  # noqa: BLE001
         all_projects = []
 
-    # Build an owner lookup (normalised company name -> {owner, account_id}) from the
-    # scoped roster, so projects inherit the CSM owner and owner-scoping is honoured.
+    # Build an owner lookup (normalised company name -> {owner, owner_id, account_id}) from
+    # the FULL lightweight book (not just the enriched slice), so projects match real
+    # accounts and inherit the CSM owner. Falls back to the enriched roster if the cheap
+    # full-book scan is unavailable.
     from adapters import identity as _id
     p = get_principal()
     admin = (not p) or p.get("role") == "admin"
+    my_owner_id = str((p or {}).get("owner_id") or "") if not admin else ""
     owner_by_name = {}
-    for aid, a in _scoped_accounts().items():
-        hs = a.get("hubspot", {}) or {}
-        nm = hs.get("name")
-        if nm:
-            owner_by_name[_id.normalise(nm)] = {"owner": hs.get("csm_owner") or "Unassigned", "account_id": aid}
+    try:
+        book = _src.HUBSPOT.list_all_companies() if (dataaccess._ADAPTERS and _src.HUBSPOT.live()) else []
+    except Exception:  # noqa: BLE001
+        book = []
+    # Resolve owner_id -> name via the adapter's cached owner lookup so rows show the CSM.
+    owner_names = {}
+    try:
+        ids = sorted({str(c.get("owner_id")) for c in book if c.get("owner_id")})
+        for oid in ids:
+            nm = _src.HUBSPOT._owner_name(oid)
+            if nm:
+                owner_names[oid] = nm
+    except Exception:  # noqa: BLE001
+        owner_names = {}
+    for c in book:
+        nm = c.get("name")
+        if not nm:
+            continue
+        oid = str(c.get("owner_id") or "")
+        owner_by_name[_id.normalise(nm)] = {
+            "owner": c.get("csm_owner") or owner_names.get(oid) or ("Unassigned" if not oid else oid),
+            "owner_id": oid,
+            "account_id": c.get("account_id") or ("rl-" + str(c.get("company_id"))),
+        }
+    # Fallback: if the full book was empty, use the enriched slice so we still match some.
+    if not owner_by_name:
+        for aid, a in _scoped_accounts().items():
+            hs = a.get("hubspot", {}) or {}
+            nm = hs.get("name")
+            if nm:
+                owner_by_name[_id.normalise(nm)] = {"owner": hs.get("csm_owner") or "Unassigned",
+                                                     "owner_id": str(hs.get("csm_owner_id") or ""),
+                                                     "account_id": aid}
 
     projects, stalled = [], []
     on_time = overdue = 0
@@ -912,10 +943,11 @@ def _onboarding_governance_build() -> dict:
         cname = pr.get("company_name")
         key = _id.normalise(cname) if cname else None
         match = owner_by_name.get(key) if key else None
-        # Owner scope: a scoped CSM only sees projects whose company matches one of THEIR
-        # accounts. Admin (or open mode) sees every project.
-        if not admin and match is None:
-            continue
+        # Owner scope: a scoped CSM only sees projects for accounts THEY own (matched by
+        # company name, then owner_id). Admin (or open mode) sees every project.
+        if not admin:
+            if match is None or (my_owner_id and match.get("owner_id") != my_owner_id):
+                continue
         status = str(pr.get("status") or "").lower()
         completed = status in {"completed", "complete", "done", "live"}
         days_in = _onboarding_days_in(pr.get("start_date"))
@@ -935,7 +967,7 @@ def _onboarding_governance_build() -> dict:
         row = {
             "account_id": (match or {}).get("account_id"),
             "name": cname or (pr.get("project_name") or "Unknown"),
-            "owner": (match or {}).get("owner") or "—",
+            "owner": (match or {}).get("owner") or "-",
             "project_name": pr.get("project_name"),
             "status": pr.get("status"),
             "health": pr.get("health"),
@@ -1827,7 +1859,7 @@ def monthly_digest(account_id: str) -> dict:
     LIVE signals: licence/seat utilisation, active logins, top feature adoption, Zendesk
     tickets resolved, and CSAT. Flags an expansion CTA when licence utilisation >= 85%.
     Identifies the Primary Admin recipient; when none is tagged, flags a data-cleanup need
-    (edge case from the spec). Every field is honest 'no data' when its source is absent —
+    (edge case from the spec). Every field is honest 'no data' when its source is absent,
     nothing is fabricated. Read-only compile; the send is a separate gated action."""
     detail = account_detail(account_id)  # owner-scope enforced inside (raises ForbiddenError)
     hs = detail.get("hubspot", {}) or {}
@@ -1891,7 +1923,7 @@ def send_digest(account_id: str, apply: bool = False) -> dict:
     copy on the timeline). Two-gate (apply + CS_ALLOW_WRITE), dry-run by default.
     Customer-facing send, so even with both gates it only sends when an outbound email
     capability is connected (CS_EMAIL_PROVIDER); otherwise it honestly reports 'prepared,
-    no email provider connected' — never a fake send. When no Primary Admin is tagged it
+    no email provider connected', never a fake send. When no Primary Admin is tagged it
     refuses and flags the data-cleanup need. The timeline copy is logged only after a
     successful send and never fails the send if the note-log itself fails."""
     digest = monthly_digest(account_id)
@@ -2313,10 +2345,10 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
 # --- Weekly time-blocked operating rhythm (WoW §3, UC2) ----------------------
 # Groups the live prioritised task queue into the WoW operating blocks so a CSM sees the
 # week the way the Ways-of-Working framework prescribes, instead of one flat list:
-#   Monday Analytics & Portfolio Review  — the week's review (worst-health + all open tasks count)
-#   Daily P1 Defensive Risk (Must Protect) — ML churn / usage drop / Sev-1 (priority 1-2 PROTECT)
-#   Weekly Renewals & Expansion (Must Expand) — T-cadence + expansion triggers
-#   Weekly Adoption & QBR (Must Use) — adoption / onboarding
+#   Monday Analytics & Portfolio Review , the week's review (worst-health + all open tasks count)
+#   Daily P1 Defensive Risk (Must Protect), ML churn / usage drop / Sev-1 (priority 1-2 PROTECT)
+#   Weekly Renewals & Expansion (Must Expand), T-cadence + expansion triggers
+#   Weekly Adoption & QBR (Must Use), adoption / onboarding
 # Built from engine.portfolio() tasks (rule_id/mandate/priority), owner-scoped already.
 def operating_rhythm() -> dict:
     p = portfolio()
@@ -2516,7 +2548,7 @@ def _authorise_ticket_write(ticket_id: str, action: str) -> None:
 
     Admins (or open/legacy mode with no principal) may act on any ticket. A scoped CSM
     may only reply to / close tickets on accounts they own. A ticket with no resolvable
-    account (not in the inbound queue) is denied for a scoped CSM — fail closed — so a
+    account (not in the inbound queue) is denied for a scoped CSM, fail closed, so a
     CSM cannot act on an arbitrary ticket_id outside their book. Raises ForbiddenError
     (-> 403) when not permitted.
     """
@@ -2582,7 +2614,7 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     warehouse monthly ARR series (`rpt_account_ndr_monthly`): dollar-weighted
     current-period revenue (`mrr_usd`) over the same accounts' prior-year revenue
     (`revenue_prev_year_usd`). This captures expansion, contraction, and churn on the
-    existing base — the board metric — NOT unrealised pipeline. Only accounts that have
+    existing base, the board metric, NOT unrealised pipeline. Only accounts that have
     BOTH a current and a prior figure contribute, so the number is never inflated by
     opportunity. `ndr_pct` is an honest None (and `ndr_computable` False) when the
     warehouse has no prior-period revenue for any in-scope account, so the UI shows
@@ -2590,16 +2622,16 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
 
     Expansion PIPELINE is reported SEPARATELY from retention (never folded into NDR):
     the ARR of healthy accounts carrying an active expansion trigger (license
-    utilization / API surge / strong adoption). This is opportunity, not revenue —
+    utilization / API surge / strong adoption). This is opportunity, not revenue,
     labelled as such.
 
     Definitions (annualised, book-level):
       base_arr          = sum of live contract ARR across the book
       churned_arr       = ARR of accounts flagged churned (Redshift status or HubSpot
-                          lifecycle) — revenue lost
+                          lifecycle), revenue lost
       grr_pct           = (base_arr - churned_arr) / base_arr, capped at 100%
       ndr_pct           = sum(current revenue) / sum(prior-year revenue) over accounts
-                          with both figures — realised net retention, or None if none
+                          with both figures, realised net retention, or None if none
       expansion_pipeline_arr = ARR of healthy accounts with an active expansion trigger
                           (pipeline/opportunity, NOT booked expansion)
 
@@ -2745,7 +2777,7 @@ def _csm_targets() -> dict:
     """Per-CSM weekly targets for the leaderboard, as a {csm_name: {outreach, completion_pct}}
     map. Sourced from the CS_CSM_TARGETS env JSON (operator-configured), e.g.
     '{"Jane Doe": {"outreach": 15, "completion_pct": 90}}'. When unset or a CSM has no
-    target, that CSM's target is a data-gap (None) — never a fabricated number."""
+    target, that CSM's target is a data-gap (None), never a fabricated number."""
     raw = os.environ.get("CS_CSM_TARGETS", "").strip()
     if not raw:
         return {}
@@ -2758,7 +2790,7 @@ def _csm_targets() -> dict:
 
 def leaderboard() -> dict:
     """Gamified team-performance leaderboard (V5 UC1/UC3). Ranks pooled/named CSMs on
-    real, already-computed KPI data (reuses kpis().by_csm — single source, no drift):
+    real, already-computed KPI data (reuses kpis().by_csm, single source, no drift):
     week-ending completion rate, open load, overdue, priority-1 load, and proactive
     outreach vs an operator-set target. Surfaces a weekly target-compliance KPI
     (target >= 90%).
@@ -3176,9 +3208,9 @@ def integrations() -> dict:
     if roi_ai_configured():
         liveset.add("ROI AI")
     # Precise, honest status. Three distinct states instead of a vague "not connected":
-    #   connected (live)      — the source is authenticated and returning data
-    #   configuration required — we have access but a specific env value is missing
-    #   access pending        — JobAdder does not have API access to this vendor yet
+    #   connected (live)     , the source is authenticated and returning data
+    #   configuration required, we have access but a specific env value is missing
+    #   access pending       , JobAdder does not have API access to this vendor yet
     import os as _os
     def _missing(*names):
         return [n for n in names if not (_os.environ.get(n) or "").strip()]
@@ -3401,7 +3433,7 @@ def _payment_risk_report_build() -> dict:
     Each row carries the fields the manual report tracks, all from live sources: customer
     name, JobAdder id, billing contact (Finance Contact or Stripe email), CSM owner, the
     Stripe customer dashboard link, and the derived JobAdder admin link. Honest empty when
-    Stripe is not connected — no data is fabricated."""
+    Stripe is not connected, no data is fabricated."""
     th = _payment_thresholds()
     suspend_at, cancel_at = th["access_suspend_days"], th["cancel_days"]
     stripe_live = "Stripe" in set(dataaccess.live_sources())
