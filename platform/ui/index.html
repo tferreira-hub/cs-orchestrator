@@ -4732,6 +4732,15 @@ function renderCompanyPage(id,d){
       '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button></div></div>'+
     '<div data-cpt="overview related usage revenue">'+tiles+'</div>'+
     '<div class="cp-section" data-cpt="overview related"><div class="cp-shead"><h2>Signals</h2></div>'+signals+'</div>'+
+    '<div class="cp-section" data-cpt="revenue"><div class="cp-shead"><h2>Revenue &amp; renewal</h2><span class="cp-cnt">commercials</span></div>'+
+      '<div class="cp-kmgrid">'+
+        km('ARR (USD)',conn.hubspot?(hs.arr_usd!=null?fmt(hs.arr_usd):ND):NC)+
+        km('Renewal',conn.hubspot?(hs.renewal_date?renewalDays(hs.renewal_date):ND):NC)+
+        km('Subscription',cell('hubspot',hs.subscription_type))+
+        km('AI forecast',(fc&&fc.applicable&&fc.label)?escapeHtml(fc.label)+(fc.rationale?' <span class="muted" style="font-size:.82em">'+escapeHtml(fc.rationale)+'</span>':''):ND)+
+        km('Expansion readiness',expn.computable?('<span class="pill '+(expn.band==='high'?'ok':expn.band==='medium'?'':expn.band==='low'?'warn':'')+'">'+expn.score+'/100 '+escapeHtml(expn.band||'')+'</span>'):ND)+
+        km('Payment',payVal)+
+      '</div></div>'+
     '<div class="cp-section" data-cpt="overview related usage"><div class="cp-shead"><h2>Key metrics</h2><span class="cp-cnt">live signals</span></div>'+keyMetrics+'</div>'+
     '<div class="cp-section" data-cpt="overview usage"><div class="cp-shead"><h2>Health</h2><span class="cp-cnt">drivers &amp; trend</span></div>'+
       (spark?'<div class="callout" style="margin-bottom:10px">'+spark+'</div>':'')+driversHtml+
@@ -5072,8 +5081,14 @@ async function applySendDigest(id,btn){
 }
 // shows all). Fixes the previously-dead Related Data / Usage / Revenue / Account Planning tabs.
 function cpTab(name,btn){
+  // Highlight the active tab button.
   document.querySelectorAll('.cp-tabs .cp-tab').forEach(b=>b.classList.toggle('active',b===btn||b.dataset.cpt===name));
+  // Toggle ONLY the content sections tagged with data-cpt. CRITICAL: exclude the tab
+  // buttons themselves (which also carry data-cpt) and anything inside the .cp-tabs row,
+  // otherwise switching tabs would hide the other tab buttons and strand the user with
+  // no way back to Overview.
   document.querySelectorAll('#company-body [data-cpt]').forEach(sec=>{
+    if(sec.closest('.cp-tabs')) return;        // skip the tab buttons / tab row
     const groups=(sec.getAttribute('data-cpt')||'').split(/\s+/);
     sec.style.display=groups.includes(name)?'':'none';
   });
