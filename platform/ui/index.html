@@ -914,6 +914,9 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <button data-v="leading" onclick="go('leading')" title="Leading Indicators"><span class="ico">↗</span> <span class="label">Leading Indicators</span></button>
         <button data-v="lagging" onclick="go('lagging')" title="Lagging Indicators"><span class="ico">↘</span> <span class="label">Lagging Indicators</span></button>
         <button data-v="reviews" onclick="go('reviews')" title="Portfolio Reviews"><span class="ico">▦</span> <span class="label">Portfolio Reviews</span></button>
+        <button data-v="onboarding" onclick="go('onboarding')" title="Onboarding"><span class="ico">◷</span> <span class="label">Onboarding</span></button>
+        <button data-v="leaderboard" onclick="go('leaderboard')" title="Team Leaderboard"><span class="ico">★</span> <span class="label">Team Leaderboard</span></button>
+        <button data-v="f2f" onclick="go('f2f')" title="Exec F2F Cadence"><span class="ico">◎</span> <span class="label">Exec F2F Cadence</span></button>
       </div>
     </div>
 
@@ -1038,6 +1041,9 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       </section>
       <section class="view" id="v-lagging"><div id="lagging-body"></div></section>
       <section class="view" id="v-reviews"><div id="reviews-body"></div></section>
+      <section class="view" id="v-onboarding"><div id="onboarding-body"></div></section>
+      <section class="view" id="v-leaderboard"><div id="leaderboard-body"></div></section>
+      <section class="view" id="v-f2f"><div id="f2f-body"></div></section>
       <section class="view" id="v-calendar"><div id="calendar-body"></div></section>
       <section class="view" id="v-rhythm"><div id="rhythm-body"></div></section>
       <section class="view" id="v-notifications"><div id="notifications-body"></div></section>
@@ -1131,6 +1137,9 @@ const meta={
   leading:['Leading Indicators','Forward-looking portfolio signals'],
   lagging:['Lagging Indicators','Realised retention and revenue outcomes'],
   reviews:['Portfolio Reviews','Structured account review cadence'],
+  onboarding:['Onboarding','Rocket Lane implementation governance and handoff KPI'],
+  leaderboard:['Team Leaderboard','CSM performance ranking and weekly target compliance'],
+  f2f:['Exec F2F Cadence','Executive Sponsor face-to-face coverage for tier-1 strategic accounts'],
   riskesc:['Risk & Escalation','Health risk and active escalations'],
   expansions:['Expansions','Upsell pipeline and whitespace'],
   objadopt:['Objectives & Adoption','Customer objectives and product adoption'],
@@ -3279,6 +3288,98 @@ async function renderPaymentRisk(){
   _renderPaymentRiskChrome();
 }
 
+// ── V5 Leadership views: Onboarding governance, Team Leaderboard, Exec F2F ──
+function _kpiStat(label,value,sub){
+  return '<div class="stat"><div class="stat-v">'+(value==null?'-':value)+'</div>'+
+    '<div class="stat-k">'+escapeHtml(label)+'</div>'+(sub?'<div class="stat-s muted">'+escapeHtml(sub)+'</div>':'')+'</div>';
+}
+function _pct(v){ return v==null?'<span class="muted">no data</span>':v+'%'; }
+
+async function renderOnboarding(){
+  const host=document.getElementById('onboarding-body'); if(!host) return;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading onboarding governance…</span></div></div>';
+  let d;
+  try{ d=await (await api('/api/onboarding-governance')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load onboarding governance.</div></div></div>'; return; }
+  if(!d.connected){
+    host.innerHTML='<div class="panel"><div class="head"><h2>Onboarding Governance</h2><span class="note warn">Rocket Lane not connected</span></div>'+
+      '<div class="body pad"><div class="empty"><b>Rocket Lane is not connected</b><div class="sub" style="margin-top:6px">'+escapeHtml(d.note||'Connect Rocket Lane to populate implementation governance.')+' No sample data is shown.</div></div></div></div>';
+    return;
+  }
+  const kpiClass = (d.handoff_on_time_pct!=null && d.handoff_on_time_pct<d.handoff_on_time_target_pct)?'warn':'';
+  const strip='<div class="panel"><div class="body pad"><div class="stats">'+
+    _kpiStat('Active projects', d.active_projects)+
+    _kpiStat('Stalled before handoff', d.stalled_projects)+
+    _kpiStat('Avg days in onboarding', d.avg_days_in_onboarding)+
+    _kpiStat('On-time handoff', _pct(d.handoff_on_time_pct), 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed')+
+    '</div></div></div>';
+  const row=p=>'<tr>'+
+    '<td>'+escapeHtml(p.name||p.account_id||'')+'</td>'+
+    '<td>'+escapeHtml(p.project_name||'-')+'</td>'+
+    '<td>'+escapeHtml(p.status||'-')+'</td>'+
+    '<td>'+(p.days_in_onboarding==null?'-':p.days_in_onboarding+'d')+'</td>'+
+    '<td>'+escapeHtml(p.owner||'-')+'</td>'+
+    '<td>'+(p.stalled?'<span class="note warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="muted">on track</span>')+'</td>'+
+    '</tr>';
+  const projs=(d.projects||[]);
+  const table=projs.length
+    ? '<table class="tbl"><thead><tr><th>Account</th><th>Project</th><th>Status</th><th>In onboarding</th><th>Owner</th><th>Signal</th></tr></thead><tbody>'+projs.map(row).join('')+'</tbody></table>'
+    : '<div class="empty">No active onboarding projects in scope.</div>';
+  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>Active implementations</h2><span class="note">Rocket Lane projects, longest in onboarding first</span></div><div class="body">'+table+'</div></div>';
+}
+
+async function renderLeaderboard(){
+  const host=document.getElementById('leaderboard-body'); if(!host) return;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading team leaderboard…</span></div></div>';
+  let d;
+  try{ d=await (await api('/api/leaderboard')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load the leaderboard.</div></div></div>'; return; }
+  const board=d.leaderboard||[];
+  const strip='<div class="panel"><div class="body pad"><div class="stats">'+
+    _kpiStat('Weekly target compliance', _pct(d.weekly_target_compliance_pct), 'target '+d.weekly_target_compliance_target_pct+'%')+
+    _kpiStat('CSMs measured', d.measurable_csms)+
+    '</div>'+(d.note?'<div class="muted" style="margin-top:8px">'+escapeHtml(d.note)+'</div>':'')+'</div></div>';
+  const row=b=>'<tr>'+
+    '<td>'+b.rank+'</td>'+
+    '<td>'+escapeHtml(b.csm||'')+'</td>'+
+    '<td>'+(b.completion_rate_pct==null?'<span class="muted">no data</span>':b.completion_rate_pct+'%'+(b.meets_target===false?' <span class="note warn">below</span>':b.meets_target===true?' <span class="note ok">✓</span>':''))+'</td>'+
+    '<td>'+(b.completed_tasks||0)+'</td>'+
+    '<td>'+(b.open_tasks||0)+'</td>'+
+    '<td>'+(b.overdue_tasks||0)+'</td>'+
+    '<td>'+(b.outreach_target==null?'<span class="muted">not set</span>':b.outreach_target)+'</td>'+
+    '<td>'+(b.accounts==null?'<span class="muted">—</span>':b.accounts)+'</td>'+
+    '</tr>';
+  const table=board.length
+    ? '<table class="tbl"><thead><tr><th>#</th><th>CSM</th><th>Completion</th><th>Done</th><th>Open</th><th>Overdue</th><th>Outreach target</th><th>Accounts</th></tr></thead><tbody>'+board.map(row).join('')+'</tbody></table>'
+    : '<div class="empty">No CSM activity to rank yet.</div>';
+  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>CSM leaderboard</h2><span class="note">Ranked by week-ending completion rate</span></div><div class="body">'+table+'</div></div>';
+}
+
+async function renderF2F(){
+  const host=document.getElementById('f2f-body'); if(!host) return;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading executive F2F cadence…</span></div></div>';
+  let d;
+  try{ d=await (await api('/api/f2f-cadence')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load F2F cadence.</div></div></div>'; return; }
+  const kpiClass=(d.tier1_exec_touchpoint_pct!=null && d.tier1_exec_touchpoint_pct<d.target_pct)?'warn':'';
+  const strip='<div class="panel"><div class="body pad"><div class="stats">'+
+    _kpiStat('Tier-1 exec touchpoint', _pct(d.tier1_exec_touchpoint_pct), 'target '+d.target_pct+'% · '+d.cadence_window_days+'d window')+
+    _kpiStat('Tier-1 strategic accounts', d.tier1_strategic_accounts)+
+    _kpiStat('With in-window F2F', d.with_in_window_touchpoint)+
+    '</div></div></div>';
+  const od=(d.overdue_accounts||[]);
+  const row=a=>'<tr>'+
+    '<td>'+escapeHtml(a.name||a.account_id||'')+'</td>'+
+    '<td>'+escapeHtml(a.owner||'-')+'</td>'+
+    '<td>'+escapeHtml(a.exec_sponsor||'<span class="note warn">no sponsor tagged</span>')+'</td>'+
+    '<td>'+(a.last_f2f?escapeHtml(a.last_f2f):'<span class="note warn">never</span>')+'</td>'+
+    '</tr>';
+  const table=od.length
+    ? '<table class="tbl"><thead><tr><th>Account</th><th>Owner</th><th>Executive Sponsor</th><th>Last F2F</th></tr></thead><tbody>'+od.map(row).join('')+'</tbody></table>'
+    : '<div class="empty">Every tier-1 strategic account has a recent executive F2F. 🎉</div>';
+  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>Overdue executive F2F</h2><span class="note">Tier-1 strategic accounts without an in-window touchpoint</span></div><div class="body">'+table+'</div></div>';
+}
+
 function render(v){
   // Defensive: never attempt to render account/task data before the portfolio has
   // loaded. If a view is opened during boot, retry once DATA is ready.
@@ -3323,6 +3424,9 @@ function render(v){
   if(v==='pooled') pooledLeaf(_pooledLeaf||'process');
   if(v==='reports') renderTableauReports();
   if(v==='paymentrisk') renderPaymentRisk();
+  if(v==='onboarding') renderOnboarding();
+  if(v==='leaderboard') renderLeaderboard();
+  if(v==='f2f') renderF2F();
   if(v==='life') loadLifecycle();
   if(v==='kpi') loadKpis();
   if(v==='agent') loadAgentFeedbackSummary();

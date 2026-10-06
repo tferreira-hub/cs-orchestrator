@@ -3076,6 +3076,10 @@ def integrations() -> dict:
             liveset.add("Tableau")
     except Exception:  # noqa: BLE001
         pass
+    # ROI AI is "live" once the inbound webhook signing secret is configured (the vendor
+    # can then post signed telemetry). Mirrors the Tableau config-driven liveness check.
+    if roi_ai_configured():
+        liveset.add("ROI AI")
     # Precise, honest status. Three distinct states instead of a vague "not connected":
     #   connected (live)      — the source is authenticated and returning data
     #   configuration required — we have access but a specific env value is missing
@@ -3089,6 +3093,7 @@ def integrations() -> dict:
         "Zendesk": ("ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_TOKEN"),
         "Churn Model": ("REDSHIFT_DATABASE", "REDSHIFT_CHURN_TABLE"),
         "Entitlements": ("ENTITLEMENTS_API_URL", "ENTITLEMENTS_KEY"),
+        "ROI AI": ("ROI_AI_WEBHOOK_SECRET",),
     }
     def status_for(name):
         if name in liveset:
@@ -3150,6 +3155,11 @@ def integrations() -> dict:
              "direction": "read-only", "access": "read-only",
              **status_for("Entitlements"),
              "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
+            {"system": "ROI AI", "category": "Product Telemetry · webhook",
+             "direction": "inbound webhook (signed)", "access": "read-only",
+             **status_for("ROI AI"),
+             "pulls": ["ROI AI adoption score", "active ROI users", "ROI realized", "trend"],
+             "pushes": []},
             {"system": "Tableau", "category": "Analytics / Reporting", "direction": "embed (SSO)",
              "access": "read-only", **status_for("Tableau"),
              "pulls": ["embedded dashboards (Revenue, NDR, Billing, Stripe)"],
