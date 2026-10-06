@@ -802,6 +802,107 @@ def test_send_digest_hubspot_provider_sends_via_seam(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
+def test_churn_risk_matrix_groups_by_driver_and_arr(monkeypatch):
+    """UC3 ML Churn Risk Matrix: the >=70% GENUINE ML cohort is grouped by primary risk
+    driver with ARR impact; computed-fallback scores and below-threshold accounts are
+    excluded; churned accounts are bucketed separately."""
+    import engine, dataaccess
+
+    def mk(aid, arr, ml=None, computed=False, churned=False, sev1=0,
+           t_last=0, t_prev=0, logins_now=0, logins_prev=0, dunning=None):
+        churn = {}
+        if churned:
+            churn["churn_status"] = "churned"
+        if ml is not None:
+            churn["ml_churn_score"] = ml
+            churn["computed"] = computed
+        return {aid: {
+            "hubspot": {"name": aid, "arr_usd": arr, "segment": "Strategic",
+                        "csm_owner": "A", "contacts": [],
+                        "instances": [{"instance_id": aid, "instance_type": "primary"}]},
+            "sources": {"hubspot": "live", "churn": "live", "zendesk": "live",
+                        "usage": "live", "stripe": "live"},
+            "zendesk": {"sev1_open": sev1, "tickets_last_7d": t_last, "tickets_prev_7d": t_prev},
+            "usage": {"logins_last_7d": logins_now, "logins_prev_7d": logins_prev},
+            "stripe": {"dunning_stage": dunning} if dunning else {},
+            "churn": churn, "jiminny": {}, "onboarding": {}, "metrics": {}}}
+
+    data = {}
+    data.update(mk("a-sev1", 100000, ml=0.80, sev1=1))
+    data.update(mk("a-spike", 50000, ml=0.75, t_last=20, t_prev=5, logins_now=2, logins_prev=20))
+    data.update(mk("a-usage", 40000, ml=0.72, logins_now=1, logins_prev=10))
+    data.update(mk("a-bill", 30000, ml=0.71, dunning="day_15_plus"))
+    data.update(mk("a-computed", 90000, ml=0.95, computed=True))   # EXCLUDED: computed, not ML
+    data.update(mk("a-low", 60000, ml=0.40))                        # EXCLUDED: below threshold
+    data.update(mk("a-churned", 25000, churned=True))
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: data)
+    # churn_risk_matrix reads orchestrate.load_accounts(); install the provider directly so
+    # the test is order-independent (conftest resets the provider to the fixture loader).
+    engine.orchestrate.set_account_provider(lambda: data)
+    engine.set_principal(None)
+
+    try:
+        m = engine.churn_risk_matrix()
+        assert m["threshold_pct"] == 70
+        assert m["cohort_accounts"] == 5           # sev1, spike, usage, bill, churned
+        assert m["cohort_arr_usd"] == 245000       # 100k+50k+40k+30k+25k
+        drivers = {b["driver"]: b for b in m["by_driver"]}
+        assert set(drivers) == {"sev1", "ticket_spike", "usage_drop", "billing", "churned"}
+        assert drivers["sev1"]["arr_usd"] == 100000
+        assert drivers["billing"]["arr_usd"] == 30000
+        # computed + below-threshold are absent from every bucket
+        all_members = {mm["account_id"] for b in m["by_driver"] for mm in b["members"]}
+        assert "a-computed" not in all_members and "a-low" not in all_members
+        # buckets sorted by ARR impact descending
+        assert [b["arr_usd"] for b in m["by_driver"]] == sorted(
+            [b["arr_usd"] for b in m["by_driver"]], reverse=True)
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+        engine.set_principal(None)
+
+
+def test_send_digest_to_admin_and_exec_sponsor_with_timeline(monkeypatch):
+    """UC2: the monthly dispatch goes to BOTH the Primary Admin and the Executive Sponsor,
+    and logs ONE copy to the HubSpot record timeline after a successful send."""
+    import engine, dataaccess
+    acct = {"hubspot": {"name": "DualCo", "arr_usd": 80000, "csm_owner": "C",
+                        "contacts": [
+                            {"role": "Primary Champion / Admin", "email": "admin@dual.com", "name": "Ada"},
+                            {"role": "Executive Sponsor", "email": "exec@dual.com", "name": "Eve"}]},
+            "usage": {"license_utilization_pct": 90}, "zendesk": {"csat_30d": 88},
+            "sources": {"hubspot": "live", "usage": "live", "zendesk": "live"},
+            "churn": {}, "jiminny": {}, "stripe": {}, "onboarding": {}, "metrics": {}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"au1-d2": acct})
+    engine.set_principal(None)
+    engine.orchestrate.set_account_provider(lambda: {"au1-d2": acct})
+    monkeypatch.setenv("CS_ALLOW_WRITE", "1")
+    monkeypatch.setenv("CS_EMAIL_PROVIDER", "hubspot")
+    monkeypatch.setattr(engine._src.HUBSPOT, "live", lambda: True)
+    monkeypatch.setattr(engine.dataaccess, "_ADAPTERS", True, raising=False)
+    sent, notes = [], []
+    monkeypatch.setattr(engine._src.HUBSPOT, "send_transactional_email",
+                        lambda to, subject=None, custom_properties=None, apply=False:
+                            (sent.append(to) or {"sent": True, "mode": "applied", "send_result": "SENT"}))
+    monkeypatch.setattr(engine._src.HUBSPOT, "log_note",
+                        lambda aid, note, apply=False: (notes.append((aid, note)) or {"logged": True, "mode": "logged"}))
+    try:
+        # digest resolves both recipients
+        d = engine.monthly_digest("au1-d2")
+        assert d["recipient"] == "admin@dual.com" and d["exec_sponsor"] == "exec@dual.com"
+        assert [r["role"] for r in d["recipients"]] == ["Primary Champion / Admin", "Executive Sponsor"]
+        assert d["missing_exec_sponsor"] is False
+
+        r = engine.send_digest("au1-d2", apply=True)["result"]
+        assert r["sent"] is True and r["mode"] == "applied"
+        assert sent == ["admin@dual.com", "exec@dual.com"]        # BOTH recipients
+        assert {s["role"] for s in r["recipients"]} == {"Primary Champion / Admin", "Executive Sponsor"}
+        assert r["timeline_logged"]["logged"] is True             # ONE timeline copy
+        assert len(notes) == 1 and notes[0][0] == "au1-d2"
+    finally:
+        engine.orchestrate.set_account_provider(engine.orchestrate._load)
+        engine.set_principal(None)
+
+
 def test_create_csql_two_gate(monkeypatch):
     """Creating an expansion deal (CSQL) is dry-run unless apply=true AND CS_ALLOW_WRITE=1."""
     from adapters import config, sources
