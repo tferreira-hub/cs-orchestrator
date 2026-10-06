@@ -617,6 +617,8 @@ body.dock-open .drawer{right:420px}
 .cp-tabs .cp-tab .cp-tico{opacity:.7;font-size:.9em}
 .cp-tabs .cp-name{font-weight:800;color:var(--ink);padding:10px 12px 10px 0;margin-right:6px;border-right:1px solid var(--line);display:inline-flex;align-items:center;gap:8px}
 .cp-title{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.cp-back{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:0 0 34px;border:1px solid var(--line);border-radius:9px;color:var(--ink2);text-decoration:none;font-size:1.2em;background:var(--surface);transition:border-color .15s,color .15s}
+.cp-back:hover{border-color:var(--brand);color:var(--brand)}
 .cp-title .hcircle{width:34px;height:34px;flex:0 0 34px;font-size:.9em}
 .cp-title h1{font-size:1.5em;font-weight:800;letter-spacing:-.02em}
 .cp-title .cp-sub{font-size:.8em;color:var(--muted);margin-top:2px}
@@ -4603,11 +4605,20 @@ function renderCompanyPage(id,d){
     tile('📈',usageChange,'Usage change',(us.usage_change_pct!=null&&us.usage_change_pct<0)?'warn':'')+
     tile('◈',health.computable?health.score:'–','Business health',health.band==='red'?'warn':health.band==='green'?'good':'')+
   '</div>';
-  // Signals section
+  // Signals section: trend risks (health declines over time) first; when none exist,
+  // surface the current health drivers as live signals so the section is never bare.
   const trendRisks=d.trend_risks||[];
-  const signals=trendRisks.length
-    ? '<div class="cp-feed">'+trendRisks.map(r=>'<div class="cp-item"><span class="cp-iico sev-'+(r.severity||'medium')+'">!</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(r.title)+'</div><div class="cp-idesc" title="'+escapeHtml(r.evidence||'')+'">'+escapeHtml(r.evidence||'')+'</div></div></div>').join('')+'</div>'
-    : '<div class="cp-signals">No active signals. The health drivers and timeline below carry the current evidence.</div>';
+  let signals;
+  if(trendRisks.length){
+    signals='<div class="cp-feed">'+trendRisks.map(r=>'<div class="cp-item"><span class="cp-iico sev-'+(r.severity||'medium')+'">!</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(r.title)+'</div><div class="cp-idesc" title="'+escapeHtml(r.evidence||'')+'">'+escapeHtml(r.evidence||'')+'</div></div></div>').join('')+'</div>';
+  } else if(health.computable && (health.reasons||[]).length){
+    signals='<div class="cp-signals" style="margin-bottom:8px">No declining trend over the last 45 days. Current point-in-time risk drivers:</div>'+
+      '<div class="cp-feed">'+(health.reasons||[]).map(r=>'<div class="cp-item"><span class="cp-iico sev-medium">!</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(r)+'</div></div></div>').join('')+'</div>';
+  } else if(health.computable){
+    signals='<div class="cp-signals">Healthy across all live signals. No active risk drivers.</div>';
+  } else {
+    signals='<div class="cp-signals">Not enough live signal to compute health. Connect more sources or wait for the next sync.</div>';
+  }
   // Conversations / activity feed from the timeline (grouped by pinned=high severity, then dated)
   const tl=(d.timeline||[]).slice();
   const feedItem=e=>{
@@ -4628,6 +4639,8 @@ function renderCompanyPage(id,d){
   const churnVal=conn.churn?(ch.churn_status?escapeHtml(ch.churn_status):(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%'+(ch.computed?' <span class="muted" style="font-weight:400;font-size:.85em">computed</span>':' <span class="muted" style="font-weight:400;font-size:.85em">Redshift</span>'):ND)):NC;
   const payVal=conn.stripe?(function(){var stage=st.dunning_stage||'none';if(stage==='none'){return (st.past_due_invoices>0)?'<span class="pill a">'+st.past_due_invoices+' past-due</span>':'<span class="pill g">Up to date</span>';}return '<span class="pill r">'+escapeHtml(stage.replace(/_/g,' '))+'</span>';})():NC;
   const adopt2=d.adoption||{};
+  const expn=d.expansion||{};
+  const lcs=d.lifecycle_state||{};
   const keyMetrics='<div class="cp-kmgrid">'+
     km('Churn model',churnVal)+
     km('CSAT (30 days)',cell('zendesk',zd.csat_30d))+
@@ -4638,14 +4651,17 @@ function renderCompanyPage(id,d){
     km('Pendo engagement',cell('usage',us.pendo_adoption_engagement))+
     km('Usage trend',cell('usage',us.pendo_trend))+
     km('Plan tier',cell('usage',us.plan_tier))+
-    km('Product adoption',(adopt2.adoption_score!=null?adopt2.adoption_score+'/100':(adopt2.score!=null?adopt2.score+'/100':ND)))+
+    km('Product adoption',(adopt2.adoption_score!=null?adopt2.adoption_score+'/100':(adopt2.score!=null?adopt2.score+'/100':ND))+
+      (adopt2.gaps&&adopt2.gaps.length?' <span class="muted" style="font-size:.82em">gaps: '+adopt2.gaps.map(escapeHtml).join(', ')+'</span>':''))+
     km('Latest Jiminny call',cell('jiminny',jm.last_call_date))+
     km('Call score',cell('jiminny',(jm.average_score!=null?jm.average_score:jm.sentiment)))+
     km('Payment',payVal)+
+    km('Expansion readiness',expn.computable?('<span class="pill '+(expn.band==='high'?'ok':expn.band==='medium'?'':expn.band==='low'?'warn':'')+'">'+expn.score+'/100 '+escapeHtml(expn.band||'')+'</span>'+
+      (expn.drivers&&expn.drivers.length?' <span class="muted" style="font-size:.82em">'+expn.drivers.map(escapeHtml).join('; ')+'</span>':'')):ND)+
+    km('Lifecycle state',lcs.stage?('<span class="pill pln">'+escapeHtml(lcs.stage)+'</span>'+(lcs.reason?' <span class="muted" style="font-size:.82em">'+escapeHtml(lcs.reason)+'</span>':'')):cell('hubspot',hs.lifecycle_stage))+
     km('Primary instances',cell('hubspot',(d.primary_instances||[]).join(', ')))+
     km('Region',cell('hubspot',hs.state||hs.country))+
     km('Subscription',cell('hubspot',hs.subscription_type))+
-    km('Lifecycle stage',cell('hubspot',hs.lifecycle_stage))+
   '</div>';
   // Full contacts list
   const contactsList=(hs.contacts&&hs.contacts.length)?('<div class="cp-contacts">'+hs.contacts.map(c=>'<div class="cp-contact"><span class="cp-cav">'+escapeHtml((c.name||'?').slice(0,1).toUpperCase())+'</span><div><div class="cp-cn">'+escapeHtml(c.name||'(unnamed)')+(c.role?' <span class="cp-crole">'+escapeHtml(c.role)+'</span>':'')+'</div>'+(c.email?'<div class="cp-ce">'+escapeHtml(c.email)+'</div>':'')+'</div></div>').join('')+'</div>'):'<div class="cp-signals">No contacts in HubSpot.</div>';
@@ -4676,7 +4692,7 @@ function renderCompanyPage(id,d){
   // Assemble. Each section is tagged with the tabs it belongs to (data-cpt, space-separated)
   // so cpTab() can show the relevant subset; Overview shows everything.
   const left='<div>'+
-    '<div class="cp-title"><h1>'+escapeHtml(title)+'</h1>'+circle+
+    '<div class="cp-title"><a class="cp-back" href="#" onclick="event.preventDefault();history.back()" title="Back">&#x2190;</a><h1>'+escapeHtml(title)+'</h1>'+circle+
       '<div class="cp-actions"><button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane</button>'+
       '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button></div></div>'+
     '<div data-cpt="overview related usage revenue">'+tiles+'</div>'+
