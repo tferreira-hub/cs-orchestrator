@@ -2091,3 +2091,24 @@ def test_operating_rhythm_groups_tasks_into_wow_blocks(monkeypatch):
     assert b["weekly_adoption_qbr"]["count"] == 1
     assert b["monday_review"]["summary"]["p1_count"] == 1
     assert b["monday_review"]["summary"]["worst_health"][0]["account_id"] == "au1-a"
+
+
+def test_adoption_score_uses_aggregation_counts_when_no_pct():
+    """When Pendo exposes no mapped adoption/feature PERCENTAGES (the real state on this
+    install), the adoption score must still compute from the live Aggregation-API counts
+    (active_users_30d, features_used_30d). An active account scores high; an idle one 0."""
+    import engine
+    active = {"usage": {"active_users_30d": 135, "features_used_30d": 935,
+                        "days_since_last_visit": 1}}
+    r = engine.adoption_score(active)
+    assert r["computable"] is True
+    assert r["score"] >= 90, f"active account should score high, got {r['score']}"
+    labels = [c["label"] for c in r["components"]]
+    assert "Active users (30d)" in labels
+    assert "Feature breadth (30d)" in labels
+
+    idle = {"usage": {"active_users_30d": 0, "features_used_30d": 0,
+                      "days_since_last_visit": 126}}
+    r2 = engine.adoption_score(idle)
+    assert r2["computable"] is True
+    assert r2["score"] == 0, f"idle account should score 0, got {r2['score']}"

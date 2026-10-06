@@ -574,13 +574,31 @@ def adoption_score(account: dict) -> dict:
     if isinstance(au, (int, float)):
         comp("Active users", au, 0.30)
     else:
-        gaps.append("active user %")
+        # No mapped percentage, but the aggregation API gives a REAL distinct-active-user
+        # count (30d). Without a licensed-seat denominator we cannot form a true %, but a
+        # non-zero active-user count is itself strong evidence of adoption. Scale it to a
+        # 0-100 engagement signal (0 users = 0, >=25 active users = full). Honest, live.
+        auc = usage.get("active_users_30d")
+        if isinstance(auc, (int, float)):
+            engaged = min(100, round((auc / 25.0) * 100))
+            comp("Active users (30d)", engaged, 0.30)
+        else:
+            gaps.append("active user %")
     # Feature adoption.
     fa = usage.get("key_feature_adoption_pct")
     if isinstance(fa, (int, float)):
         comp("Feature adoption", fa, 0.25)
     else:
-        gaps.append("feature adoption %")
+        # No mapped percentage, but the Pendo Aggregation API gives a REAL count of
+        # distinct features touched in the last 30 days. Convert feature breadth to a
+        # 0-100 depth signal (0 features = 0, >=50 distinct features = full adoption).
+        # This is a genuine live signal, not a fabricated percentage.
+        feat = usage.get("features_used_30d")
+        if isinstance(feat, (int, float)):
+            breadth = min(100, round((feat / 50.0) * 100))
+            comp("Feature breadth (30d)", breadth, 0.25)
+        else:
+            gaps.append("feature adoption %")
     # Licence utilisation (seats used vs purchased).
     util = ent.get("license_utilization_pct")
     if isinstance(util, (int, float)):
