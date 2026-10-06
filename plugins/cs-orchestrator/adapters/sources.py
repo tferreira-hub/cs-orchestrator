@@ -1139,60 +1139,71 @@ class HubSpot:
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
                  "cs_customer_tier", "industry", "country"]
         rows: list[dict[str, Any]] = []
-        after = None
-        while len(rows) < limit:
-            page = min(100, limit - len(rows))
-            body = {
-                "filterGroups": [{"filters": [
-                    {"propertyName": "lifecyclestage", "operator": "IN",
-                     "values": self._ingest_lifecycle_stages()}  # customer + churned by default; configurable to add onboarding
-                ]}],
-                "properties": props,
-                "limit": page,
+
+        def _n(p, *keys):
+            for k in keys:
+                v = p.get(k)
+                if v not in (None, ""):
+                    try:
+                        return int(float(v))
+                    except (ValueError, TypeError):
+                        pass
+            return None
+
+        def _row(r: dict) -> dict:
+            p = r.get("properties", {})
+            acc = p.get("account_id")
+            tier = (p.get("cs_customer_tier") or "").strip()
+            managed = bool(acc)
+            pooled = (tier.lower() == "pooled") or (not managed)
+            raw_segment = p.get("icp_sales_segment") or p.get("cs_segment")
+            return {
+                "company_id": r.get("id"),
+                "account_id": (identity.normalise(acc) if acc else None),
+                "name": p.get("name"),
+                "arr_usd": _n(p, "arr__v2_", "arr", "hs_active_contracts_arr"),
+                "segment": self._map_segment(raw_segment),
+                "segment_label": raw_segment,
+                "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
+                                    .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
+                "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                "customer_tier": tier or None,
+                "managed": managed,
+                "pooled": pooled,
+                "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
+                "country": p.get("country"),
+                "industry": (p.get("industry") or "").replace("_", " ").title() or None,
+                "_source": "hubspot-live",
             }
-            if after:
-                body["after"] = after
-            res = config.http_post(
-                "https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
-            for r in res.get("results", []):
-                p = r.get("properties", {})
-                acc = p.get("account_id")
-                tier = (p.get("cs_customer_tier") or "").strip()
-                managed = bool(acc)
-                pooled = (tier.lower() == "pooled") or (not managed)
 
-                def _n(*keys):
-                    for k in keys:
-                        v = p.get(k)
-                        if v not in (None, ""):
-                            try:
-                                return int(float(v))
-                            except (ValueError, TypeError):
-                                pass
-                    return None
-
-                raw_segment = p.get("icp_sales_segment") or p.get("cs_segment")
-                rows.append({
-                    "company_id": r.get("id"),
-                    "account_id": (identity.normalise(acc) if acc else None),
-                    "name": p.get("name"),
-                    "arr_usd": _n("arr__v2_", "arr", "hs_active_contracts_arr"),
-                    "segment": self._map_segment(raw_segment),
-                    "segment_label": raw_segment,
-                    "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
-                                        .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
-                    "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
-                    "customer_tier": tier or None,
-                    "managed": managed,
-                    "pooled": pooled,
-                    "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
-                    "country": p.get("country"),
-                    "industry": (p.get("industry") or "").replace("_", " ").title() or None,
-                    "_source": "hubspot-live",
-                })
-            after = (res.get("paging", {}) or {}).get("next", {}).get("after")
-            if not after:
+        # Scan ONE lifecycle stage at a time, in the configured order, paginating each
+        # fully before the next. _ingest_lifecycle_stages() lists ACTIVE first ('customer')
+        # then churned ('20251280'), so the active book always fills before the churned
+        # bucket — critical because churned (~6.9k) is far larger than active (~4.3k) and
+        # would otherwise exhaust the limit / partial warm and crowd active accounts out of
+        # the roster that drives the dashboard's default "active" view.
+        for stage in self._ingest_lifecycle_stages():
+            if len(rows) >= limit:
                 break
+            after = None
+            while len(rows) < limit:
+                page = min(100, limit - len(rows))
+                body = {
+                    "filterGroups": [{"filters": [
+                        {"propertyName": "lifecyclestage", "operator": "EQ", "value": stage}
+                    ]}],
+                    "properties": props,
+                    "limit": page,
+                }
+                if after:
+                    body["after"] = after
+                res = config.http_post(
+                    "https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
+                for r in res.get("results", []):
+                    rows.append(_row(r))
+                after = (res.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
         HubSpot._full_roster_cache = (_t.time(), rows, limit)
         return rows[:limit]
 
