@@ -80,6 +80,7 @@ RULE_SEAT_CONTRACTION = "seat_user_contraction"          # P2 MUST_PROTECT (sudd
 RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
 RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
+RULE_EXPANSION_ROI_AI = "expansion_roi_ai_spike"             # P3 MUST_EXPAND (ROI AI adoption spike)
 RULE_RENEWAL_CADENCE = "proactive_renewal_cadence"       # P4 MUST_EXPAND (T-120/90/60/30)
 RULE_EXEC_F2F_CADENCE = "exec_sponsor_f2f_cadence"       # P4 MUST_EXPAND (tier-1 strategic exec F2F)
 RULE_ADOPTION_INTERVENTION = "adoption_onboarding_intervention"  # P5 MUST_USE
@@ -97,6 +98,7 @@ RULE_PRIORITY = {
     RULE_EXPANSION_UTILIZATION: 3,
     RULE_EXPANSION_API_SURGE: 3,
     RULE_EXPANSION_ADOPTION: 3,
+    RULE_EXPANSION_ROI_AI: 3,
     RULE_RENEWAL_CADENCE: 4,
     RULE_EXEC_F2F_CADENCE: 4,
     RULE_ADOPTION_INTERVENTION: 5,
@@ -369,6 +371,18 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
                 {"pendo_adoption": usage.get("pendo_adoption"),
                  "days_since_last_visit": dsv},
                 "High product adoption on a healthy account, explore upsell / additional seats.")
+        else:
+            # ROI AI adoption spike (V5): high + rising ROI AI adoption on a healthy
+            # Strategic account is a genuine upsell cue. Only when the telemetry is present
+            # (data-gap otherwise).
+            roi = a.get("roi_ai", {}) or {}
+            roi_adopt = roi.get("adoption_score")
+            if (isinstance(roi_adopt, (int, float)) and roi_adopt >= 75
+                    and str(roi.get("trend") or "").lower() == "up"):
+                add(RULE_EXPANSION_ROI_AI, 3, "MUST_EXPAND", "Expansion trigger (ROI AI adoption spike)",
+                    {"roi_ai_adoption_score": roi_adopt, "roi_ai_trend": roi.get("trend"),
+                     "metric_date": roi.get("metric_date"), "_source": "roi-ai-webhook"},
+                    "ROI AI adoption is high and rising, explore upsell / additional modules.")
 
     # --- MUST_USE: adoption and onboarding ---
     adoption_drivers = []

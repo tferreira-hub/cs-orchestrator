@@ -763,6 +763,33 @@ class Handler(BaseHTTPRequestHandler):
                 form = urllib.parse.parse_qs(raw.decode("utf-8", "replace"))
                 self._handle_dev_login({"email": (form.get("email") or [""])[0]}); return
 
+            # ROI AI telemetry webhook (V5). Machine-to-machine: authenticated by an HMAC
+            # signature over the RAW body (NOT the user cookie), so it is handled BEFORE the
+            # auth gate. 503 when unconfigured; 401 bad signature; 400 invalid payload;
+            # idempotent on event_id. Never fabricates and never partially writes.
+            if path == "/api/webhooks/roi-ai":
+                if not engine.roi_ai_configured():
+                    self._json(503, {"error": "roi_ai_not_configured",
+                                     "detail": "ROI AI webhook secret is not set; ingestion is disabled."})
+                    return
+                sig = self.headers.get("X-RoiAi-Signature")
+                if not engine.verify_roi_ai_signature(raw, sig):
+                    self._json(401, {"error": "invalid_signature"}); return
+                try:
+                    payload = json.loads(raw or b"{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("body must be a JSON object")
+                except (ValueError, TypeError):
+                    self._json(400, {"error": "invalid_json"}); return
+                try:
+                    result = engine.record_roi_ai(payload)
+                except ValueError as exc:
+                    self._json(400, {"error": "invalid_payload", "detail": str(exc)}); return
+                if result.get("duplicate"):
+                    self._json(200, {"status": "duplicate", "event_id": result.get("event_id")}); return
+                self._json(200, {"status": "accepted", "event_id": result.get("event_id"),
+                                 "account_id": result.get("account_id")}); return
+
             body = json.loads(raw or b"{}") if raw else {}
             if not isinstance(body, dict):
                 body = {}
