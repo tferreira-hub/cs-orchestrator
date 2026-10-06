@@ -757,6 +757,123 @@ def churn_risk_matrix(threshold: float | None = None) -> dict:
     }
 
 
+def _onboarding_days_in(start_date: str | None) -> int | None:
+    """Days a project has been in onboarding, from its start_date to today. None when
+    the start date is absent/unparseable (data-gap, never fabricated)."""
+    if not start_date:
+        return None
+    try:
+        start = datetime.fromisoformat(str(start_date)[:10]).date()
+    except (ValueError, TypeError):
+        return None
+    today_env = os.environ.get("CS_TODAY")
+    try:
+        today = datetime.fromisoformat(today_env).date() if today_env else date.today()
+    except ValueError:
+        today = date.today()
+    delta = (today - start).days
+    return delta if delta >= 0 else None
+
+
+def _onboarding_stalled(onboarding: dict) -> tuple[bool, list[str]]:
+    """Mirror the stalled logic in orchestrate.evaluate() so the governance view and the
+    queue agree. Returns (stalled, reasons)."""
+    status = str(onboarding.get("status") or "").lower()
+    health = str(onboarding.get("health") or "").lower()
+    reasons: list[str] = []
+    due = onboarding.get("due_date")
+    past_due_days = None
+    if due:
+        try:
+            d = datetime.fromisoformat(str(due)[:10]).date()
+            today_env = os.environ.get("CS_TODAY")
+            today = (datetime.fromisoformat(today_env).date() if today_env else date.today())
+            past_due_days = (today - d).days
+        except (ValueError, TypeError):
+            past_due_days = None
+    completed_states = {"completed", "complete", "done", "live"}
+    if status in {"stalled", "blocked", "at_risk", "on_hold"}:
+        reasons.append(f"status={onboarding.get('status')}")
+    if health in {"red", "at_risk"}:
+        reasons.append(f"health={onboarding.get('health')}")
+    if isinstance(past_due_days, int) and past_due_days > 0 and status not in completed_states:
+        reasons.append(f"{past_due_days}d past due")
+    return (bool(reasons), reasons)
+
+
+def onboarding_governance() -> dict:
+    """Rocket Lane implementation & onboarding governance (V5 UC3): the leadership view of
+    active onboarding projects, time-in-onboarding, milestone/handoff velocity, and
+    stalled-before-handoff alerts, with an on-time handoff KPI (target >= 90%).
+
+    Owner-scoped (admin: all; CSM: own book). HONEST: only accounts with a genuinely
+    matched live Rocket Lane project (`onboarding._matched`) contribute; when Rocket Lane
+    is not connected the view returns `connected: false` and never a fabricated zero."""
+    rocket_live = "Rocket Lane" in set(dataaccess.live_sources())
+    accounts = _scoped_accounts()
+
+    projects = []
+    stalled = []
+    on_time = overdue = 0
+    for aid, a in accounts.items():
+        ob = (a.get("onboarding", {}) or {})
+        if not ob.get("_matched"):
+            continue
+        hs = a.get("hubspot", {}) or {}
+        status = str(ob.get("status") or "").lower()
+        completed = status in {"completed", "complete", "done", "live"}
+        days_in = _onboarding_days_in(ob.get("start_date"))
+        is_stalled, reasons = _onboarding_stalled(ob)
+        # Handoff on-time accounting: only completed projects with a due date count toward
+        # the KPI denominator; a completed project not past its due date is on-time.
+        due = ob.get("due_date")
+        if completed and due:
+            try:
+                dd = datetime.fromisoformat(str(due)[:10]).date()
+                today_env = os.environ.get("CS_TODAY")
+                today = (datetime.fromisoformat(today_env).date() if today_env else date.today())
+                if today <= dd:
+                    on_time += 1
+                else:
+                    overdue += 1
+            except (ValueError, TypeError):
+                pass
+        row = {
+            "account_id": aid,
+            "name": hs.get("name") or aid,
+            "owner": hs.get("csm_owner") or "Unassigned",
+            "project_name": ob.get("project_name"),
+            "status": ob.get("status"),
+            "health": ob.get("health"),
+            "start_date": ob.get("start_date"),
+            "due_date": due,
+            "days_in_onboarding": days_in,
+            "completed": completed,
+            "stalled": is_stalled,
+            "stall_reasons": reasons,
+        }
+        if not completed and not (ob.get("archived")):
+            projects.append(row)
+        if is_stalled and not completed:
+            stalled.append(row)
+
+    handoff_denom = on_time + overdue
+    handoff_on_time_pct = round(100 * on_time / handoff_denom) if handoff_denom else None
+    active_days = [p["days_in_onboarding"] for p in projects if isinstance(p["days_in_onboarding"], int)]
+    return {
+        "connected": rocket_live,
+        "active_projects": len(projects),
+        "stalled_projects": len(stalled),
+        "avg_days_in_onboarding": round(sum(active_days) / len(active_days)) if active_days else None,
+        "handoff_on_time_pct": handoff_on_time_pct,
+        "handoff_on_time_target_pct": 90,
+        "handoff_completed": handoff_denom,
+        "projects": sorted(projects, key=lambda r: -(r["days_in_onboarding"] or 0)),
+        "stalled": sorted(stalled, key=lambda r: -(r["days_in_onboarding"] or 0)),
+        "note": (None if rocket_live else "Rocket Lane is not connected; onboarding governance is unavailable."),
+    }
+
+
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""
