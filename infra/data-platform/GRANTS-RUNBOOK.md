@@ -72,3 +72,10 @@ Run a read-only one-shot ECS task (or the app) and confirm:
   view's underlying `stg` dependency changes, grant SELECT on the new underlying object.
 - If the Data Platform ever rebuilds the warehouse users, re-run section 2.
 - Nothing here grants write; the reader cannot mutate warehouse data.
+- **CRITICAL (verified 2026-10):** modifying the IAM role — *even a tag-only change* — causes
+  Redshift to recreate the mapped `IAMR:cs-platform-churn-reader` DB user on the next assume,
+  which **drops these object grants**. Any `terraform apply` / role edit MUST be followed by
+  re-running section 2 and verifying section 4. This was observed when bringing the role under
+  Terraform: the tag flip wiped the grants; they were re-applied and NDR/churn confirmed live
+  again (734,867 NDR rows, 10,280 churn, 91% sample). Treat section 2 as a mandatory post-step
+  for any role change.
