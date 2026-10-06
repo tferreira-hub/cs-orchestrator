@@ -683,6 +683,17 @@ class Handler(BaseHTTPRequestHandler):
                 # UC3 Rocket Lane implementation/onboarding governance (active projects,
                 # time-in-onboarding, stalled-before-handoff, on-time handoff KPI).
                 self._json(200, engine.onboarding_governance()); return
+            if path == "/api/f2f-cadence":
+                # V5 Executive Sponsor F2F cadence KPI (tier-1 strategic touchpoints).
+                self._json(200, engine.f2f_cadence()); return
+            if path == "/api/f2f-log":
+                account_id = (query.get("account_id") or [""])[0].strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                if not engine.can_view_account(account_id):
+                    self._json(403, {"error": "forbidden", "account_id": account_id}); return
+                self._json(200, {"account_id": account_id, "entries": engine.f2f_log_for(account_id),
+                                 "last_f2f": engine.last_f2f(account_id)}); return
             if path == "/api/audit":
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
@@ -906,6 +917,30 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/success-plans":
                 try:
                     self._json(201, _record_success_plan(body, principal))
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
+            if path == "/api/f2f-log":
+                # Log an executive F2F touchpoint. Owner-scoped (you can only log F2F on
+                # accounts you own); audited. This is an internal CS record (append-only),
+                # not an outbound action, so it writes on a valid request (no apply gate),
+                # but is still owner-scoped + audited like other mutations.
+                account_id = (body.get("account_id") or "").strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only log F2F meetings on accounts you own."})
+                    return
+                try:
+                    entry = engine.record_f2f(body, principal)
+                    try:
+                        record_audit("f2f_logged", principal,
+                                     {"account_id": account_id, "f2f_id": entry.get("f2f_id"),
+                                      "met_on": entry.get("met_on")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(201, entry)
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
