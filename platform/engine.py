@@ -874,6 +874,127 @@ def onboarding_governance() -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Executive Sponsor F2F cadence (V5 UC2)
+# --------------------------------------------------------------------------- #
+# Append-only JSONL log of executive face-to-face touchpoints, following the
+# SUCCESS_PLANS pattern. Latest record per f2f_id wins (so a logged meeting can be
+# edited). CS_F2F_LOG_FILE relocates it (e.g. an EFS mount) so it survives restarts.
+F2F_LOG_FILE = Path(os.environ.get(
+    "CS_F2F_LOG_FILE", str(Path(__file__).resolve().parents[1] / ".cs-f2f-log.jsonl")))
+F2F_CADENCE_DAYS = int(os.environ.get("CS_F2F_CADENCE_DAYS", "90"))
+HIGH_ARR_TIER1 = 100000  # ARR proxy for tier-1 strategic when no explicit customer_tier
+
+
+def _f2f_today() -> date:
+    env = os.environ.get("CS_TODAY")
+    try:
+        return date.fromisoformat(env) if env else date.today()
+    except ValueError:
+        return date.today()
+
+
+def record_f2f(body: dict, principal: dict | None) -> dict:
+    """Log an executive F2F touchpoint. Append-only; latest-wins by f2f_id."""
+    account_id = str(body.get("account_id") or "").strip()
+    met_on = str(body.get("met_on") or "").strip() or _f2f_today().isoformat()
+    if not account_id:
+        raise ValueError("account_id is required")
+    try:
+        date.fromisoformat(met_on[:10])
+    except ValueError:
+        raise ValueError("met_on must be an ISO date (YYYY-MM-DD)")
+    entry = {
+        "f2f_id": body.get("f2f_id") or uuid.uuid4().hex[:12],
+        "account_id": account_id,
+        "met_on": met_on[:10],
+        "attendees": body.get("attendees") if isinstance(body.get("attendees"), list) else [],
+        "cs_leadership": body.get("cs_leadership") if isinstance(body.get("cs_leadership"), list) else [],
+        "notes": str(body.get("notes") or "").strip() or None,
+        "outcome": str(body.get("outcome") or "").strip() or None,
+        "logged_by": (principal or {}).get("email") or (principal or {}).get("name"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    F2F_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with F2F_LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+    return entry
+
+
+def f2f_log_for(account_id: str) -> list[dict]:
+    """All F2F entries for an account, newest first; latest record per f2f_id wins."""
+    if not F2F_LOG_FILE.exists():
+        return []
+    latest: dict[str, dict] = {}
+    for line in F2F_LOG_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if row.get("account_id") == account_id:
+            latest[row.get("f2f_id")] = row
+    return sorted(latest.values(), key=lambda r: r.get("met_on", ""), reverse=True)
+
+
+def last_f2f(account_id: str) -> str | None:
+    """Most recent F2F met_on date (ISO) for an account, or None (data-gap)."""
+    rows = f2f_log_for(account_id)
+    return rows[0]["met_on"] if rows else None
+
+
+def _is_tier1_strategic(hs: dict) -> bool:
+    """Tier-1 strategic signal: explicit customer_tier == 'tier-1'/'tier 1', else an
+    ARR >= HIGH_ARR_TIER1 proxy on a Strategic account."""
+    if (hs.get("segment") or "") != "Strategic":
+        return False
+    tier = str(hs.get("customer_tier") or "").strip().lower()
+    if tier in ("tier-1", "tier 1", "tier1", "strategic-tier-1"):
+        return True
+    arr = hs.get("arr_usd")
+    return isinstance(arr, (int, float)) and arr >= HIGH_ARR_TIER1
+
+
+def f2f_cadence() -> dict:
+    """Executive F2F cadence KPI (V5 UC2): of the tier-1 strategic accounts in scope, the
+    share that have an exec touchpoint within the cadence window (default 90 days).
+    Target 100%. Owner-scoped. Honest: an account with no F2F logged is simply overdue,
+    never credited with a fabricated meeting."""
+    accounts = _scoped_accounts()
+    today = _f2f_today()
+    tier1 = []
+    in_window = []
+    overdue = []
+    for aid, a in accounts.items():
+        hs = a.get("hubspot", {}) or {}
+        if not _is_tier1_strategic(hs):
+            continue
+        last = last_f2f(aid)
+        row = {"account_id": aid, "name": hs.get("name") or aid,
+               "owner": hs.get("csm_owner") or "Unassigned", "last_f2f": last,
+               "exec_sponsor": next((c.get("name") for c in hs.get("contacts", [])
+                                     if c.get("role") == "Executive Sponsor"), None)}
+        tier1.append(row)
+        within = False
+        if last:
+            try:
+                within = (today - date.fromisoformat(last)).days <= F2F_CADENCE_DAYS
+            except ValueError:
+                within = False
+        (in_window if within else overdue).append(row)
+    denom = len(tier1)
+    pct = round(100 * len(in_window) / denom) if denom else None
+    return {
+        "cadence_window_days": F2F_CADENCE_DAYS,
+        "tier1_strategic_accounts": denom,
+        "with_in_window_touchpoint": len(in_window),
+        "overdue_accounts": sorted(overdue, key=lambda r: (r["last_f2f"] or "")),
+        "tier1_exec_touchpoint_pct": pct,
+        "target_pct": 100,
+    }
+
+
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""

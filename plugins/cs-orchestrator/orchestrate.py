@@ -81,6 +81,7 @@ RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
 RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
 RULE_RENEWAL_CADENCE = "proactive_renewal_cadence"       # P4 MUST_EXPAND (T-120/90/60/30)
+RULE_EXEC_F2F_CADENCE = "exec_sponsor_f2f_cadence"       # P4 MUST_EXPAND (tier-1 strategic exec F2F)
 RULE_ADOPTION_INTERVENTION = "adoption_onboarding_intervention"  # P5 MUST_USE
 RULE_ONBOARDING_STAGNATION = "onboarding_stagnation"     # P3 MUST_USE (stalled onboarding)
 RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategic)
@@ -97,10 +98,34 @@ RULE_PRIORITY = {
     RULE_EXPANSION_API_SURGE: 3,
     RULE_EXPANSION_ADOPTION: 3,
     RULE_RENEWAL_CADENCE: 4,
+    RULE_EXEC_F2F_CADENCE: 4,
     RULE_ADOPTION_INTERVENTION: 5,
     RULE_ONBOARDING_STAGNATION: 3,
     RULE_CONTACT_HYGIENE: 5,
 }
+
+
+def _last_f2f_date(account_id: str) -> str | None:
+    """Most recent executive F2F date (ISO) for an account, read directly from the
+    append-only F2F log (CS_F2F_LOG_FILE) so the rules engine stays decoupled from the
+    platform engine (no circular import) and the judge's recompute reads identical state.
+    Returns None when there is no logged touchpoint (data-gap)."""
+    path = os.environ.get("CS_F2F_LOG_FILE") or str(
+        Path(__file__).resolve().parents[1] / ".cs-f2f-log.jsonl")
+    p = Path(path)
+    if not p.exists():
+        return None
+    latest: dict = {}
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("account_id") == account_id and row.get("f2f_id"):
+                latest[row["f2f_id"]] = row
+    except Exception:  # noqa: BLE001
+        return None
+    return max((r.get("met_on") for r in latest.values() if r.get("met_on")), default=None)
 
 
 def payment_disposition(segment: str, arr: int, stage: str) -> str:
@@ -434,6 +459,37 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         if milestone and segment == "Strategic" and churn_status != "churned":
             add(RULE_RENEWAL_CADENCE, 4, "MUST_EXPAND", f"Proactive renewal {milestone[0]}",
                 {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"]}, milestone[1])
+
+    # --- MUST_EXPAND: Executive Sponsor F2F cadence (V5 UC2) ---
+    # Tier-1 strategic accounts should have a periodic executive face-to-face. Fire when
+    # the account is tier-1 strategic (explicit customer_tier or a high-ARR proxy) and no
+    # F2F has been logged within the cadence window. Strategic-only + MUST_EXPAND keeps it
+    # consistent with the judge's segment_routing (Scaled MUST_EXPAND is a violation).
+    if segment == "Strategic" and churn_status != "churned":
+        _tier = str(hs.get("customer_tier") or "").strip().lower()
+        is_tier1 = _tier in ("tier-1", "tier 1", "tier1", "strategic-tier-1") or (arr or 0) >= HIGH_ARR
+        if is_tier1:
+            try:
+                cadence_days = int(os.environ.get("CS_F2F_CADENCE_DAYS", "90"))
+            except ValueError:
+                cadence_days = 90
+            last = _last_f2f_date(account_id)
+            overdue = True
+            if last:
+                try:
+                    overdue = (_today() - date.fromisoformat(last)).days > cadence_days
+                except ValueError:
+                    overdue = True
+            if overdue:
+                sponsor = _first_contact(hs, "Executive Sponsor")
+                add(RULE_EXEC_F2F_CADENCE, 4, "MUST_EXPAND", "Executive Sponsor F2F due",
+                    {"last_f2f": last, "cadence_days": cadence_days,
+                     "executive_sponsor": sponsor,
+                     "_source": "f2f-log", "has_sponsor": bool(sponsor)},
+                    (f"Coordinate and log an executive face-to-face with {sponsor} (CS leadership "
+                     "involved) for this tier-1 strategic account." if sponsor else
+                     "Tag an Executive Sponsor and coordinate an executive face-to-face for this "
+                     "tier-1 strategic account; log the meeting outcome."))
 
     # --- MUST_USE: contact hygiene gate (WoW §5: roles maintained on ALL accounts) ---
     have = {c.get("role") for c in hs.get("contacts", [])}
