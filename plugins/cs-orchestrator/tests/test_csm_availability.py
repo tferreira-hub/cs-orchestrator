@@ -62,3 +62,23 @@ def test_round_robin_skips_unavailable_via_live_roster(monkeypatch):
     assert r["summary"]["available_csms"] == ["Ann"]
     assert r["tickets"][0]["assigned_to"] == "Ann"
     engine._CSM_PRESENCE.clear()
+
+
+def test_inbound_queue_persists_and_resolves(monkeypatch):
+    """record_inbound persists triaged tickets; inbound_queue lists them; resolve_inbound
+    marks status. Validates the Option A queue surface."""
+    import engine
+    engine._INBOUND_QUEUE.clear()
+    tickets = [
+        {"id": "t1", "destination": "cs_pooled_queue", "intent": "billing", "sla_breached": False},
+        {"id": "t2", "destination": "zendesk_handoff", "intent": "technical", "sla_breached": True},
+    ]
+    assert engine.record_inbound(tickets) == 2
+    q = engine.inbound_queue()
+    assert q["count"] == 2 and q["open"] == 2 and q["sla_breached"] == 1
+    assert q["by_intent"]["billing"] == 1
+    # Resolve one.
+    engine.resolve_inbound("t1", status="resolved")
+    assert engine.inbound_queue(status="open")["count"] == 1
+    assert engine.inbound_queue(status="resolved")["count"] == 1
+    engine._INBOUND_QUEUE.clear()

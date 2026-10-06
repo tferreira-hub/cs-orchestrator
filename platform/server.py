@@ -845,6 +845,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/csm/availability":
                 # Live pooled CSM presence (Available/OOO) feeding the round-robin.
                 self._json(200, engine.pooled_roster()); return
+            if path == "/api/inbound/queue":
+                # The persisted inbound queue (Option A channels -> triaged tickets).
+                st = (query.get("status") or [None])[0]
+                self._json(200, engine.inbound_queue(status=st)); return
             if path == "/api/strategic/review-queue":
                 # Strategic monthly draft/review/approve queue (28th-31st window).
                 period = (query.get("period") or [None])[0]
@@ -996,7 +1000,27 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:  # noqa: BLE001
                     pass
                 roster = engine.pooled_roster().get("roster", [])
-                self._json(200, _inbound.triage_inbound(items, roster=roster))
+                result = _inbound.triage_inbound(items, roster=roster)
+                # Persist the routed tickets so the pooled team sees a live queue.
+                try:
+                    engine.record_inbound(result.get("tickets", []))
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(200, result)
+                return
+            if path == "/api/inbound/resolve":
+                tid = str(body.get("ticket_id") or body.get("id") or "").strip()
+                status = (body.get("status") or "resolved").strip()
+                try:
+                    record_audit("inbound_resolve", principal, {"ticket_id": tid, "status": status})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.resolve_inbound(tid, status=status))
+                except KeyError:
+                    self._json(404, {"error": "ticket not found"})
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
                 return
             if path == "/api/csm/availability":
                 # Set a pooled CSM's Available/OOO status (the Help Desk presence feed).

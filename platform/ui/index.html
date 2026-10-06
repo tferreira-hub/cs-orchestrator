@@ -1010,9 +1010,11 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="cc-tabs" id="scaled-tabs">
           <button class="cc-tab active" data-sc="pool" onclick="scaledTab('pool')"><span class="cc-tico">▦</span>The Pool</button>
           <button class="cc-tab" data-sc="dashboard" onclick="scaledTab('dashboard')"><span class="cc-tico">▚</span>Pooled Dashboard</button>
+          <button class="cc-tab" data-sc="inbox" onclick="scaledTab('inbox')"><span class="cc-tico">✉</span>Inbound Queue</button>
         </div>
         <div class="cc-pane on" id="sc-pane-pool"></div>
         <div class="cc-pane" id="sc-pane-dashboard"></div>
+        <div class="cc-pane" id="sc-pane-inbox"></div>
       </section>
       <section class="view" id="v-mydash">
         <div class="cc-tabs" id="mydash-tabs">
@@ -1365,7 +1367,43 @@ function scaledTab(tab){
   const pane=document.getElementById('sc-pane-'+tab); if(pane)pane.classList.add('on');
   if(tab==='pool') renderThePool();
   else if(tab==='dashboard') renderPooledDashboard();
+  else if(tab==='inbox') renderInboundQueue();
   window.scrollTo({top:0,behavior:'instant'});
+}
+// Inbound Queue — Option A channels -> triaged tickets the pooled team works like an inbox.
+function renderInboundQueue(){
+  const host=document.getElementById('sc-pane-inbox'); if(!host)return;
+  host.innerHTML='<div class="panel"><div class="head"><h2>Inbound Queue</h2><span class="note">5-channel intake · triaged + round-robined</span></div><div class="body pad" id="inbox-body"><span class="muted">Loading…</span></div></div>';
+  fetch('/api/inbound/queue').then(r=>r.json()).then(d=>_renderInbox(d)).catch(()=>{
+    const b=document.getElementById('inbox-body'); if(b)b.innerHTML='<span class="muted">Inbound queue unavailable.</span>';
+  });
+}
+function _channelLabel(c){return ({zendesk_misroute:'Zendesk misroute',slack_call:'Slack call-log',mailbox:'Mailbox',campaign_reply:'Campaign reply',high_intent_form:'High-intent form'}[c]||c||'—');}
+function _renderInbox(d){
+  const b=document.getElementById('inbox-body'); if(!b)return;
+  const tickets=d.tickets||[];
+  if(!tickets.length){ b.innerHTML='<p class="muted" style="margin:0">No inbound tickets yet. When the HubSpot Service Hub channels post to <code>/api/inbound/hubspot</code>, triaged tickets appear here, round-robined to available pooled CSMs under the 24h SLA.</p>'; return; }
+  const rows=tickets.map(t=>
+    '<tr>'+
+      '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">'+escapeHtml(_channelLabel(t.channel))+'</span></td>'+
+      '<td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="muted" style="font-size:.8em">'+escapeHtml(t.from||'')+'</div></td>'+
+      '<td>'+escapeHtml(t.intent||'—')+'</td>'+
+      '<td>'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
+      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">—</span>')+'</td>'+
+      '<td>'+(t.sla_breached?'<span class="pill" style="background:#fdecec;border:1px solid #f3c2c2;color:#b42318;padding:2px 8px;border-radius:10px">SLA breached</span>':(t.needs_reassign?'<span class="mp-tag">reassign</span>':'<span class="pill pln" style="padding:2px 8px">'+(t.status||'open')+'</span>'))+'</td>'+
+      '<td style="text-align:right">'+(t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted" style="font-size:.8em">'+escapeHtml(t.status)+'</span>')+'</td>'+
+    '</tr>').join('');
+  b.innerHTML=
+    '<div class="mp-chips" style="margin-bottom:12px">'+
+      '<span class="mp-chip">Total: <strong>'+(d.count||0)+'</strong></span>'+
+      '<span class="mp-chip">Open: <strong>'+(d.open||0)+'</strong></span>'+
+      '<span class="mp-chip">SLA breached: <strong>'+(d.sla_breached||0)+'</strong></span>'+
+    '</div>'+
+    '<div class="mp-list"><div class="mp-scroll"><table><thead><tr><th>Channel</th><th>Subject</th><th>Intent</th><th>Destination</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function resolveInbound(id){
+  fetch('/api/inbound/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id,status:'resolved'})})
+    .then(()=>renderInboundQueue());
 }
 // The Pool — scaled/low-touch accounts (low ARR), with a Growth Potential column (Planhat).
 function renderThePool(){

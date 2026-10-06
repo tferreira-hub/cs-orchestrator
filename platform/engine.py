@@ -1813,6 +1813,66 @@ def pooled_roster(with_availability: bool = True) -> dict:
             "presence_source": "live" if _CSM_PRESENCE else "default-all-available"}
 
 
+# --- Inbound queue store (Option A, Tech-Touch UC1) --------------------------
+# Triaged inbound tickets from /api/inbound/hubspot are persisted here so the pooled
+# team has a live, actionable queue (not just a one-shot triage response). In-process
+# store keyed by ticket id; newest first. A durable store (DynamoDB/DB) can replace this
+# without changing the intake/triage contract. Resolving a ticket (reply/close via the
+# Zendesk writes, or marking handled) sets its status.
+_INBOUND_QUEUE: dict[str, dict] = {}
+
+
+def record_inbound(tickets: list[dict]) -> int:
+    """Persist triaged tickets into the inbound queue (upsert by id). Returns how many
+    were stored/updated. Status defaults to 'open'; existing status is preserved."""
+    n = 0
+    for t in tickets or []:
+        tid = t.get("id")
+        if not tid:
+            continue
+        prev = _INBOUND_QUEUE.get(tid, {})
+        row = dict(t)
+        row["status"] = prev.get("status", "open")
+        row["recorded_at"] = prev.get("recorded_at") or datetime.now(timezone.utc).isoformat()
+        _INBOUND_QUEUE[tid] = row
+        n += 1
+    return n
+
+
+def inbound_queue(status: str | None = None) -> dict:
+    """The persisted inbound queue (newest first), optionally filtered by status, with a
+    summary by destination/intent/SLA so the pooled team can work it like an inbox."""
+    rows = sorted(_INBOUND_QUEUE.values(),
+                  key=lambda r: r.get("recorded_at") or "", reverse=True)
+    if status:
+        rows = [r for r in rows if r.get("status") == status]
+    by_dest: dict[str, int] = {}
+    by_intent: dict[str, int] = {}
+    breached = open_count = 0
+    for r in rows:
+        by_dest[r.get("destination")] = by_dest.get(r.get("destination"), 0) + 1
+        by_intent[r.get("intent")] = by_intent.get(r.get("intent"), 0) + 1
+        if r.get("status") == "open":
+            open_count += 1
+        if r.get("sla_breached"):
+            breached += 1
+    return {"count": len(rows), "open": open_count, "sla_breached": breached,
+            "by_destination": by_dest, "by_intent": by_intent, "tickets": rows}
+
+
+def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
+    """Mark an inbound ticket resolved/handled. Returns the updated row or raises KeyError."""
+    status = (status or "resolved").strip().lower()
+    if status not in ("open", "resolved", "handed_off", "closed"):
+        raise ValueError(f"invalid status {status!r}")
+    row = _INBOUND_QUEUE.get(ticket_id)
+    if not row:
+        raise KeyError(ticket_id)
+    row["status"] = status
+    row["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    return row
+
+
 
 def zendesk_reply(ticket_id: str, body: str, public: bool = True, apply: bool = False) -> dict:
     """Reply to a Zendesk ticket (public or internal) from the inbound queue. Two-gate;
