@@ -263,6 +263,15 @@ tr.click{cursor:pointer;transition:background .1s}tr.click:hover td{background:#
 /* V5 F2F cards */
 .f2f-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:16px 18px}
 .f2f-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface)}
+.ob-summary{display:flex;gap:8px;padding:0 0 12px;flex-wrap:wrap}
+.ob-sumcard{padding:12px 18px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;text-align:center;min-width:90px;transition:border-color .15s}
+.ob-sumcard:hover{border-color:var(--brand)}
+.ob-sumcard.active{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 6%,var(--surface))}
+.ob-sumcard.warn .ob-sumn{color:var(--red)}
+.ob-sumcard.ok .ob-sumn{color:var(--green,#16a34a)}
+.ob-sumn{font-size:1.5em;font-weight:800;line-height:1.1}
+.ob-suml{font-size:.72em;color:var(--ink2);margin-top:3px}
+.ob-stalled{border-left:4px solid var(--red);margin-bottom:12px}
 .f2f-card .nm{font-weight:700}
 .f2f-card .mt{font-size:.78em;color:var(--ink2);margin-top:6px}
 .f2f-card .mt b{color:var(--ink)}
@@ -1580,12 +1589,28 @@ function renderPooledDashboard(){
   const phases={};pool.forEach(a=>{const p=a.lifecycle_stage||'Unknown';phases[p]=(phases[p]||0)+1;});
   const maxP=Math.max(1,...Object.values(phases));
   const phaseBars=Object.entries(phases).sort((a,b)=>b[1]-a[1]).map(([p,n])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+n+'</span><div class="cc-distbar" style="height:'+Math.round((n/maxP)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml(p)+'</div></div>').join('');
-  host.innerHTML='<div class="cc-headline" style="margin-bottom:16px">'+
+  // Segment distribution across the pool (Agency / Corporate / etc.).
+  const segs={};pool.forEach(a=>{const s=a.segment||'Unknown';segs[s]=(segs[s]||0)+1;});
+  const maxS=Math.max(1,...Object.values(segs));
+  const segBars=Object.entries(segs).sort((a,b)=>b[1]-a[1]).map(([s,n])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+n+'</span><div class="cc-distbar" style="height:'+Math.round((n/maxS)*100)+'%;background:var(--brand2,#7c5cff)"></div></div><div class="cc-distlbl">'+escapeHtml(s)+'</div></div>').join('');
+  // Health distribution across the pool (scored accounts only).
+  const scored=pool.filter(a=>a.health&&a.health.computable);
+  const hb={red:0,amber:0,green:0};scored.forEach(a=>{hb[a.health.band]=(hb[a.health.band]||0)+1;});
+  const notScored=pool.length-scored.length;
+  const maxH=Math.max(1,hb.red,hb.amber,hb.green,notScored);
+  const healthBars='<div class="cc-dist" style="height:130px">'+[['At risk',hb.red,'var(--red)'],['Watch',hb.amber,'var(--amber)'],['Healthy',hb.green,'var(--green)'],['Not scored',notScored,'var(--muted)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxH)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
+  const avgHealth=scored.length?Math.round(scored.reduce((s,a)=>s+a.health.score,0)/scored.length):0;
+  host.innerHTML='<div class="cc-headline" style="margin-bottom:16px;grid-template-columns:repeat(4,1fr)">'+
     '<div class="cc-big"><div class="cc-big-l">Total ARR</div><div class="cc-big-v">'+fmt(totalArr)+'</div></div>'+
     '<div class="cc-big"><div class="cc-big-l">Pooled Customers</div><div class="cc-big-v">'+pool.length+'</div></div>'+
-    '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v good">'+(pool.length?Math.round(pool.reduce((s,a)=>s+((a.health&&a.health.computable)?a.health.score:0),0)/pool.length):0)+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v '+(avgHealth>=75?'good':avgHealth<50?'warn':'')+'">'+(scored.length?avgHealth:'-')+'</div><div class="cc-big-s">'+scored.length+' scored of '+pool.length+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">At risk</div><div class="cc-big-v '+(hb.red>0?'warn':'good')+'">'+hb.red+'</div></div>'+
   '</div>'+
-  '<div class="panel"><div class="head"><h2>Pooled Customers by Phase</h2></div><div class="body pad"><div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div></div></div>'+
+  '<div class="mdw-grid" style="margin-bottom:16px">'+
+    _widget('Pooled customers by phase','<div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div>')+
+    _widget('Pooled customers by segment','<div class="cc-dist">'+(segBars||'<div class="empty" style="width:100%">No segment data.</div>')+'</div>')+
+  '</div>'+
+  '<div class="panel"><div class="head"><h2>Pooled health distribution</h2></div><div class="body pad">'+healthBars+'</div></div>'+
   '<div class="panel" id="csm-presence-panel" style="margin-top:16px"><div class="head"><h2>Pooled team availability</h2><span class="note">Feeds the inbound round-robin</span></div><div class="body pad" id="csm-presence-body"><span class="muted">Loading…</span></div></div>';
   loadCsmPresence();
 }
@@ -2210,8 +2235,10 @@ function riskEscTab(tab){
   ({health:renderRiskHealth,mitigation:renderRiskMitigation}[tab]||function(){})();
   window.scrollTo({top:0,behavior:'instant'});
 }
-function renderRiskHealth(){
-  // Reuse the Portfolio Health layout so risk leaders see the same health cohorts.
+async function renderRiskHealth(){
+  // Risk leaders get the health cohort band PLUS the ML churn-risk matrix (driver
+  // breakdown + the specific accounts behind each driver), which the engine already
+  // computes at /api/churn-risk-matrix but the old view never surfaced.
   const host=document.getElementById('re-pane-health'); if(!host||!DATA)return;
   const b=_healthBuckets();
   const churnFc=filteredAccounts().filter(a=>{const fc=a.renewal_forecast;return fc&&fc.applicable&&fc.label==='Churn Risk';}).length;
@@ -2220,7 +2247,34 @@ function renderRiskHealth(){
     _widgetBig('At Risk ARR',fmt(b.arrRisk),b.arrRisk>0?'warn':'')+_widgetBig('Healthy ARR',fmt(b.arrHealthy),'good')+_widgetBig('Forecast to churn',churnFc,churnFc>0?'warn':'good')+'</div>';
   const maxC=Math.max(1,b.atRisk,b.unc,b.healthy);
   const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
-  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad"><div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. This risk view slices health by cohort to focus mitigation.</div>'+tiles+'<div class="mdw-grid">'+_widget('Count of companies by health',countBars,'wide')+'</div></div></div>';
+  // Render the cohort band immediately, then fetch the churn matrix and append it.
+  host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad"><div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. This risk view slices health by cohort and by ML churn-risk driver to focus mitigation.</div>'+tiles+'<div class="mdw-grid">'+_widget('Count of companies by health',countBars,'wide')+'</div></div></div>'+
+    '<div id="churn-matrix-host"><div class="panel"><div class="body pad"><span class="muted">Loading churn-risk matrix…</span></div></div></div>';
+  let m;
+  try{ m=await (await api('/api/churn-risk-matrix')).json(); }
+  catch(e){ if(e&&e.message==='unauthenticated')return; const mh=document.getElementById('churn-matrix-host'); if(mh)mh.innerHTML=''; return; }
+  const mh=document.getElementById('churn-matrix-host'); if(!mh)return;
+  const drivers=(m.by_driver||[]);
+  if(!drivers.length){
+    mh.innerHTML='<div class="panel"><div class="head"><h2>ML churn-risk matrix</h2><span class="note">model threshold '+(m.threshold_pct!=null?m.threshold_pct+'%':'-')+'</span></div><div class="body pad"><div class="empty">No accounts above the churn-risk threshold. '+escapeHtml(m.note||'')+'</div></div></div>';
+    return;
+  }
+  // Matrix hero: cohort size + ARR exposure above the model threshold.
+  const mstrip=_heroBand([
+    _bigStat('Accounts above threshold', m.cohort_accounts, 'model risk ≥ '+(m.threshold_pct!=null?m.threshold_pct+'%':'-'), m.cohort_accounts>0?'warn':'good'),
+    _bigStat('ARR at churn risk', fmt(m.cohort_arr_usd||0), null, (m.cohort_arr_usd>0?'warn':'good')),
+    _bigStat('Primary drivers', drivers.length),
+  ], 3);
+  const maxDa=Math.max(1,...drivers.map(dr=>dr.accounts||0));
+  const driverPanels=drivers.map(dr=>{
+    const barPct=Math.round(((dr.accounts||0)/maxDa)*100);
+    const members=(dr.members||[]).slice(0,8).map(mb=>'<tr'+(mb.account_id?' class="click" onclick="openAccount(\''+escapeHtml(mb.account_id)+'\')"':'')+'><td><strong>'+escapeHtml(mb.name||mb.account_id||'')+'</strong>'+(mb.churned?' <span class="pill r" style="font-size:.72em">churned</span>':'')+'</td><td class="muted">'+escapeHtml(mb.segment||'-')+'</td><td class="muted">'+escapeHtml(mb.owner||'-')+'</td><td class="mono">'+(mb.arr_usd!=null?fmt(mb.arr_usd):'-')+'</td><td class="mono">'+(mb.ml_churn_score!=null?Math.round(mb.ml_churn_score*100)+'%':'-')+'</td></tr>').join('');
+    const more=(dr.members||[]).length>8?'<div class="pad muted" style="font-size:.82em">+'+((dr.members||[]).length-8)+' more</div>':'';
+    return '<div class="panel" style="margin-top:12px"><div class="head"><h2>'+escapeHtml(dr.label||dr.driver||'Driver')+'</h2><span class="note">'+(dr.accounts||0)+' account'+((dr.accounts===1)?'':'s')+' · '+fmt(dr.arr_usd||0)+' ARR</span></div>'+
+      '<div style="padding:4px 16px 0"><div class="lb-bar"><i style="width:'+barPct+'%;background:var(--red)"></i></div></div>'+
+      '<div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>Segment</th><th>Owner</th><th>ARR</th><th>Churn score</th></tr></thead><tbody>'+members+'</tbody></table>'+more+'</div></div>';
+  }).join('');
+  mh.innerHTML='<div class="panel" style="background:none;border:none;box-shadow:none;padding:0;margin:16px 0 0"><div class="head" style="padding-left:0"><h2>ML churn-risk matrix</h2><span class="note">accounts above the model threshold, grouped by primary risk driver</span></div></div>'+mstrip+driverPanels;
 }
 // Risk Mitigation Strategy, accounts whose live health is below the healthy band.
 // Health scale is 0–100 (engine.py:257): red = score < 50 ("at risk"), amber = 50–74
@@ -3327,17 +3381,6 @@ async function renderPaymentRisk(){
 }
 
 // ── V5 views: Onboarding governance, Team Leaderboard, Exec F2F ──
-// Uses the real design system: a `.stats` grid of `.stat` cards (.l label / .v value
-// (.warn|.good) / .d detail), `.panel`/`.head`/`.body`, and `.tbl` tables, matching
-// the Command Center and Payment Risk pages.
-function _stat(label,value,detail,tone){
-  const v=(value==null||value==='')?'<span class="muted">-</span>':value;
-  const vc=tone==='warn'?' warn':tone==='good'?' good':'';
-  return '<div class="stat"><div class="l">'+escapeHtml(label)+'</div>'+
-    '<div class="v'+vc+'">'+v+'</div>'+
-    (detail?'<div class="d">'+escapeHtml(detail)+'</div>':'')+'</div>';
-}
-function _statsGrid(cards){ return '<div class="stats">'+cards.join('')+'</div>'; }
 function _pctTone(v,target){ // tone for a "higher is better" KPI vs a target
   if(v==null) return null;
   return v>=target?'good':'warn';
@@ -3365,6 +3408,25 @@ async function renderOnboarding(){
       '<div class="body pad"><div class="empty"><b>Rocket Lane is not connected</b><div class="sub" style="margin-top:6px">'+escapeHtml(d.note||'Connect Rocket Lane to populate implementation governance.')+' No sample data is shown.</div></div></div></div>';
     return;
   }
+  _OB=d; renderOnboardingBody();
+}
+// Onboarding filter state: which status group + whether to show stalled only.
+let _OB=null, _obStatus='all', _obStalledOnly=false, _obOwner='all';
+function obSet(k,v){ if(k==='status')_obStatus=v; else if(k==='owner')_obOwner=v; else if(k==='stalled')_obStalledOnly=!_obStalledOnly; renderOnboardingBody(); }
+// Group a Rocket Lane status string into a coarse phase bucket for summary tiles/filtering.
+function _obPhase(status){
+  const s=String(status||'').toLowerCase();
+  if(/(cancel)/.test(s)) return 'Cancelled';
+  if(/(hold|block|stall)/.test(s)) return 'On hold';
+  if(/(review|not booked|incomplete)/.test(s)) return 'Needs action';
+  if(/(progress|kick)/.test(s)) return 'In progress';
+  if(/(new)/.test(s)) return 'New';
+  return 'Other';
+}
+const _OB_PHASE_TONE={ 'Cancelled':'warn','On hold':'warn','Needs action':'warn','In progress':'','New':'ok','Other':'' };
+function renderOnboardingBody(){
+  const host=document.getElementById('onboarding-body'); if(!host||!_OB) return;
+  const d=_OB;
   const hp=d.handoff_on_time_pct;
   const strip=_heroBand([
     _bigStat('Active projects', d.active_projects),
@@ -3372,26 +3434,61 @@ async function renderOnboarding(){
     _bigStat('Avg days in onboarding', d.avg_days_in_onboarding!=null?d.avg_days_in_onboarding:'-', d.avg_days_in_onboarding!=null?'days':null),
     _bigStat('On-time handoff', hp!=null?hp+'%':'-', 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed', _pctTone(hp,d.handoff_on_time_target_pct)),
   ]);
-  const projs=(d.projects||[]);
-  const maxDays=Math.max(1,...projs.map(p=>p.days_in_onboarding||0));
+  const allProjs=(d.projects||[]);
+  // Phase distribution across the full project list (drives the summary band + filter pills).
+  const phaseCounts={}; allProjs.forEach(p=>{const ph=_obPhase(p.status);phaseCounts[ph]=(phaseCounts[ph]||0)+1;});
+  const phaseOrder=['Needs action','On hold','In progress','New','Cancelled','Other'].filter(k=>phaseCounts[k]);
+  // Owner workload rollup: projects + stalled count per CSM, worst (most stalled) first.
+  const byOwner={};
+  allProjs.forEach(p=>{const o=p.owner||'Unassigned';(byOwner[o]=byOwner[o]||{owner:o,total:0,stalled:0,days:0,n:0}); byOwner[o].total++; if(p.stalled)byOwner[o].stalled++; if(p.days_in_onboarding!=null){byOwner[o].days+=p.days_in_onboarding;byOwner[o].n++;}});
+  const owners=Object.values(byOwner).map(o=>({...o,avg:o.n?Math.round(o.days/o.n):null})).sort((a,b)=>b.stalled-a.stalled||b.total-a.total);
+  // ---- Phase summary band (clickable filter) ----
+  const phasePill=(label,n,active,on,tone)=>'<div class="ob-sumcard'+(active?' active':'')+(tone==='warn'?' warn':tone==='ok'?' ok':'')+'" onclick="'+on+'"><div class="ob-sumn">'+n+'</div><div class="ob-suml">'+escapeHtml(label)+'</div></div>';
+  const summary='<div class="ob-summary">'+
+    phasePill('All projects',allProjs.length,_obStatus==='all',"obSet('status','all')")+
+    phaseOrder.map(ph=>phasePill(ph,phaseCounts[ph],_obStatus===ph,"obSet('status','"+ph+"')",_OB_PHASE_TONE[ph])).join('')+
+  '</div>';
+  // ---- Stalled callout (the accounts leadership must unblock) ----
+  const stalled=allProjs.filter(p=>p.stalled).sort((a,b)=>(b.days_in_onboarding||0)-(a.days_in_onboarding||0));
+  const stalledCallout=stalled.length?('<div class="panel ob-stalled"><div class="head"><h2>Stalled before handoff</h2><span class="note warn">'+stalled.length+' project'+(stalled.length===1?'':'s')+' need unblocking</span></div><div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>Owner</th><th>Status</th><th>Days in</th><th>Blockers</th></tr></thead><tbody>'+
+    stalled.slice(0,12).map(p=>'<tr'+(p.account_id?' class="click" onclick="openAccount(\''+escapeHtml(p.account_id)+'\')"':'')+'><td><strong>'+escapeHtml(p.name||p.account_id||'')+'</strong>'+(p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'')+'</td><td class="muted">'+escapeHtml(p.owner||'-')+'</td><td><span class="pill warn">'+escapeHtml(p.status||'stalled')+'</span></td><td class="mono">'+(p.days_in_onboarding==null?'-':p.days_in_onboarding)+'</td><td class="muted" style="font-size:.85em">'+escapeHtml((p.stall_reasons||[]).join('; ')||'past due')+'</td></tr>').join('')+
+    '</tbody></table>'+(stalled.length>12?'<div class="pad muted" style="font-size:.85em">+'+(stalled.length-12)+' more stalled below</div>':'')+'</div></div>'):'';
+  // ---- Owner workload table ----
+  const ownerTable='<div class="panel"><div class="head"><h2>Workload by owner</h2><span class="note">'+owners.length+' owners · most stalled first</span></div><div class="body"><table class="acct-list"><thead><tr><th>Owner</th><th>Projects</th><th>Stalled</th><th>Avg days in</th></tr></thead><tbody>'+
+    owners.map(o=>'<tr'+(o.owner!=='Unassigned'?' class="click" onclick="obSet(\'owner\',\''+escapeHtml(o.owner).replace(/'/g,"")+'\')"':'')+'><td><strong>'+escapeHtml(o.owner)+'</strong>'+(_obOwner===o.owner?' <span class="pill ok" style="font-size:.64em">filtered</span>':'')+'</td><td class="mono">'+o.total+'</td><td class="mono">'+(o.stalled>0?'<span class="pill warn">'+o.stalled+'</span>':'0')+'</td><td class="mono">'+(o.avg==null?'-':o.avg)+'</td></tr>').join('')+
+    '</tbody></table></div></div>';
+  // ---- Filtered detail list ----
+  let projs=allProjs.slice();
+  if(_obStatus!=='all') projs=projs.filter(p=>_obPhase(p.status)===_obStatus);
+  if(_obOwner!=='all') projs=projs.filter(p=>(p.owner||'Unassigned')===_obOwner);
+  if(_obStalledOnly) projs=projs.filter(p=>p.stalled);
+  projs.sort((a,b)=>(b.days_in_onboarding||0)-(a.days_in_onboarding||0));
+  const maxDays=Math.max(1,...allProjs.map(p=>p.days_in_onboarding||0));
   const prow=p=>{
     const dz=p.days_in_onboarding;
-    const bar=dz==null?'' : '<div class="lb-bar" style="flex:0 0 90px"><i style="width:'+Math.round((dz/maxDays)*100)+'%;background:'+(p.stalled?'var(--red)':'var(--brand)')+'"></i></div>';
+    const barPct=dz==null?0:Math.round((dz/maxDays)*100);
     const st=String(p.status||'').toLowerCase();
-    const stTone=/(stall|block|risk|hold)/.test(st)?'warn':/(progress|new|kick)/.test(st)?'':'ok';
-    return '<div class="lb-row">'+
-      '<div class="lb-main"><div class="lb-name">'+escapeHtml(p.name||p.account_id||'')+(p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'')+'</div>'+
-        '<div class="lb-sub">'+escapeHtml(p.project_name||'-')+' · owner '+escapeHtml(p.owner||'-')+'</div></div>'+
-      '<div class="lb-metrics">'+
-        '<div class="lb-metric"><div class="n">'+(dz==null?'-':dz)+'</div><div class="k">Days in</div></div>'+
-        '<div style="flex:0 0 auto">'+(p.status?'<span class="pill '+stTone+'">'+escapeHtml(p.status)+'</span>':'<span class="muted">-</span>')+'</div>'+
-      '</div>'+bar+
-      '<div class="lb-comp">'+(p.stalled?'<span class="pill warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="pill ok">on track</span>')+'</div>'+
-      '</div>';
+    const stTone=/(stall|block|risk|hold|cancel|not booked|incomplete)/.test(st)?'warn':/(progress|kick)/.test(st)?'':'ok';
+    const dates=[]; if(p.start_date)dates.push('start '+escapeHtml(p.start_date)); if(p.due_date)dates.push('due '+escapeHtml(p.due_date));
+    return '<tr'+(p.account_id?' class="click" onclick="openAccount(\''+escapeHtml(p.account_id)+'\')"':'')+'>'+
+      '<td><strong>'+escapeHtml(p.name||p.account_id||'')+'</strong>'+(p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'')+
+        '<div class="muted" style="font-size:.8em">'+escapeHtml(p.project_name||'-')+(dates.length?' · '+dates.join(' · '):'')+'</div></td>'+
+      '<td class="muted">'+escapeHtml(p.owner||'-')+'</td>'+
+      '<td><span class="pill '+stTone+'">'+escapeHtml(p.status||'-')+'</span></td>'+
+      '<td style="min-width:150px"><div class="lb-bar" style="display:inline-flex;width:80px;vertical-align:middle"><i style="width:'+barPct+'%;background:'+(p.stalled?'var(--red)':'var(--brand)')+'"></i></div> <span class="mono">'+(dz==null?'-':dz+'d')+'</span></td>'+
+      '<td>'+(p.stalled?'<span class="pill warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="pill ok">on track</span>')+'</td>'+
+      '</tr>';
   };
-  const body=projs.length ? projs.map(prow).join('')
-    : '<div class="body pad"><div class="empty">No active onboarding projects in scope.</div></div>';
-  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>Active implementations</h2><span class="note">Rocket Lane projects, longest in onboarding first</span></div>'+body+'</div>';
+  const controls='<div class="filterbar" style="padding:10px 16px 4px">'+
+    (_obOwner!=='all'?'<span class="fpill active" style="cursor:pointer" onclick="obSet(\'owner\',\'all\')">Owner: '+escapeHtml(_obOwner)+' ✕</span>':'')+
+    '<span class="fpill '+(_obStalledOnly?'active':'ghost')+'" style="cursor:pointer" onclick="obSet(\'stalled\')">'+(_obStalledOnly?'Showing stalled only':'Stalled only')+'</span>'+
+    '<span class="fb-count">'+projs.length+' of '+allProjs.length+' projects</span>'+
+  '</div>';
+  const body=projs.length ? ('<div class="body"><table class="acct-list"><thead><tr><th>Company</th><th>Owner</th><th>Status</th><th>Days in onboarding</th><th>Health</th></tr></thead><tbody>'+projs.map(prow).join('')+'</tbody></table></div>')
+    : '<div class="body pad"><div class="empty">No projects match this filter.</div></div>';
+  const listTitle=_obStatus==='all'?'All active implementations':(_obStatus+' projects');
+  host.innerHTML=strip+summary+stalledCallout+ownerTable+
+    '<div class="panel"><div class="head"><h2>'+escapeHtml(listTitle)+'</h2><span class="note">Rocket Lane projects, longest in onboarding first</span></div>'+controls+body+'</div>';
 }
 
 async function renderLeaderboard(){
@@ -3407,8 +3504,10 @@ async function renderLeaderboard(){
     _bigStat('Weekly target compliance', wc!=null?wc+'%':'-', 'target '+d.weekly_target_compliance_target_pct+'%', _pctTone(wc,d.weekly_target_compliance_target_pct)),
     _bigStat('CSMs ranked', board.length),
     _bigStat('Ranked by', byWorkload?'Workload':'Completion', byWorkload?'no completions logged yet':'week-ending completion'),
-  ], 3);
+    _bigStat('Measurable CSMs', d.measurable_csms!=null?d.measurable_csms:'-', d.targets_configured?'per-CSM targets set':'default targets'),
+  ]);
   const maxLoad = Math.max(1, ...board.map(b=>(b.open_tasks||0)+(b.overdue_tasks||0)));
+  const maxP1 = Math.max(1, ...board.map(b=>b.priority1_tasks||0));
   const lbrow=b=>{
     const load=(b.open_tasks||0)+(b.overdue_tasks||0);
     const medal = b.rank<=3 ? ' m'+b.rank : '';
@@ -3432,7 +3531,9 @@ async function renderLeaderboard(){
       '<div class="lb-metrics">'+
         '<div class="lb-metric"><div class="n">'+(b.open_tasks||0)+'</div><div class="k">Open</div></div>'+
         '<div class="lb-metric"><div class="n'+((b.overdue_tasks||0)>0?' warn':'')+'">'+(b.overdue_tasks||0)+'</div><div class="k">Overdue</div></div>'+
+        '<div class="lb-metric"><div class="n'+((b.priority1_tasks||0)>0?' warn':'')+'">'+(b.priority1_tasks||0)+'</div><div class="k">P1</div></div>'+
         '<div class="lb-metric"><div class="n">'+(b.completed_tasks||0)+'</div><div class="k">Done</div></div>'+
+        (b.capacity_utilization_pct!=null?'<div class="lb-metric"><div class="n'+(b.capacity_utilization_pct>=100?' warn':'')+'">'+b.capacity_utilization_pct+'%</div><div class="k">Capacity</div></div>':'')+
       '</div>'+right+'</div>';
   };
   const list=board.length
@@ -3440,7 +3541,7 @@ async function renderLeaderboard(){
     : '<div class="body pad"><div class="empty">No CSM activity to rank yet.</div></div>';
   const headNote = byWorkload ? 'Ranked by current workload (open + overdue). Completion ranking activates once CSMs complete tasks in-platform.' : 'Ranked by week-ending completion rate';
   const noteHtml=d.note?'<div class="panel"><div class="body pad"><span class="muted">'+escapeHtml(d.note)+'</span></div></div>':'';
-  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>CSM leaderboard</h2><span class="note">'+headNote+'</span></div>'+(board.length?list:list)+'</div>'+noteHtml;
+  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>CSM leaderboard</h2><span class="note">'+headNote+'</span></div>'+list+'</div>'+noteHtml;
 }
 
 async function renderF2F(){
