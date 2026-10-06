@@ -12,6 +12,7 @@ no-op for tests that don't touch them.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -41,6 +42,11 @@ def _isolate_shared_globals():
     orchestrate.set_account_provider(orchestrate._load)
     if engine is not None:
         engine.set_principal(None)
+        # Disable the short-TTL report cache in tests so each test's monkeypatched data is
+        # seen fresh (no stale cross-test reads), and clear any entries from prior tests.
+        os.environ["CS_REPORT_CACHE_TTL"] = "0"
+        if hasattr(engine, "_REPORT_CACHE"):
+            engine._REPORT_CACHE.clear()
 
     yield
 

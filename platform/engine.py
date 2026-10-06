@@ -94,6 +94,51 @@ def _owns(account: dict, owner_id: str | None) -> bool:
     return bool(owner_id) and str(account.get("hubspot", {}).get("csm_owner_id") or "") == str(owner_id)
 
 
+# --------------------------------------------------------------------------- #
+# Short-TTL memo cache for expensive, read-only live reports
+# --------------------------------------------------------------------------- #
+# Reports like the payment-risk and onboarding-governance views each fan out to a vendor
+# (Stripe / Rocket Lane) on every request, which made the pages take a few seconds EVERY
+# load. We memoise the result per (report, principal-scope) for a short TTL so repeat
+# views are instant while the data still refreshes. Keyed by scope so a CSM can never be
+# served another principal's cached data. Default 60s; tune via CS_REPORT_CACHE_TTL;
+# set 0 to disable (tests set 0 for determinism).
+_REPORT_CACHE: dict = {}
+
+
+def _report_cache_ttl() -> float:
+    try:
+        return float(os.environ.get("CS_REPORT_CACHE_TTL", "60"))
+    except ValueError:
+        return 60.0
+
+
+def _scope_key() -> str:
+    """Cache key component for the current principal's visibility scope."""
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return "admin"
+    return "csm:" + str(p.get("owner_id") or p.get("email") or "unknown")
+
+
+def _cached_report(name: str, build):
+    """Return build() memoised per (name, scope) for CS_REPORT_CACHE_TTL seconds. TTL<=0
+    disables caching (always rebuild). Only successful dict results are cached."""
+    import time
+    ttl = _report_cache_ttl()
+    if ttl <= 0:
+        return build()
+    key = (name, _scope_key())
+    now = time.time()
+    hit = _REPORT_CACHE.get(key)
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+    result = build()
+    if isinstance(result, dict):
+        _REPORT_CACHE[key] = (now, result)
+    return result
+
+
 def _scoped_accounts() -> dict:
     """The account roster visible to the current principal. Admin (or no principal,
     for legacy/open mode) sees everything; a CSM sees only accounts they own."""
@@ -819,6 +864,12 @@ def _onboarding_stalled(onboarding: dict) -> tuple[bool, list[str]]:
 
 
 def onboarding_governance() -> dict:
+    """Cached wrapper (short TTL, per scope) over the live Rocket Lane governance build so
+    the page doesn't re-fan-out to Rocket Lane on every load."""
+    return _cached_report("onboarding_governance", _onboarding_governance_build)
+
+
+def _onboarding_governance_build() -> dict:
     """Rocket Lane implementation & onboarding governance (V5 UC3): active onboarding
     projects, time-in-onboarding, stalled-before-handoff alerts, and an on-time handoff
     KPI (target >= 90%).
@@ -3333,6 +3384,12 @@ def _payment_thresholds() -> dict:
 
 
 def payment_risk_report() -> dict:
+    """Cached wrapper (short TTL, per scope) over the live Payment Risk build so the page
+    doesn't re-query Stripe on every load."""
+    return _cached_report("payment_risk_report", _payment_risk_report_build)
+
+
+def _payment_risk_report_build() -> dict:
     """Payment Risk Report (live). Buckets the owner-scoped book into pages driven by live
     Stripe dunning (days past due) plus configurable access/cancellation thresholds:
 
