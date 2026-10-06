@@ -675,6 +675,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.expansion_opportunities()); return
             if path == "/api/executive":
                 self._json(200, engine.executive_summary()); return
+            if path == "/api/churn-risk-matrix":
+                # UC3 ML Churn Risk Matrix: the >=70% ML-churn cohort grouped by primary
+                # risk driver with ARR impact. Owner-scoped inside the engine.
+                self._json(200, engine.churn_risk_matrix()); return
             if path == "/api/audit":
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
