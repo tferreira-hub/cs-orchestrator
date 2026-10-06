@@ -141,6 +141,29 @@ def test_onboarding_not_matched_or_completed_does_not_fire():
     assert not [t for t in t2 if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
 
 
+def test_onboarding_stagnation_judge_passes():
+    """MUST_USE at P3 is intentionally elevated in RULE_PRIORITY. The judge must
+    honour the rule's own declared priority rather than imposing the blanket
+    MUST_USE >=P5 mandate floor, so this should PASS with no priority_ordering
+    violation. Regression test for the latent judge/engine contract mismatch."""
+    from playbook_judge import judge
+    account = {
+        "hubspot": {"name": "Stall Judge", "segment": "Scaled", "contacts": []},
+        "usage": {}, "churn": {}, "zendesk": {}, "stripe": {},
+        "onboarding": {"_matched": True, "status": "on_hold", "health": "red",
+                       "project_name": "Impl X", "due_date": "2026-01-01",
+                       "archived": False},
+    }
+    tasks, _ = orchestrate.evaluate("au1-ob-judge", account)
+    stag = [t for t in tasks if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
+    assert stag, "stagnation task should fire"
+    verdict = judge(tasks, {"au1-ob-judge": account})
+    prio_viol = [v for v in verdict["violations"] if v["rule"] == "priority_ordering"
+                 and "MUST_USE at priority 3" in v.get("detail", "")]
+    assert not prio_viol, f"judge should not flag P3 MUST_USE stagnation: {prio_viol}"
+    assert verdict["verdict"] == "PASS", f"expected PASS: {verdict['violations']}"
+
+
 def test_protect_suppresses_duplicate_adoption_and_hygiene_tasks():
     account = {
         "hubspot": {"name": "At Risk Adoption Gap", "segment": "Strategic", "contacts": []},

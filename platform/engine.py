@@ -1786,6 +1786,12 @@ SEQUENCES = {
         "steps": ["Renewal heads-up", "Success recap", "Renewal confirmation"],
         "trigger": "Renewal within 180 days",
     },
+    "onboarding_welcome": {
+        "label": "Automated onboarding (Tech Touch Pillar 1)",
+        "steps": ["Welcome email", "Feature training drip", "Milestone engagement survey",
+                  "Community workspace invitation"],
+        "trigger": "New customer in onboarding / early lifecycle (scaled tech-touch)",
+    },
 }
 
 
@@ -1812,6 +1818,14 @@ def enrol_sequence(account_id: str, sequence: str = "low_usage_reengage", apply:
         qualifies = dsv is not None and dsv >= 28
         reason = (f"idle {dsv} days" if qualifies else
                   (f"active ({dsv} days since visit)" if dsv is not None else "no usage signal"))
+    elif sequence == "onboarding_welcome":
+        ob = live.get("onboarding", {}) or {}
+        lc = str(hs.get("lifecycle_stage") or "").lower()
+        is_new = lc in ("customer",) and (ob.get("status") or "").lower() in (
+            "new", "onboarding", "in_progress", "kickoff", "implementation", "implementing", "training", "")
+        qualifies = is_new and not str(ob.get("status") or "").lower() in ("completed", "complete", "done", "live")
+        reason = ("new customer in onboarding" if qualifies else
+                  "not in early onboarding phase")
     else:
         qualifies = bool(hs.get("renewal_date"))
         reason = "renewal date set" if qualifies else "no renewal date"
