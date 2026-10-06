@@ -216,13 +216,16 @@ variable "app_environment" {
     CS_PENDO_ACTIVITY   = "1"
     CS_STALE_REVALIDATE = "1"
     CS_CACHE_TTL        = "600"
-    # Enriched/health-scored roster size. This is how many accounts get the full
-    # multi-vendor signal fan-out + a computable health score per refresh (the deeply
-    # scored slice behind the dashboard health mix). Unset defaults to 25 in code, which
-    # left ~1,276 of the book "not scored yet"; 150 widens real coverage while keeping the
-    # per-refresh fan-out bounded (each account = several live vendor calls, run with
-    # CS_FETCH_WORKERS concurrency). Raise further only with an eye on vendor rate limits.
-    CS_ROSTER_LIMIT = "150"
+    # Enriched/health-scored roster size: how many accounts get the full multi-vendor
+    # fan-out + a computable health score. The cold-cache build is SYNCHRONOUS on the
+    # first request (all_accounts()), so this value directly bounds first-load latency:
+    # each account = ~8 live vendor calls at CS_FETCH_WORKERS concurrency. 150 made the
+    # cold build too slow and the dashboard hung on "Checking sources"; 50 keeps real
+    # coverage well above the old default of 25 while cold-start stays responsive.
+    CS_ROSTER_LIMIT = "50"
+    # Parallelism for the per-account vendor fan-out (cold build + refresh). Raised from
+    # the code default of 6 to shorten build time without hammering vendor rate limits.
+    CS_FETCH_WORKERS = "10"
     # Stripe is accessed with the live SECRET key currently in SSM; permit it until a
     # restricted read-only key (rk_...) is issued. Needed by the Payment Risk Report and
     # any live dunning signals. SECURITY: prefer rotating STRIPE_KEY to an rk_ key and
