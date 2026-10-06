@@ -4568,6 +4568,9 @@ function renderCompanyPage(id,d){
       d.tasks.map(t=>'<div class="callout" style="margin-bottom:8px"><span class="prio prio'+t.priority+'">'+t.priority+'</span> '+escapeHtml(t.trigger)+
         (t.recommended_action?'<div class="sub" style="margin-top:6px"><b>Action:</b> '+escapeHtml(t.recommended_action)+'</div>':'')+'</div>').join('')+'</div>'):'')+
     _writebackPanel(id,d)+
+    _onboardingBoardPanel(id,d)+
+    _f2fPanel(id,d)+
+    _roiAiPanel(id,d)+
     _notesRolesPanel(id,d)+
     _csqlPanel(id,d)+
     _digestPanel(id,d)+
@@ -4581,6 +4584,120 @@ function renderCompanyPage(id,d){
   window.scrollTo({top:0,behavior:'instant'});
   // Lazily load the monthly digest preview (fire-and-forget) so the planning tab fills in.
   try{ loadDigestPreview(id); }catch(e){}
+}
+
+// ── V5 Account 360 blocks (UC2): Rocket Lane board, Exec Sponsor F2F log, ROI AI ──
+
+// Rocket Lane implementation board status for this account (per-account match by name).
+function _onboardingBoardPanel(id,d){
+  const ob=d.onboarding||{};
+  const prov=(d.sources||{}).onboarding;
+  let bodyHtml;
+  if(prov===undefined || prov==='not_live'){
+    bodyHtml='<div class="callout"><span class="nc">Rocket Lane not connected</span></div>';
+  } else if(!ob._matched){
+    bodyHtml='<div class="callout"><span class="muted">No Rocket Lane implementation project matched to this account.</span></div>';
+  } else if(!ob.status && !ob.project_name){
+    bodyHtml='<div class="callout"><span class="muted">Matched in Rocket Lane, but no active project on record.</span></div>';
+  } else {
+    const statusLc=String(ob.status||'').toLowerCase();
+    const stTone=/(stall|block|risk|hold)/.test(statusLc)?'warn':/(complete|done|live)/.test(statusLc)?'ok':'';
+    const healthLc=String(ob.health||'').toLowerCase();
+    const hTone=(healthLc==='red'||healthLc==='at_risk')?'warn':(healthLc==='green'?'ok':'');
+    const kv=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
+    bodyHtml='<div class="cp-kmgrid">'+
+      kv('Project',ob.project_name?escapeHtml(ob.project_name):'<span class="muted">—</span>')+
+      kv('Status',ob.status?'<span class="pill '+(stTone||'')+'">'+escapeHtml(ob.status)+'</span>':'<span class="muted">—</span>')+
+      kv('Project health',ob.health?'<span class="pill '+(hTone||'')+'">'+escapeHtml(ob.health)+'</span>':'<span class="muted">—</span>')+
+      kv('Start date',ob.start_date?escapeHtml(ob.start_date):'<span class="muted">—</span>')+
+      kv('Due date',ob.due_date?escapeHtml(ob.due_date):'<span class="muted">—</span>')+
+    '</div>';
+  }
+  return '<div class="cp-section" data-cpt="overview planning"><div class="cp-shead"><h2>Implementation board</h2><span class="cp-cnt">Rocket Lane</span></div>'+bodyHtml+'</div>';
+}
+
+// ROI AI adoption telemetry for this account (feeds the health story).
+function _roiAiPanel(id,d){
+  const roi=(d.signals||{}).roi_ai||{};
+  const prov=(d.sources||{}).roi_ai;
+  let bodyHtml;
+  if(prov===undefined || prov==='not_live'){
+    bodyHtml='<div class="callout"><span class="nc">ROI AI not connected</span> <span class="muted">— telemetry arrives via the signed ROI AI webhook.</span></div>';
+  } else if(roi.adoption_score==null){
+    bodyHtml='<div class="callout"><span class="muted">No ROI AI telemetry received for this account yet.</span></div>';
+  } else {
+    const sc=roi.adoption_score;
+    const tone=sc>=75?'good':sc<25?'warn':'';
+    const trend=String(roi.trend||'').toLowerCase();
+    const trendPill=trend?('<span class="pill '+(trend==='up'?'ok':trend==='down'?'warn':'')+'">'+escapeHtml(roi.trend)+'</span>'):'<span class="muted">—</span>';
+    const kv=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
+    bodyHtml='<div class="cp-kmgrid">'+
+      kv('Adoption score','<span class="'+(tone==='good'?'good':tone==='warn'?'warn':'')+'" style="font-weight:800">'+sc+'/100</span>')+
+      kv('Trend',trendPill)+
+      kv('Active ROI users',roi.active_roi_users!=null?roi.active_roi_users:'<span class="muted">—</span>')+
+      kv('ROI realized',roi.roi_realized_usd!=null?fmt(roi.roi_realized_usd):'<span class="muted">—</span>')+
+      kv('As of',roi.metric_date?escapeHtml(roi.metric_date):'<span class="muted">—</span>')+
+    '</div><div class="muted" style="margin-top:8px;font-size:.82em">ROI AI adoption is a modest input to the business health score.</div>';
+  }
+  return '<div class="cp-section" data-cpt="overview usage"><div class="cp-shead"><h2>ROI AI adoption</h2><span class="cp-cnt">product telemetry</span></div>'+bodyHtml+'</div>';
+}
+
+// Executive Sponsor F2F interaction log + a Log F2F action (owner-scoped write + audit).
+function _f2fPanel(id,d){
+  const hs=d.hubspot||{};
+  const sponsor=((hs.contacts||[]).find(c=>c.role==='Executive Sponsor')||{});
+  const log=(d.f2f_log||[]);
+  const sponsorLine=sponsor.name
+    ? 'Executive Sponsor: <b>'+escapeHtml(sponsor.name)+'</b>'+(sponsor.email?' <span class="muted">'+escapeHtml(sponsor.email)+'</span>':'')
+    : '<span class="pill warn">No Executive Sponsor tagged</span>';
+  const entries=log.length
+    ? log.map(e=>'<div class="callout" style="margin-bottom:8px">'+
+        '<b>'+escapeHtml(e.met_on||'')+'</b>'+
+        (e.cs_leadership&&e.cs_leadership.length?' · CS leadership: '+escapeHtml(e.cs_leadership.join(', ')):'')+
+        (e.attendees&&e.attendees.length?' · with '+escapeHtml(e.attendees.join(', ')):'')+
+        (e.outcome?'<div class="sub" style="margin-top:6px"><b>Outcome:</b> '+escapeHtml(e.outcome)+'</div>':'')+
+        (e.notes?'<div class="sub" style="margin-top:4px">'+escapeHtml(e.notes)+'</div>':'')+
+        '</div>').join('')
+    : '<div class="muted" style="margin:6px 0 10px">No executive F2F logged yet.</div>';
+  const i=escapeHtml(id);
+  const form='<div class="writeback" style="background:#fff;margin-top:10px">Log an executive face-to-face:'+
+    '<div style="display:grid;grid-template-columns:140px 1fr;gap:8px;margin-top:10px;align-items:center">'+
+      '<label class="cp-km-l">Date</label><input id="f2f-date-'+i+'" type="date" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+      '<label class="cp-km-l">CS leadership</label><input id="f2f-lead-'+i+'" type="text" placeholder="e.g. Daniel Hill, Justin Brown" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+      '<label class="cp-km-l">Attendees</label><input id="f2f-att-'+i+'" type="text" placeholder="Customer attendees" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+      '<label class="cp-km-l">Outcome</label><input id="f2f-out-'+i+'" type="text" placeholder="Key outcome / executive feedback" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
+      '<label class="cp-km-l">Notes</label><textarea id="f2f-notes-'+i+'" placeholder="Follow-up actions..." style="min-height:52px"></textarea>'+
+    '</div>'+
+    '<div style="margin-top:10px;display:flex;gap:8px;align-items:center">'+
+      '<button class="btn" onclick="applyLogF2F(\''+i+'\',this)">Log F2F</button>'+
+      '<span class="muted" id="f2f-status-'+i+'" style="font-size:.85em"></span>'+
+    '</div></div>';
+  return '<div class="cp-section" data-cpt="overview planning"><div class="cp-shead"><h2>Executive Sponsor F2F</h2><span class="cp-cnt">'+log.length+'</span></div>'+
+    '<div class="callout" style="margin-bottom:10px">'+sponsorLine+(d.f2f_last?' · last F2F <b>'+escapeHtml(d.f2f_last)+'</b>':' · <span class="muted">no F2F on record</span>')+'</div>'+
+    entries+form+'</div>';
+}
+async function applyLogF2F(id,btn){
+  const g=s=>document.getElementById(s+'-'+id);
+  const status=g('f2f-status');
+  const met_on=(g('f2f-date')&&g('f2f-date').value||'').trim();
+  const lead=(g('f2f-lead')&&g('f2f-lead').value||'').trim();
+  const att=(g('f2f-att')&&g('f2f-att').value||'').trim();
+  const outcome=(g('f2f-out')&&g('f2f-out').value||'').trim();
+  const notes=(g('f2f-notes')&&g('f2f-notes').value||'').trim();
+  const body={account_id:id,met_on:met_on||undefined,
+    cs_leadership:lead?lead.split(',').map(s=>s.trim()).filter(Boolean):[],
+    attendees:att?att.split(',').map(s=>s.trim()).filter(Boolean):[],
+    outcome:outcome||undefined, notes:notes||undefined};
+  if(btn)btn.disabled=true; if(status)status.textContent='Logging…';
+  try{
+    const r=await api('/api/f2f-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(r.status===403){ if(status)status.textContent='You can only log F2F on accounts you own.'; }
+    else if(r.status===400){ if(status)status.textContent=(j.error||'Could not log the F2F.'); }
+    else if(j.f2f_id){ if(status)status.textContent='Logged ✓'; const dd=await (await fetch('/api/accounts/'+encodeURIComponent(id))).json(); renderCompanyPage(id,dd); }
+    else { if(status)status.textContent='Could not log the F2F.'; }
+  }catch(e){ if(status)status.textContent='Could not log the F2F.'; }
+  finally{ if(btn)btn.disabled=false; }
 }
 
 // Write-back panel (Account Planning): shows the CS data that would sync to HubSpot and
