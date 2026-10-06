@@ -4919,23 +4919,28 @@ function _notesRolesPanel(id,d){
       '<button class="btn" onclick="applyLogNote(\''+escapeHtml(id)+'\',this)">Log note</button>'+
       '<span class="muted" id="note-status-'+escapeHtml(id)+'" style="font-size:.85em"></span>'+
     '</div></div>';
-  // Which of the 3 WoW-required roles are still untagged? (computed first so the
-  // per-contact dropdown can pre-select the next missing role, making the intent clear.)
+  // Which of the 3 WoW-required roles are still untagged?
   const haveRoles=new Set(contacts.map(c=>c.role).filter(Boolean));
   const missingReq=CS_ROLES.filter(r=>!haveRoles.has(r));
-  // The dropdown defaults to the FIRST still-missing required role (or Exec Sponsor if
-  // all are tagged), so a CSM is nudged toward completing the role architecture rather
-  // than defaulting every contact to the same role.
-  const defaultRole=missingReq.length?missingReq[0]:CS_ROLES[0];
-  const roleOptsFor=sel=>CS_ROLES.map(r=>'<option value="'+escapeHtml(r)+'"'+(r===sel?' selected':'')+'>'+escapeHtml(r)+(haveRoles.has(r)?' (tagged)':'')+'</option>').join('');
+  // Each contact dropdown opens on a neutral "Select role" prompt (NOT a pre-filled
+  // role) so it is visually obvious that each contact is assigned a DIFFERENT role,
+  // not all the same one. Already-assigned roles are marked "(tagged)" and the still-
+  // missing roles are flagged "(needed)" to steer completion of the architecture.
+  const roleOptsFor=current=>{
+    const prompt='<option value="" disabled'+(current?'':' selected')+'>Select role…</option>';
+    return prompt+CS_ROLES.map(r=>{
+      const tag=haveRoles.has(r)?' (tagged)':(missingReq.includes(r)?' (needed)':'');
+      return '<option value="'+escapeHtml(r)+'"'+(r===current?' selected':'')+'>'+escapeHtml(r)+tag+'</option>';
+    }).join('');
+  };
   const rows=contacts.length?contacts.map(c=>{
     const em=escapeHtml(c.email||'');
     if(!em) return '';
-    // Pre-select: if this contact already has a required role, show it; else the next missing one.
-    const preset=(c.role&&CS_ROLES.includes(c.role))?c.role:defaultRole;
+    // Show the contact's current role if already tagged; otherwise open on the neutral prompt.
+    const current=(c.role&&CS_ROLES.includes(c.role))?c.role:'';
     return '<div class="dc-row" style="gap:10px;align-items:center"><span>'+escapeHtml(c.name||c.email)+(c.role?' <span class="pill g" style="font-size:.72em">'+escapeHtml(c.role)+'</span>':'')+'</span>'+
       '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+
-        '<select class="role-sel" data-email="'+em+'">'+roleOptsFor(preset)+'</select>'+
+        '<select class="role-sel" data-email="'+em+'">'+roleOptsFor(current)+'</select>'+
         '<button class="btn" style="padding:5px 10px" onclick="applyTagRole(\''+escapeHtml(id)+'\',\''+em+'\',this)">Tag</button>'+
       '</span></div>';
   }).join(''):'<div class="muted">No associated contacts to tag.</div>';
@@ -4967,6 +4972,7 @@ async function applyLogNote(id,btn){
 async function applyTagRole(id,email,btn){
   const sel=btn.parentElement.querySelector('.role-sel'); const role=sel?sel.value:'';
   const status=document.getElementById('role-status-'+id);
+  if(!role){ if(status)status.textContent='Choose a role for '+email+' first.'; return; }
   if(!confirm('Tag '+email+' as "'+role+'" in HubSpot?')) return;
   if(btn)btn.disabled=true; if(status)status.textContent='Tagging '+email+'…';
   try{
