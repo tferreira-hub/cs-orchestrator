@@ -2730,11 +2730,25 @@ def leaderboard() -> dict:
         })
 
     # Rank by completion rate desc (None last), then fewest overdue, then most completed.
-    board.sort(key=lambda b: (
-        -(b["completion_rate_pct"] if b["completion_rate_pct"] is not None else -1),
-        b["overdue_tasks"],
-        -b["completed_tasks"],
-    ))
+    # Ranking basis: completion ranking is only meaningful once CSMs have actually
+    # COMPLETED tasks in-platform. A 0% rate derived purely from open tasks is not
+    # completion data. So fall back to a WORKLOAD ranking (most open+overdue first) until
+    # at least one task has been completed anywhere, so the board is useful day one.
+    any_completion = any((b["completed_tasks"] or 0) > 0 for b in board)
+    if any_completion:
+        ranking_basis = "completion"
+        board.sort(key=lambda b: (
+            -(b["completion_rate_pct"] if b["completion_rate_pct"] is not None else -1),
+            b["overdue_tasks"],
+            -b["completed_tasks"],
+        ))
+    else:
+        ranking_basis = "workload"
+        board.sort(key=lambda b: (
+            -(b["open_tasks"] + b["overdue_tasks"]),
+            -b["overdue_tasks"],
+            -(b["accounts"] or 0),
+        ))
     for i, b in enumerate(board, 1):
         b["rank"] = i
 
@@ -2752,6 +2766,7 @@ def leaderboard() -> dict:
     weekly_target_compliance_pct = round(100 * compliant / measurable) if measurable else None
     return {
         "leaderboard": board,
+        "ranking_basis": ranking_basis,
         "weekly_target_compliance_pct": weekly_target_compliance_pct,
         "weekly_target_compliance_target_pct": 90,
         "measurable_csms": measurable,

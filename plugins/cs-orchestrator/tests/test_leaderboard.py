@@ -86,6 +86,15 @@ def test_leaderboard_targets_from_env(monkeypatch):
     assert lb["targets_configured"] is True
 
 
+def test_leaderboard_ranking_basis_workload_without_completions(monkeypatch):
+    """With no completed tasks anywhere, the board ranks by workload (open+overdue) and
+    reports ranking_basis='workload' so the UI can label it honestly."""
+    engine = _setup(monkeypatch)
+    d = engine.leaderboard()
+    assert d["ranking_basis"] == "workload"
+    assert [b["rank"] for b in d["leaderboard"]] == list(range(1, len(d["leaderboard"]) + 1))
+
+
 def test_leaderboard_anonymises_peers_for_csm(monkeypatch):
     engine = _setup(monkeypatch)
     # Alice is the signed-in CSM: her row stays named, Bob is anonymised.
