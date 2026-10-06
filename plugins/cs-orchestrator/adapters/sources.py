@@ -384,6 +384,59 @@ class RocketLane:
                 return f.get("fieldValueLabel") or f.get("fieldValue")
         return None
 
+    def list_active_projects(self, limit: int = 500) -> list[dict[str, Any]]:
+        """All non-archived onboarding projects straight from Rocket Lane (source-first),
+        so the governance view is COMPLETE regardless of how the account roster was warmed
+        and without depending on brittle per-account name matching. Returns a normalised
+        list; [] when not live or on error (honest, never fabricated).
+
+        Each row: {company_name, company_id, project_name, status, start_date, due_date,
+        archived, owner, _source}."""
+        if not self.live():
+            return []
+        import urllib.parse
+        base = self._base()
+        headers = self._headers()
+        out: list[dict[str, Any]] = []
+        page_token = None
+        try:
+            while len(out) < limit:
+                params = {"pageSize": min(100, limit - len(out)),
+                          "sortBy": "createdAt", "sortOrder": "DESC"}
+                if page_token:
+                    params["pageToken"] = page_token
+                res = config.http_get(f"{base}/1.0/projects?{urllib.parse.urlencode(params)}", headers)
+                data = (res.get("data") or []) if isinstance(res, dict) else []
+                for p in data:
+                    if p.get("archived"):
+                        continue
+                    status_obj = p.get("status") or {}
+                    status_label = status_obj.get("label") if isinstance(status_obj, dict) else status_obj
+                    cust = p.get("customer") or {}
+                    owner = p.get("owner") or {}
+                    owner_name = " ".join(x for x in [owner.get("firstName"), owner.get("lastName")] if x) or owner.get("emailId")
+                    out.append({
+                        "company_name": cust.get("companyName"),
+                        "company_id": cust.get("companyId"),
+                        "project_name": p.get("projectName"),
+                        "status": status_label,
+                        "start_date": p.get("startDate"),
+                        "due_date": p.get("dueDate"),
+                        "archived": bool(p.get("archived")),
+                        "owner": owner_name,
+                        "health": self._field(p, ("health", "onboarding health", "status health")),
+                        "_source": "rocket-lane-live",
+                    })
+                pg = (res.get("pagination") or {}) if isinstance(res, dict) else {}
+                page_token = pg.get("nextPageToken")
+                if not page_token or not data:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[rocket-lane] list_active_projects {type(exc).__name__}: {exc}", file=_s.stderr)
+            return []
+        return out
+
 
 
 # ------------------------------------------------------------- Entitlements ---

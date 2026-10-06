@@ -819,31 +819,57 @@ def _onboarding_stalled(onboarding: dict) -> tuple[bool, list[str]]:
 
 
 def onboarding_governance() -> dict:
-    """Rocket Lane implementation & onboarding governance (V5 UC3): the leadership view of
-    active onboarding projects, time-in-onboarding, milestone/handoff velocity, and
-    stalled-before-handoff alerts, with an on-time handoff KPI (target >= 90%).
+    """Rocket Lane implementation & onboarding governance (V5 UC3): active onboarding
+    projects, time-in-onboarding, stalled-before-handoff alerts, and an on-time handoff
+    KPI (target >= 90%).
 
-    Owner-scoped (admin: all; CSM: own book). HONEST: only accounts with a genuinely
-    matched live Rocket Lane project (`onboarding._matched`) contribute; when Rocket Lane
-    is not connected the view returns `connected: false` and never a fabricated zero."""
+    SOURCE-FIRST: pulls projects directly from Rocket Lane (like the Payment Risk report
+    pulls from Stripe), so the view is COMPLETE regardless of how the account roster was
+    warmed and without depending on brittle per-account name matching. Each project is
+    joined back to the account roster by normalised company name to attach the CSM owner;
+    unmatched projects still appear (owner shown as unknown). Owner-scoped: an admin sees
+    every project; a scoped CSM sees only projects for accounts they own. HONEST: when
+    Rocket Lane is not connected it returns connected:false and never a fabricated zero."""
     rocket_live = "Rocket Lane" in set(dataaccess.live_sources())
-    accounts = _scoped_accounts()
+    if not rocket_live:
+        return {"connected": False, "active_projects": 0, "stalled_projects": 0,
+                "avg_days_in_onboarding": None, "handoff_on_time_pct": None,
+                "handoff_on_time_target_pct": 90, "handoff_completed": 0,
+                "projects": [], "stalled": [],
+                "note": "Rocket Lane is not connected; onboarding governance is unavailable."}
 
-    projects = []
-    stalled = []
-    on_time = overdue = 0
-    for aid, a in accounts.items():
-        ob = (a.get("onboarding", {}) or {})
-        if not ob.get("_matched"):
-            continue
+    try:
+        all_projects = _src.ROCKET_LANE.list_active_projects()
+    except Exception:  # noqa: BLE001
+        all_projects = []
+
+    # Build an owner lookup (normalised company name -> {owner, account_id}) from the
+    # scoped roster, so projects inherit the CSM owner and owner-scoping is honoured.
+    from adapters import identity as _id
+    p = get_principal()
+    admin = (not p) or p.get("role") == "admin"
+    owner_by_name = {}
+    for aid, a in _scoped_accounts().items():
         hs = a.get("hubspot", {}) or {}
-        status = str(ob.get("status") or "").lower()
+        nm = hs.get("name")
+        if nm:
+            owner_by_name[_id.normalise(nm)] = {"owner": hs.get("csm_owner") or "Unassigned", "account_id": aid}
+
+    projects, stalled = [], []
+    on_time = overdue = 0
+    for pr in all_projects:
+        cname = pr.get("company_name")
+        key = _id.normalise(cname) if cname else None
+        match = owner_by_name.get(key) if key else None
+        # Owner scope: a scoped CSM only sees projects whose company matches one of THEIR
+        # accounts. Admin (or open mode) sees every project.
+        if not admin and match is None:
+            continue
+        status = str(pr.get("status") or "").lower()
         completed = status in {"completed", "complete", "done", "live"}
-        days_in = _onboarding_days_in(ob.get("start_date"))
-        is_stalled, reasons = _onboarding_stalled(ob)
-        # Handoff on-time accounting: only completed projects with a due date count toward
-        # the KPI denominator; a completed project not past its due date is on-time.
-        due = ob.get("due_date")
+        days_in = _onboarding_days_in(pr.get("start_date"))
+        is_stalled, reasons = _onboarding_stalled(pr)
+        due = pr.get("due_date")
         if completed and due:
             try:
                 dd = datetime.fromisoformat(str(due)[:10]).date()
@@ -856,27 +882,28 @@ def onboarding_governance() -> dict:
             except (ValueError, TypeError):
                 pass
         row = {
-            "account_id": aid,
-            "name": hs.get("name") or aid,
-            "owner": hs.get("csm_owner") or "Unassigned",
-            "project_name": ob.get("project_name"),
-            "status": ob.get("status"),
-            "health": ob.get("health"),
-            "start_date": ob.get("start_date"),
+            "account_id": (match or {}).get("account_id"),
+            "name": cname or (pr.get("project_name") or "Unknown"),
+            "owner": (match or {}).get("owner") or "—",
+            "project_name": pr.get("project_name"),
+            "status": pr.get("status"),
+            "health": pr.get("health"),
+            "start_date": pr.get("start_date"),
             "due_date": due,
             "days_in_onboarding": days_in,
             "completed": completed,
             "stalled": is_stalled,
             "stall_reasons": reasons,
+            "matched_account": match is not None,
         }
-        if not completed and not (ob.get("archived")):
+        if not completed:
             projects.append(row)
         if is_stalled and not completed:
             stalled.append(row)
 
     handoff_denom = on_time + overdue
     handoff_on_time_pct = round(100 * on_time / handoff_denom) if handoff_denom else None
-    active_days = [p["days_in_onboarding"] for p in projects if isinstance(p["days_in_onboarding"], int)]
+    active_days = [r["days_in_onboarding"] for r in projects if isinstance(r["days_in_onboarding"], int)]
     return {
         "connected": rocket_live,
         "active_projects": len(projects),
@@ -887,7 +914,7 @@ def onboarding_governance() -> dict:
         "handoff_completed": handoff_denom,
         "projects": sorted(projects, key=lambda r: -(r["days_in_onboarding"] or 0)),
         "stalled": sorted(stalled, key=lambda r: -(r["days_in_onboarding"] or 0)),
-        "note": (None if rocket_live else "Rocket Lane is not connected; onboarding governance is unavailable."),
+        "note": None,
     }
 
 
