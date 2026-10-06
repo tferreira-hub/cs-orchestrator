@@ -81,6 +81,11 @@ Resources:
               - "ec2:*SecurityGroup*"
               - "ec2:CreateTags"
               - "ec2:DeleteTags"
+              # EFS mount targets create/delete an ENI per subnet, so the EFS service
+              # (acting as this role) needs these network-interface actions.
+              - "ec2:CreateNetworkInterface"
+              - "ec2:DeleteNetworkInterface"
+              - "ec2:ModifyNetworkInterfaceAttribute"
               - "application-autoscaling:*"
             Resource: "*"
           - Sid: ManageCsPlatformIam
