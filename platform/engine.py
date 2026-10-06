@@ -125,11 +125,16 @@ def _scope_key() -> str:
 def _cached_report(name: str, build):
     """Return build() memoised per (name, scope) for CS_REPORT_CACHE_TTL seconds.
 
-    STALE-WHILE-REVALIDATE: when the cache is stale (age > TTL) but a previous result
-    exists, the stale result is returned IMMEDIATELY and a background thread refreshes
-    the cache for the next request. This means the page is NEVER slow after the initial
-    warm. Only the very first cold call blocks. TTL<=0 disables caching entirely
-    (tests set this for determinism).
+    FULLY NON-BLOCKING: the request never waits for a build, even the very first time.
+
+    - FRESH cache (age < TTL): return instantly.
+    - STALE cache (data exists, age >= TTL): return stale instantly, background refresh.
+    - COLD cache (no data at all): return a {"warming": true} placeholder instantly
+      and kick off a background build. The frontend shows a warming state and polls
+      until the cache is ready (typically 10-30s). This prevents the ALB from timing
+      out on the 156s Stripe pagination cold build.
+
+    TTL<=0 disables caching entirely (tests set this for determinism).
     """
     import time
     import threading
@@ -144,29 +149,48 @@ def _cached_report(name: str, build):
     if hit and (now - hit[0]) < ttl:
         return hit[1]
 
-    # Stale cache exists: return it NOW, refresh in the background so the user never waits.
+    # Background refresh helper (shared by stale + cold paths).
+    def _start_bg():
+        if key in _REPORT_REFRESHING:
+            return  # already building
+        _REPORT_REFRESHING.add(key)
+        principal = get_principal()
+        def _bg():
+            try:
+                set_principal(principal)
+                result = build()
+                if isinstance(result, dict):
+                    _REPORT_CACHE[key] = (time.time(), result)
+            finally:
+                _REPORT_REFRESHING.discard(key)
+                set_principal(None)
+        threading.Thread(target=_bg, daemon=True).start()
+
+    # Stale cache exists: return it NOW, refresh in the background.
     if hit and hit[1] is not None:
-        if key not in _REPORT_REFRESHING:
-            _REPORT_REFRESHING.add(key)
-            # Capture the current principal so the bg thread builds with the right scope.
-            principal = get_principal()
-            def _bg():
-                try:
-                    set_principal(principal)
-                    result = build()
-                    if isinstance(result, dict):
-                        _REPORT_CACHE[key] = (time.time(), result)
-                finally:
-                    _REPORT_REFRESHING.discard(key)
-                    set_principal(None)
-            threading.Thread(target=_bg, daemon=True).start()
+        _start_bg()
         return hit[1]  # stale but instant
 
-    # Cold (no cached data at all): build synchronously (the one slow path).
-    result = build()
-    if isinstance(result, dict):
-        _REPORT_CACHE[key] = (now, result)
-    return result
+    # COLD (no cached data at all): return a warming placeholder immediately and
+    # build in the background. The frontend polls until the real data appears.
+    _start_bg()
+    return {"warming": True, "note": f"{name} is loading for the first time after deploy. It will appear in a few seconds."}
+
+
+def warm_reports():
+    """Synchronously build both TTL-cached reports under the admin scope key so the
+    first admin page load after deploy is instant. Called from the boot warm thread
+    (not from a request handler). MUST NOT use _cached_report (which now returns a
+    warming placeholder on cold miss)."""
+    import time as _t
+    for name, build in [("onboarding_governance", _onboarding_governance_build),
+                        ("payment_risk_report", _payment_risk_report_build)]:
+        try:
+            result = build()
+            if isinstance(result, dict):
+                _REPORT_CACHE[(name, "admin")] = (_t.time(), result)
+        except Exception:  # noqa: BLE001
+            pass  # boot warm is best-effort; never crash the server
 
 
 def _scoped_accounts() -> dict:

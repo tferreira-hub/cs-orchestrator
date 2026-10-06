@@ -172,6 +172,8 @@ tr.row-roster:hover td{opacity:1}
 .covdot.off{background:#f1f3f8;color:var(--muted);text-decoration:line-through}
 .pill.nc2{background:#f1f3f8;color:var(--muted);border:1px dashed #cbd2df}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes warm-spin{to{transform:rotate(360deg)}}
+.warming-spin{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:warm-spin .8s linear infinite}
 .content{padding:26px 32px 70px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
 .tbl{width:100%;border-collapse:collapse;font-size:.86em}
@@ -2030,12 +2032,25 @@ function renderOperatingRhythm(){
 function _renderRhythm(d){
   const i=document.getElementById('rhythm-inner'); if(!i)return;
   const b=d.blocks||{};
-  const taskRows=(tasks)=>(tasks||[]).slice(0,25).map(t=>
-    '<tr class="click" onclick="openAccount(\''+escapeHtml(t.account_id)+'\')">'+
-      '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">P'+(t.priority||'-')+'</span></td>'+
+  // Summary counts across all blocks.
+  const totalTasks=Object.values(b).reduce((s,bl)=>s+(bl.count||0),0);
+  const p1Count=(b.daily_p1_risk||{}).count||0;
+  const renewCount=(b.weekly_renewals_expansion||{}).count||0;
+  const adoptCount=(b.weekly_adoption_qbr||{}).count||0;
+  const strip=_heroBand([
+    _bigStat('Total open actions', totalTasks, totalTasks===0?'clear week':'across all blocks'),
+    _bigStat('Defensive (P1/P2)', p1Count, p1Count>0?'requires immediate action':'no urgent risk', p1Count>0?'warn':'good'),
+    _bigStat('Renewals and expansion', renewCount, renewCount>0?'tasks this week':null),
+    _bigStat('Adoption and QBR', adoptCount, adoptCount>0?'tasks this week':null),
+  ]);
+  const taskRows=(tasks)=>(tasks||[]).slice(0,25).map(t=>{
+    const priCls=t.priority<=2?' warn':t.priority<=3?'':'';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(t.account_id)+'\')">'+
+      '<td><span class="prio prio'+(t.priority||3)+'">P'+(t.priority||'-')+'</span></td>'+
       '<td><strong>'+escapeHtml(t.account||t.account_id)+'</strong></td>'+
       '<td style="color:var(--ink2)">'+escapeHtml(t.trigger||'')+'</td>'+
-      '<td class="muted" style="white-space:nowrap">'+(t.due_on?escapeHtml(String(t.due_on).slice(0,10)):'-')+'</td></tr>').join('');
+      '<td class="muted" style="white-space:nowrap">'+(t.due_on?escapeHtml(String(t.due_on).slice(0,10)):'-')+'</td></tr>';
+  }).join('');
   const block=(key)=>{
     const bl=b[key]; if(!bl)return '';
     if(key==='monday_review'){
@@ -2052,7 +2067,7 @@ function _renderRhythm(d){
       '<table class="acct-list"><thead><tr><th>Pri</th><th>Account</th><th>Trigger</th><th>Due</th></tr></thead><tbody>'+
       (taskRows(bl.tasks)||'<tr><td colspan="4" class="empty" style="padding:18px">Nothing in this block right now.</td></tr>')+'</tbody></table></div></div>';
   };
-  i.parentElement.innerHTML=block('monday_review')+block('daily_p1_risk')+block('weekly_renewals_expansion')+block('weekly_adoption_qbr');
+  i.parentElement.innerHTML=strip+block('monday_review')+block('daily_p1_risk')+block('weekly_renewals_expansion')+block('weekly_adoption_qbr');
 }
 
 // ===== Calendar: weekly task/meeting view =====
@@ -2655,6 +2670,19 @@ async function api(path,opts){
     throw new Error('unauthenticated');
   }
   return r;
+}
+
+// A cached report may return {warming:true} on the first load after a deploy (the
+// server is building it in the background to avoid blocking the request). Render a
+// warming state and auto-retry so the page fills in without a manual refresh.
+function _renderWarming(host, label, retryFn){
+  host.innerHTML='<div class="panel"><div class="head"><h2>'+escapeHtml(label)+'</h2><span class="note">preparing live data</span></div>'+
+    '<div class="body pad" style="text-align:center;padding:40px 24px">'+
+      '<div class="warming-spin" style="margin:0 auto 16px"></div>'+
+      '<div style="font-weight:600">Preparing live data</div>'+
+      '<div class="muted" style="margin-top:6px;font-size:.9em">This runs once after a deploy and takes a few seconds. The page will fill in automatically.</div>'+
+    '</div></div>';
+  setTimeout(retryFn, 3000);
 }
 
 // ── Inline-SVG chart helpers (no external library) ───────────────
@@ -3373,6 +3401,7 @@ async function renderPaymentRisk(){
   let d;
   try{ d=await (await api('/api/payment-risk')).json(); }
   catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load the payment risk report.</div></div></div>'; return; }
+  if(d&&d.warming){ _renderWarming(host,'Payment Risk Report',renderPaymentRisk); return; }
   _prState={active:'payment_failed', data:d};
   if(!d.stripe_connected){
     host.innerHTML='<div class="panel"><div class="head"><h2>Payment Risk Report</h2><span class="note warn">Stripe not connected</span></div>'+
@@ -3405,6 +3434,7 @@ async function renderOnboarding(){
   let d;
   try{ d=await (await api('/api/onboarding-governance')).json(); }
   catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load onboarding governance.</div></div></div>'; return; }
+  if(d&&d.warming){ _renderWarming(host,'Implementation Governance',renderOnboarding); return; }
   if(!d.connected){
     host.innerHTML='<div class="panel"><div class="head"><h2>Implementation Governance</h2><span class="note warn">Rocket Lane not connected</span></div>'+
       '<div class="body pad"><div class="empty"><b>Rocket Lane is not connected</b><div class="sub" style="margin-top:6px">'+escapeHtml(d.note||'Connect Rocket Lane to populate implementation governance.')+' No sample data is shown.</div></div></div></div>';
