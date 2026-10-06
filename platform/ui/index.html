@@ -495,6 +495,8 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .cc-big .cc-big-l{font-size:.88em;font-weight:700;color:var(--ink2)}
 .cc-big .cc-big-v{font-size:2.2em;font-weight:800;letter-spacing:-.03em;margin-top:8px}
 .cc-big .cc-big-v.warn{color:var(--red)}.cc-big .cc-big-v.good{color:var(--green)}
+.cc-big .cc-big-s{font-size:.75em;color:var(--muted);margin-top:6px}
+.v5-hero{margin-bottom:18px}
 .cc-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;margin-bottom:16px;align-items:start}
 .cc-left{display:flex;flex-direction:column;gap:16px;min-width:0}
 .cc-headline{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -3337,6 +3339,17 @@ function _pctTone(v,target){ // tone for a "higher is better" KPI vs a target
   if(v==null) return null;
   return v>=target?'good':'warn';
 }
+// Command-Center-caliber hero stat (big value, label, optional sub) in a .cc-headline band.
+function _bigStat(label,value,sub,tone){
+  const v=(value==null||value==='')?'—':value;
+  const vc=tone==='warn'?' warn':tone==='good'?' good':'';
+  return '<div class="cc-big"><div class="cc-big-l">'+escapeHtml(label)+'</div>'+
+    '<div class="cc-big-v'+vc+'">'+v+'</div>'+
+    (sub?'<div class="cc-big-s">'+escapeHtml(sub)+'</div>':'')+'</div>';
+}
+function _heroBand(cards,cols){
+  return '<div class="cc-headline v5-hero" style="grid-template-columns:repeat('+(cols||cards.length)+',1fr)">'+cards.join('')+'</div>';
+}
 
 async function renderOnboarding(){
   const host=document.getElementById('onboarding-body'); if(!host) return;
@@ -3350,25 +3363,32 @@ async function renderOnboarding(){
     return;
   }
   const hp=d.handoff_on_time_pct;
-  const strip=_statsGrid([
-    _stat('Active projects', d.active_projects),
-    _stat('Stalled before handoff', d.stalled_projects, null, (d.stalled_projects>0?'warn':'good')),
-    _stat('Avg days in onboarding', d.avg_days_in_onboarding!=null?d.avg_days_in_onboarding+'d':null),
-    _stat('On-time handoff', hp!=null?hp+'%':null, 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed', _pctTone(hp,d.handoff_on_time_target_pct)),
+  const strip=_heroBand([
+    _bigStat('Active projects', d.active_projects),
+    _bigStat('Stalled before handoff', d.stalled_projects, d.stalled_projects>0?'needs attention':'all on track', d.stalled_projects>0?'warn':'good'),
+    _bigStat('Avg days in onboarding', d.avg_days_in_onboarding!=null?d.avg_days_in_onboarding:'—', d.avg_days_in_onboarding!=null?'days':null),
+    _bigStat('On-time handoff', hp!=null?hp+'%':'—', 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed', _pctTone(hp,d.handoff_on_time_target_pct)),
   ]);
-  const prow=p=>'<tr>'+
-    '<td><b>'+escapeHtml(p.name||p.account_id||'')+'</b></td>'+
-    '<td>'+escapeHtml(p.project_name||'—')+'</td>'+
-    '<td>'+escapeHtml(p.status||'—')+'</td>'+
-    '<td>'+(p.days_in_onboarding==null?'—':p.days_in_onboarding+'d')+'</td>'+
-    '<td>'+escapeHtml(p.owner||'—')+'</td>'+
-    '<td>'+(p.stalled?'<span class="pill warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="pill ok">on track</span>')+'</td>'+
-    '</tr>';
   const projs=(d.projects||[]);
-  const body=projs.length
-    ? '<table class="tbl"><thead><tr><th>Account</th><th>Project</th><th>Status</th><th>In onboarding</th><th>Owner</th><th>Signal</th></tr></thead><tbody>'+projs.map(prow).join('')+'</tbody></table>'
+  const maxDays=Math.max(1,...projs.map(p=>p.days_in_onboarding||0));
+  const prow=p=>{
+    const dz=p.days_in_onboarding;
+    const bar=dz==null?'' : '<div class="lb-bar" style="flex:0 0 90px"><i style="width:'+Math.round((dz/maxDays)*100)+'%;background:'+(p.stalled?'var(--red)':'var(--brand)')+'"></i></div>';
+    const st=String(p.status||'').toLowerCase();
+    const stTone=/(stall|block|risk|hold)/.test(st)?'warn':/(progress|new|kick)/.test(st)?'':'ok';
+    return '<div class="lb-row">'+
+      '<div class="lb-main"><div class="lb-name">'+escapeHtml(p.name||p.account_id||'')+(p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'')+'</div>'+
+        '<div class="lb-sub">'+escapeHtml(p.project_name||'—')+' · owner '+escapeHtml(p.owner||'—')+'</div></div>'+
+      '<div class="lb-metrics">'+
+        '<div class="lb-metric"><div class="n">'+(dz==null?'—':dz)+'</div><div class="k">Days in</div></div>'+
+        '<div style="flex:0 0 auto">'+(p.status?'<span class="pill '+stTone+'">'+escapeHtml(p.status)+'</span>':'<span class="muted">—</span>')+'</div>'+
+      '</div>'+bar+
+      '<div class="lb-comp">'+(p.stalled?'<span class="pill warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="pill ok">on track</span>')+'</div>'+
+      '</div>';
+  };
+  const body=projs.length ? projs.map(prow).join('')
     : '<div class="body pad"><div class="empty">No active onboarding projects in scope.</div></div>';
-  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>Active implementations</h2><span class="note">Rocket Lane projects, longest in onboarding first</span></div>'+(projs.length?'<div class="body">'+body+'</div>':body)+'</div>';
+  host.innerHTML=strip+'<div class="panel"><div class="head"><h2>Active implementations</h2><span class="note">Rocket Lane projects, longest in onboarding first</span></div>'+body+'</div>';
 }
 
 async function renderLeaderboard(){
@@ -3380,11 +3400,11 @@ async function renderLeaderboard(){
   const board=d.leaderboard||[];
   const wc=d.weekly_target_compliance_pct;
   const byWorkload = d.ranking_basis==='workload';
-  const strip=_statsGrid([
-    _stat('Weekly target compliance', wc!=null?wc+'%':null, 'target '+d.weekly_target_compliance_target_pct+'%', _pctTone(wc,d.weekly_target_compliance_target_pct)),
-    _stat('CSMs ranked', board.length),
-    _stat('Ranked by', byWorkload?'Workload':'Completion', byWorkload?'no completions logged yet':'week-ending completion'),
-  ]);
+  const strip=_heroBand([
+    _bigStat('Weekly target compliance', wc!=null?wc+'%':'—', 'target '+d.weekly_target_compliance_target_pct+'%', _pctTone(wc,d.weekly_target_compliance_target_pct)),
+    _bigStat('CSMs ranked', board.length),
+    _bigStat('Ranked by', byWorkload?'Workload':'Completion', byWorkload?'no completions logged yet':'week-ending completion'),
+  ], 3);
   const maxLoad = Math.max(1, ...board.map(b=>(b.open_tasks||0)+(b.overdue_tasks||0)));
   const lbrow=b=>{
     const load=(b.open_tasks||0)+(b.overdue_tasks||0);
@@ -3427,11 +3447,11 @@ async function renderF2F(){
   try{ d=await (await api('/api/f2f-cadence')).json(); }
   catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load F2F cadence.</div></div></div>'; return; }
   const tp=d.tier1_exec_touchpoint_pct;
-  const strip=_statsGrid([
-    _stat('Tier-1 exec touchpoint', tp!=null?tp+'%':null, 'target '+d.target_pct+'% · '+d.cadence_window_days+'d window', _pctTone(tp,d.target_pct)),
-    _stat('Tier-1 strategic accounts', d.tier1_strategic_accounts),
-    _stat('With in-window F2F', d.with_in_window_touchpoint),
-    _stat('Overdue', (d.overdue_accounts||[]).length, null, ((d.overdue_accounts||[]).length>0?'warn':'good')),
+  const strip=_heroBand([
+    _bigStat('Tier-1 exec touchpoint', tp!=null?tp+'%':'—', 'target '+d.target_pct+'% · '+d.cadence_window_days+'d window', _pctTone(tp,d.target_pct)),
+    _bigStat('Tier-1 strategic accounts', d.tier1_strategic_accounts),
+    _bigStat('With in-window F2F', d.with_in_window_touchpoint),
+    _bigStat('Overdue', (d.overdue_accounts||[]).length, null, ((d.overdue_accounts||[]).length>0?'warn':'good')),
   ]);
   const od=(d.overdue_accounts||[]);
   const card=a=>'<div class="f2f-card">'+
