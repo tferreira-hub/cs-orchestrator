@@ -1536,6 +1536,8 @@ def account_detail(account_id: str) -> dict:
             "roi_ai": live.get("roi_ai", {}),
         },
         "onboarding": live.get("onboarding", {}),
+        "f2f_log": f2f_log_for(account_id),
+        "f2f_last": last_f2f(account_id),
         "health": h,
         "renewal_forecast": renewal_forecast(live, h, expansion_qualified=expansion_qualified),
         "health_trend": _health_trend_for(account_id),
