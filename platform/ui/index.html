@@ -4254,9 +4254,16 @@ function adFeedback(m,idx){
   if(!m.data) return '';
   if(m.feedback==='helpful') return '<div class="ad-fb done">Thanks, noted. This helps me get better for you.</div>';
   if(m.feedback==='needs_correction') return '<div class="ad-fb done">Thanks for flagging it. I have logged this so we can review and improve.</div>';
+  // Specific reasons MUST match the server's allowed set (wrong_priority, missing_evidence,
+  // irrelevant_action, source_gap, other) or they collapse to 'other' and poison the
+  // learning loop. Offer the real categories, not a single generic 'needs work'.
   return '<div class="ad-fb"><span>Was this helpful? Your feedback trains the agent.</span>'+
     '<button onclick="adRate('+idx+',\'helpful\')">Yes</button>'+
-    '<button onclick="adRate('+idx+',\'needs_correction\',\'wrong_or_incomplete\')">Needs work</button></div>';
+    '<button onclick="adRate('+idx+',\'needs_correction\',\'wrong_priority\')" title="Wrong priority/ranking">Wrong priority</button>'+
+    '<button onclick="adRate('+idx+',\'needs_correction\',\'missing_evidence\')" title="Missing or weak evidence">Missing evidence</button>'+
+    '<button onclick="adRate('+idx+',\'needs_correction\',\'irrelevant_action\')" title="Recommended action does not fit">Wrong action</button>'+
+    '<button onclick="adRate('+idx+',\'needs_correction\',\'source_gap\')" title="A data source was missing">Source gap</button>'+
+    '</div>';
 }
 async function adRate(idx,rating,reason){
   const m=adThread[idx]; if(!m) return;

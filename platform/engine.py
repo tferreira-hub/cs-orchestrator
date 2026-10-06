@@ -195,13 +195,58 @@ def warm_reports():
 
 def _scoped_accounts() -> dict:
     """The account roster visible to the current principal. Admin (or no principal,
-    for legacy/open mode) sees everything; a CSM sees only accounts they own."""
+    for legacy/open mode) sees everything; a CSM sees only accounts they own.
+
+    Attaches each account's success plans (if any) so the rules engine can fire the
+    success-plan-at-risk rule. Plans are read from the shared JSONL store; accounts
+    without plans are untouched (no key added), so behaviour is unchanged for them."""
     accounts = dataaccess.all_accounts()
     p = get_principal()
-    if not p or p.get("role") == "admin":
-        return accounts
-    owner_id = p.get("owner_id")
-    return {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
+    if p and p.get("role") not in (None, "admin"):
+        owner_id = p.get("owner_id")
+        accounts = {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
+    plans_by_account = _success_plans_all()
+    if plans_by_account:
+        for aid, a in accounts.items():
+            plans = plans_by_account.get(aid)
+            if plans:
+                # Shallow copy so we never mutate the dataaccess cache in place.
+                a = dict(a)
+                a["success_plans"] = plans
+                accounts[aid] = a
+    return accounts
+
+
+_SUCCESS_PLANS_FILE = os.environ.get(
+    "CS_SUCCESS_PLANS_FILE",
+    str(Path(__file__).resolve().parents[1] / ".cs-success-plans.jsonl"))
+
+
+def _success_plans_all() -> dict:
+    """Latest success plan per (account_id, plan_id) from the append-only JSONL store,
+    grouped by account_id. Shared file with the server's writer (CS_SUCCESS_PLANS_FILE).
+    Returns {account_id: [plan, ...]}; empty when the file is absent. Never raises."""
+    path = Path(os.environ.get("CS_SUCCESS_PLANS_FILE", _SUCCESS_PLANS_FILE))
+    if not path.exists():
+        return {}
+    latest: dict = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:  # noqa: BLE001
+                continue
+            key = (row.get("account_id"), row.get("plan_id"))
+            if row.get("account_id"):
+                latest[key] = row  # later lines overwrite earlier (edits)
+    except Exception:  # noqa: BLE001
+        return {}
+    by_account: dict = {}
+    for (aid, _pid), plan in latest.items():
+        by_account.setdefault(aid, []).append(plan)
+    return by_account
 
 
 def can_view_account(account_id: str) -> bool:

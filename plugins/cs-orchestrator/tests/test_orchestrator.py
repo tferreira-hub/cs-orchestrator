@@ -163,6 +163,37 @@ def test_onboarding_stagnation_judge_passes():
     assert not prio_viol, f"judge should not flag P3 MUST_USE stagnation: {prio_viol}"
     assert verdict["verdict"] == "PASS", f"expected PASS: {verdict['violations']}"
 
+def test_success_plan_at_risk_fires_and_judge_passes():
+    """A committed success plan that is off-track or past its deadline must raise a
+    P2 MUST_PROTECT task; a healthy/on-track plan must not. Judge PASSES either way."""
+    from playbook_judge import judge
+    base_hs = {"name": "Plan Co", "segment": "Strategic", "contacts": [],
+               "renewal_date": "2027-06-01"}
+    base = {"hubspot": base_hs, "usage": {"days_since_last_visit": 2},
+            "churn": {}, "zendesk": {}, "stripe": {}}
+    # Off-track plan -> fires.
+    acct = {**base, "success_plans": [
+        {"plan_id": "p1", "goal": "Activate SSO", "status": "off_track", "deadline": "2027-01-01"}]}
+    tasks, _ = orchestrate.evaluate("au1-plan1", acct)
+    sp = [t for t in tasks if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    assert sp and sp[0]["priority"] == 2 and sp[0]["mandate"] == "MUST_PROTECT"
+    assert "Activate SSO" in sp[0]["evidence"]["goals"]
+    assert judge(tasks, {"au1-plan1": acct})["verdict"] == "PASS"
+    # Overdue deadline (past due vs CS_TODAY 2026-09-23) -> fires.
+    acct2 = {**base, "success_plans": [
+        {"plan_id": "p2", "goal": "Hit 80% adoption", "status": "on_track", "deadline": "2026-01-01"}]}
+    t2, _ = orchestrate.evaluate("au1-plan2", acct2)
+    assert [t for t in t2 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    # On-track, future deadline -> does NOT fire.
+    acct3 = {**base, "success_plans": [
+        {"plan_id": "p3", "goal": "Expand seats", "status": "on_track", "deadline": "2027-12-01"}]}
+    t3, _ = orchestrate.evaluate("au1-plan3", acct3)
+    assert not [t for t in t3 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    # No plans at all -> does NOT fire (unchanged behaviour).
+    t4, _ = orchestrate.evaluate("au1-plan4", base)
+    assert not [t for t in t4 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+
+
 
 def test_protect_suppresses_duplicate_adoption_and_hygiene_tasks():
     account = {

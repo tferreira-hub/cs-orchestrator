@@ -77,6 +77,7 @@ RULE_SCALED_EXCEPTION = "scaled_exception_escalation"    # P2 MUST_PROTECT (Scal
 RULE_DAY15_PAYMENT = "day15_payment_strategic"           # P2 MUST_PROTECT (Day-15 high-ARR Strategic)
 RULE_OVERDUE_RENEWAL = "overdue_renewal_escalation"      # P2 MUST_PROTECT (renewal past due)
 RULE_SEAT_CONTRACTION = "seat_user_contraction"          # P2 MUST_PROTECT (sudden >20% seat/user drop, 14d)
+RULE_SUCCESS_PLAN_AT_RISK = "success_plan_at_risk"       # P2 MUST_PROTECT (committed goal off-track/overdue)
 RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
 RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
@@ -95,6 +96,7 @@ RULE_PRIORITY = {
     RULE_SCALED_EXCEPTION: 2,
     RULE_DAY15_PAYMENT: 2,
     RULE_OVERDUE_RENEWAL: 2,
+    RULE_SUCCESS_PLAN_AT_RISK: 2,
     RULE_EXPANSION_UTILIZATION: 3,
     RULE_EXPANSION_API_SURGE: 3,
     RULE_EXPANSION_ADOPTION: 3,
@@ -347,6 +349,40 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
                  "_source": "entitlements-seats" if drv == "seats" else ("pendo-logins" if drv == "logins" else "pendo-logins+entitlements-seats")},
                 "Investigate the drop: confirm with the Primary Champion / Admin whether seats or "
                 "usage were intentionally reduced, assess renewal/churn risk, and log the finding.")
+
+    # --- MUST_PROTECT: success plan at risk (WoW: a committed customer goal that is
+    # off-track or past its deadline is a defensive signal). Reads the plans the engine
+    # attached to the account (engine._scoped_accounts). Not churned (own recovery rule).
+    if churn_status != "churned":
+        plans = a.get("success_plans") or []
+        at_risk = []
+        for sp in plans:
+            if not isinstance(sp, dict):
+                continue
+            status = str(sp.get("status") or "").strip().lower()
+            deadline = sp.get("deadline")
+            overdue_days = None
+            if deadline:
+                try:
+                    overdue_days = -_days_to(str(deadline)[:10])  # positive when past due
+                except Exception:  # noqa: BLE001
+                    overdue_days = None
+            is_off_track = status in ("off_track", "off track", "at_risk", "at risk", "behind", "red")
+            is_overdue = isinstance(overdue_days, int) and overdue_days > 0 and status not in ("done", "complete", "completed", "achieved")
+            if is_off_track or is_overdue:
+                reason = "status=" + (status or "unknown") if is_off_track else f"{overdue_days}d past deadline"
+                at_risk.append({"goal": sp.get("goal"), "metric": sp.get("metric"),
+                                "status": status or None, "deadline": deadline,
+                                "overdue_days": overdue_days if is_overdue else None, "reason": reason})
+        if at_risk:
+            risk_fired = True
+            goals = ", ".join([a["goal"] for a in at_risk if a.get("goal")][:3]) or f"{len(at_risk)} plan(s)"
+            add(RULE_SUCCESS_PLAN_AT_RISK, 2, "MUST_PROTECT",
+                "Success plan at risk",
+                {"plans_at_risk": len(at_risk), "goals": goals, "detail": "; ".join(a["reason"] for a in at_risk),
+                 "at_risk": at_risk, "_source": "cs-success-plans"},
+                "A committed success-plan goal is off-track or past its deadline: review the plan with "
+                "the Primary Champion / Admin, re-baseline or escalate, and update the plan status.")
 
     # --- MUST_EXPAND: expansion triggers (healthy only) ---
     healthy = score < 0.4 and not sev1 and churn_status != "churned"
