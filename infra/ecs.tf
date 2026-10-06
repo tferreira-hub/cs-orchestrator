@@ -46,6 +46,12 @@ locals {
     CS_USER_GROUPS           = var.cs_user_group_ids
     AUTH_ADMIN_EMAILS        = var.auth_admin_emails
     REDSHIFT_ASSUME_ROLE_ARN = var.redshift_assume_role_arn
+    # Persist append-only state on the EFS volume mounted at /data so it survives
+    # task restarts/deploys (health history must accumulate for trend detection).
+    CS_HISTORY_FILE     = "/data/.cs-health-history.jsonl"
+    CS_F2F_LOG_FILE     = "/data/.cs-f2f-log.jsonl"
+    CS_ROI_AI_FILE      = "/data/.cs-roi-ai.jsonl"
+    CS_TASK_EVENTS_FILE = "/data/.cs-task-events.jsonl"
   })
 
   container_environment = [for k, v in local.computed_env : { name = k, value = tostring(v) }]
@@ -82,6 +88,7 @@ resource "aws_ecs_task_definition" "app" {
       portMappings    = [{ containerPort = var.container_port, protocol = "tcp" }]
       environment     = local.container_environment
       secrets         = local.container_secrets
+      mountPoints     = [{ sourceVolume = "data", containerPath = "/data", readOnly = false }]
       linuxParameters = { initProcessEnabled = true }
       logConfiguration = {
         logDriver = "awslogs"
@@ -100,6 +107,20 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+
+  # EFS-backed volume for persistent append-only state (see efs.tf). Uses the
+  # access point so the non-root container user owns the files, with TLS in transit.
+  volume {
+    name = "data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
 
   tags = local.tags
 }
