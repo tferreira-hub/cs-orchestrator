@@ -2592,17 +2592,35 @@ function renderPooledStalled(){
 }
 function renderPooledLowUsage(){
   const rows=_pooledAccts().filter(a=>a.connected&&a.connected.usage&&a.usage_days_since_visit!=null&&a.usage_days_since_visit>=28).sort((x,y)=>y.usage_days_since_visit-x.usage_days_since_visit);
-  const body=rows.map(a=>{const r=_pooledRow(a);return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill r">'+a.usage_days_since_visit+'d idle</span></td></tr>';}).join('');
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Low Usage</h2><span class="note">Pooled accounts with no product visit in 28+ days (live Pendo)</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Idle 28+ days</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Usage recency</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled companies are low-usage right now.</td></tr>')+'</tbody></table></div></div>';
+  // Summary of the idle cohort: how many, how much ARR is sitting idle, how stale.
+  const idleArr=rows.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const worst=rows.length?rows[0].usage_days_since_visit:0;
+  const avgIdle=rows.length?Math.round(rows.reduce((s,a)=>s+a.usage_days_since_visit,0)/rows.length):0;
+  const over90=rows.filter(a=>a.usage_days_since_visit>=90).length;
+  const strip=_heroBand([
+    _bigStat('Idle accounts', rows.length, 'no visit in 28+ days', rows.length>0?'warn':'good'),
+    _bigStat('ARR idle', fmt(idleArr), 'revenue not actively used', idleArr>0?'warn':''),
+    _bigStat('Idle 90+ days', over90, over90>0?'deeply disengaged':'none', over90>0?'warn':'good'),
+    _bigStat('Avg days idle', avgIdle, 'across the cohort'),
+  ]);
+  const body=rows.map(a=>{const r=_pooledRow(a);const d=a.usage_days_since_visit;const tone=d>=90?'r':d>=56?'a':'pln';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span class="pill pln">The Pool</span>')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill '+tone+'">'+d+'d idle</span></td></tr>';}).join('');
+  _pooledHost().innerHTML=strip+'<div class="panel"><div class="head"><h2>Low Usage</h2><span class="note">Pooled accounts with no product visit in 28+ days (live Pendo) · most idle first</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Usage recency</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled companies are low-usage right now.</td></tr>')+'</tbody></table></div></div>';
 }
 function renderPooledLowUsageSeq(){
   // Low-usage re-engagement sequence: pooled accounts idle 28+ days (live Pendo) that
   // can be enrolled into the one-to-many re-engagement sequence (guarded write-back).
   const rows=_pooledAccts().filter(a=>a.usage_days_since_visit!=null&&a.usage_days_since_visit>=28).sort((x,y)=>y.usage_days_since_visit-x.usage_days_since_visit);
+  const seqArr=rows.reduce((s,a)=>s+(a.arr_usd||0),0);
+  const strip=_heroBand([
+    _bigStat('Ready to enrol', rows.length, 'idle 28+ days'),
+    _bigStat('ARR in re-engagement', fmt(seqArr), 'revenue to reactivate'),
+    _bigStat('Sequence', '4 steps', 'welcome → training → survey → community'),
+  ], 3);
   const body=rows.map(a=>{const r=_pooledRow(a);const id=escapeHtml(a.account_id);
     return '<tr id="seqrow-'+id+'"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill r">'+a.usage_days_since_visit+'d idle</span></td><td><span class="seq-state" id="seqstate-'+id+'"><button class="review-btn" onclick="enrolSequence(\''+id+'\')">Enrol in sequence</button></span></td></tr>';}).join('');
   const bulk=rows.length?'<button class="review-btn primary" onclick="enrolSequenceBulk()">Enrol all '+rows.length+' in re-engagement</button>':'';
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Low Usage Sequence</h2><span class="note">Re-engagement for idle pooled accounts · guarded write-back (dry-run unless CS_ALLOW_WRITE=1)</span></div>'+
+  _pooledHost().innerHTML=strip+'<div class="panel"><div class="head"><h2>Low Usage Sequence</h2><span class="note">Re-engagement for idle pooled accounts · guarded write-back (dry-run unless CS_ALLOW_WRITE=1)</span></div>'+
     '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Idle 28+ days</span><span class="fb-count">'+rows.length+' to enrol</span>'+(bulk?('<span style="margin-left:auto">'+bulk+'</span>'):'')+'</div>'+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage recency</th><th>Sequence</th></tr></thead><tbody id="seq-tbody">'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled accounts need re-engagement right now.</td></tr>')+'</tbody></table></div></div>';
 }
@@ -4700,7 +4718,25 @@ function renderCompanyPage(id,d){
     signals='<div class="cp-signals" style="margin-bottom:8px">No declining trend over the last 45 days. Current point-in-time risk drivers:</div>'+
       '<div class="cp-feed">'+(health.reasons||[]).map(r=>'<div class="cp-item"><span class="cp-iico sev-medium">!</span><div class="cp-ibody"><div class="cp-ititle">'+escapeHtml(r)+'</div></div></div>').join('')+'</div>';
   } else if(health.computable){
-    signals='<div class="cp-signals">Healthy across all live signals. No active risk drivers.</div>';
+    // Healthy, no risk drivers: surface the POSITIVE live signals that make this account
+    // healthy, so the section is substantive (not a bare "nothing wrong" line). Each is
+    // grounded in a live value already on the page.
+    const pos=[];
+    if(us.days_since_last_visit!=null && us.days_since_last_visit<=7) pos.push(['Actively using the product','Last visit '+(us.days_since_last_visit===0?'today':us.days_since_last_visit+' day'+(us.days_since_last_visit===1?'':'s')+' ago')]);
+    if(us.active_users_30d) pos.push([us.active_users_30d+' active user'+(us.active_users_30d===1?'':'s')+' (30d)','Live Pendo feature events']);
+    if(us.features_used_30d) pos.push([us.features_used_30d+' features used (30d)','Breadth of product adoption']);
+    if(String(us.pendo_adoption||'').toLowerCase().match(/pos|high|strong|increas/)) pos.push(['Pendo adoption: '+escapeHtml(us.pendo_adoption),'Pendo Predict signal']);
+    if(String(us.pendo_adoption_engagement||'').toLowerCase().match(/pos|high|strong/)) pos.push(['Pendo engagement: '+escapeHtml(us.pendo_adoption_engagement),'Pendo Predict signal']);
+    if(String(jm.sentiment||'').toLowerCase()==='positive') pos.push(['Positive call sentiment','Latest Jiminny call']);
+    if((st.dunning_stage||'none')==='none' && (st.past_due_invoices||0)===0 && conn.stripe) pos.push(['Payments up to date','Live Stripe']);
+    const expn2=d.expansion||{};
+    if(expn2.computable && (expn2.band==='high'||expn2.band==='medium')) pos.push(['Expansion-ready ('+expn2.score+'/100)',(expn2.drivers||[]).slice(0,1).map(escapeHtml).join('')||'computed readiness']);
+    if(pos.length){
+      signals='<div class="cp-signals" style="margin-bottom:8px">Healthy across all live signals. What is going well:</div>'+
+        '<div class="cp-feed">'+pos.map(p=>'<div class="cp-item"><span class="cp-iico" style="background:var(--green,#16a34a);color:#fff">✓</span><div class="cp-ibody"><div class="cp-ititle">'+p[0]+'</div><div class="cp-idesc">'+p[1]+'</div></div></div>').join('')+'</div>';
+    } else {
+      signals='<div class="cp-signals">Healthy across all live signals. No active risk drivers.</div>';
+    }
   } else {
     signals='<div class="cp-signals">Not enough live signal to compute health. Connect more sources or wait for the next sync.</div>';
   }
