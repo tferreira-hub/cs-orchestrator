@@ -110,6 +110,18 @@ def account(account_id: str) -> dict:
         if metrics.get("user_utilization_pct") is not None and usage.get("license_utilization_pct") is None:
             usage["license_utilization_pct"] = metrics["user_utilization_pct"]
 
+    # ROI AI telemetry (V5): adoption signal delivered via the signed webhook and stored
+    # append-only. Deferred import of engine avoids a module-load circular (engine imports
+    # dataaccess). Empty {} when no telemetry for this account (data-gap, never faked).
+    roi_ai = {}
+    try:
+        import engine as _engine_roi
+        if _engine_roi.roi_ai_configured():
+            roi_ai = _engine_roi.roi_ai_for(account_id) or {}
+    except Exception:  # noqa: BLE001
+        roi_ai = {}
+    sources["roi_ai"] = "live" if roi_ai else "not_live"
+
     return {
         "hubspot": hubspot,
         "zendesk": zendesk,
@@ -119,6 +131,7 @@ def account(account_id: str) -> dict:
         "stripe": stripe,
         "onboarding": onboarding,
         "metrics": metrics,
+        "roi_ai": roi_ai,
         "sources": sources,
     }
 

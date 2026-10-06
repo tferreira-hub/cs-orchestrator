@@ -60,6 +60,7 @@ locals {
     { name = "ROCKET_LANE_KEY", valueFrom = aws_ssm_parameter.secrets["sources/rocket-lane-key"].arn },
     { name = "JIMINNY_KEY", valueFrom = aws_ssm_parameter.secrets["sources/jiminny-key"].arn },
     { name = "TABLEAU_CA_SECRET_VALUE", valueFrom = aws_ssm_parameter.secrets["tableau/ca-secret-value"].arn },
+    { name = "ROI_AI_WEBHOOK_SECRET", valueFrom = aws_ssm_parameter.secrets["sources/roi-ai-webhook-secret"].arn },
   ]
 }
 

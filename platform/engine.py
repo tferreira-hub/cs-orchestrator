@@ -173,6 +173,7 @@ _SIGNAL_SOURCE = {
     # Jiminny removed: no live source, was fixture-only ('remove all mock data').
     "churn": "churn",
     "onboarding": "onboarding",
+    "roi_ai": "roi_ai",
 }
 
 # Pendo's live endpoint does not expose these usage metrics (the adapter hardcodes
@@ -219,6 +220,7 @@ def _live_account(account: dict) -> dict:
         "stripe": _live_block(account, "stripe"),
         "onboarding": _live_block(account, "onboarding"),
         "metrics": _live_block(account, "metrics"),
+        "roi_ai": _live_block(account, "roi_ai"),
         "entitlements": account.get("entitlements", {}) if isinstance(account.get("entitlements"), dict) else {},
         "sources": sources,
     }
@@ -309,6 +311,20 @@ def health_score(account: dict) -> dict:
         score = min(100.0, score + 3)
         reasons.append("latest call sentiment: positive (+3)")
 
+    # ROI AI adoption telemetry (V5): a modest colour on health. High adoption is a
+    # positive signal; very low adoption is a mild risk. Weighted small so it never
+    # dominates hard signals (churn, Sev-1), matching the Jiminny treatment.
+    roi_ai = account.get("roi_ai", {}) or {}
+    roi_adopt = roi_ai.get("adoption_score")
+    if isinstance(roi_adopt, (int, float)):
+        if roi_adopt >= 75:
+            score = min(100.0, score + 3)
+            reasons.append(f"ROI AI adoption {int(roi_adopt)} (+3)")
+        elif roi_adopt < 25:
+            pen = 8 if roi_adopt < 10 else 5
+            score -= pen
+            reasons.append(f"ROI AI adoption {int(roi_adopt)} (-{pen})")
+
     if str(churn.get("churn_status") or "").lower() == "churned":
         score = min(score, 49)
     score = max(0, min(100, round(score)))
@@ -324,6 +340,7 @@ def health_score(account: dict) -> dict:
         or usage.get("pendo_risk_score")
         or stripe.get("dunning_stage")
         or jiminny.get("sentiment")
+        or roi_ai.get("adoption_score") is not None
     )
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
@@ -995,6 +1012,110 @@ def f2f_cadence() -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# ROI AI webhook telemetry (V5): inbound product-adoption signal
+# --------------------------------------------------------------------------- #
+# ROI AI pushes adoption telemetry via a signed webhook (HMAC). We persist each
+# event append-only (CS_ROI_AI_FILE), idempotent on event_id, latest-wins per account
+# by newest metric_date. Honest: no secret configured => the source is "not connected"
+# and the webhook refuses; no stored data for an account => data-gap (no fabrication).
+ROI_AI_FILE = Path(os.environ.get(
+    "CS_ROI_AI_FILE", str(Path(__file__).resolve().parents[1] / ".cs-roi-ai.jsonl")))
+
+
+def roi_ai_configured() -> bool:
+    """True when the ROI AI webhook signing secret is set (source is connectable)."""
+    return bool((os.environ.get("ROI_AI_WEBHOOK_SECRET") or "").strip())
+
+
+def verify_roi_ai_signature(raw_body: bytes, header_sig: str | None) -> bool:
+    """Constant-time HMAC-SHA256 verification of a ROI AI webhook body against the shared
+    secret. Expects header value 'sha256=<hex>'. False when the secret is unset or the
+    signature is missing/invalid."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+    secret = (os.environ.get("ROI_AI_WEBHOOK_SECRET") or "").strip()
+    if not secret or not header_sig:
+        return False
+    provided = header_sig.strip()
+    if provided.startswith("sha256="):
+        provided = provided[len("sha256="):]
+    expected = _hmac.new(secret.encode("utf-8"), raw_body, _hashlib.sha256).hexdigest()
+    return _hmac.compare_digest(provided, expected)
+
+
+def _roi_ai_seen_event(event_id: str) -> bool:
+    if not event_id or not ROI_AI_FILE.exists():
+        return False
+    for line in ROI_AI_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            if json.loads(line).get("event_id") == event_id:
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def record_roi_ai(body: dict) -> dict:
+    """Validate + persist one ROI AI telemetry event. Idempotent on event_id (returns
+    {'duplicate': True} without re-writing when already seen). Raises ValueError on an
+    invalid payload (caller maps to 400). Never partially writes."""
+    event_id = str(body.get("event_id") or "").strip()
+    account_ref = str(body.get("account_ref") or body.get("account_id") or "").strip()
+    metric_date = str(body.get("metric_date") or "").strip()
+    adoption = body.get("adoption_score")
+    if not event_id:
+        raise ValueError("event_id is required")
+    if not account_ref:
+        raise ValueError("account_ref is required")
+    try:
+        date.fromisoformat(metric_date[:10])
+    except ValueError:
+        raise ValueError("metric_date must be an ISO date (YYYY-MM-DD)")
+    if not isinstance(adoption, (int, float)) or not (0 <= adoption <= 100):
+        raise ValueError("adoption_score must be a number between 0 and 100")
+    if _roi_ai_seen_event(event_id):
+        return {"duplicate": True, "event_id": event_id}
+    from adapters import identity as _id
+    entry = {
+        "event_id": event_id,
+        "account_id": _id.normalise(account_ref),
+        "metric_date": metric_date[:10],
+        "adoption_score": adoption,
+        "active_roi_users": body.get("active_roi_users"),
+        "roi_realized_usd": body.get("roi_realized_usd"),
+        "trend": str(body.get("trend") or "").strip().lower() or None,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ROI_AI_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with ROI_AI_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+    return {"duplicate": False, **entry}
+
+
+def roi_ai_for(account_id: str) -> dict:
+    """Latest ROI AI telemetry for an account (newest metric_date wins), or {} when none
+    (data-gap). account_id is matched on the normalised id."""
+    if not ROI_AI_FILE.exists():
+        return {}
+    from adapters import identity as _id
+    want = _id.normalise(account_id)
+    best = None
+    for line in ROI_AI_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if row.get("account_id") == want:
+            if best is None or (row.get("metric_date") or "") >= (best.get("metric_date") or ""):
+                best = row
+    return best or {}
+
+
 def portfolio() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
     renewal, plus the prioritised task queue and suppressed signals across the book."""
@@ -1372,6 +1493,7 @@ def account_detail(account_id: str) -> dict:
         orchestrate.RULE_EXPANSION_UTILIZATION,
         orchestrate.RULE_EXPANSION_API_SURGE,
         orchestrate.RULE_EXPANSION_ADOPTION,
+        orchestrate.RULE_EXPANSION_ROI_AI,
     }
     expansion_qualified = any(t.get("rule_id") in _expansion_rules for t in tasks)
     return {
@@ -1384,6 +1506,7 @@ def account_detail(account_id: str) -> dict:
             "churn": live.get("churn", {}),
             "stripe": live.get("stripe", {}),
             "metrics": live.get("metrics", {}),
+            "roi_ai": live.get("roi_ai", {}),
         },
         "onboarding": live.get("onboarding", {}),
         "health": h,
@@ -1650,6 +1773,8 @@ def monthly_digest(account_id: str) -> dict:
         "days_since_last_visit": usage.get("days_since_last_visit"),
         "tickets_resolved_30d": zd.get("tickets_resolved_30d"),
         "csat_30d": zd.get("csat_30d"),
+        # ROI AI adoption (V5): None when no telemetry for this account (data-gap).
+        "roi_ai_adoption_score": (sig.get("roi_ai", {}) or {}).get("adoption_score"),
     }
     expansion_cta = isinstance(util, (int, float)) and util >= 85
     # Combined, de-duplicated recipient list (Primary Admin + Executive Sponsor), each
