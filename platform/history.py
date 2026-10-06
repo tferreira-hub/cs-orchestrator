@@ -61,12 +61,17 @@ def record_portfolio(accounts: dict, health_fn, on_day: str | None = None) -> in
             if not h.get("computable"):
                 continue
             usage = acct.get("usage", {}) if isinstance(acct, dict) else {}
+            ent = acct.get("entitlements", {}) if isinstance(acct, dict) else {}
             snap = {
                 "health": h.get("score"),
                 "band": h.get("band"),
                 "churn": (acct.get("churn", {}) or {}).get("ml_churn_score"),
                 "days_since_visit": usage.get("days_since_last_visit"),
                 "logins_7d": usage.get("logins_last_7d"),
+                # Active seats from the entitlement system (None when Entitlements is not
+                # connected or has no record — never fabricated). Powers the seat side of
+                # the sudden-contraction rule.
+                "seats": (ent.get("active_seats") if isinstance(ent, dict) else None),
             }
             before = _has_snapshot(aid, day)
             record_snapshot(aid, snap, on_day=day)
@@ -137,6 +142,81 @@ def health_trend(account_id: str, window_days: int = 45) -> dict | None:
     return {
         "current": current["health"], "past": past["health"], "delta": delta,
         "days": days, "direction": "up" if delta > 0 else "down" if delta < 0 else "flat",
+    }
+
+
+def _pct_change_over_window(rows: list[dict], field: str, window_days: int):
+    """(from_value, to_value, pct_change, days) for a numeric snapshot field over the
+    window, or None when there aren't two comparable points. pct_change is negative for a
+    drop. Mirrors health_trend()'s windowing: compares the latest point to the earliest
+    point on/after (latest - window)."""
+    pts = [r for r in rows if isinstance(r.get(field), (int, float))]
+    if len(pts) < 2:
+        return None
+    current = pts[-1]
+    try:
+        cur_day = datetime.fromisoformat(current["date"]).date()
+    except (ValueError, KeyError):
+        return None
+    cutoff = cur_day - timedelta(days=window_days)
+    past = None
+    for r in pts[:-1]:
+        try:
+            d = datetime.fromisoformat(r["date"]).date()
+        except (ValueError, KeyError):
+            continue
+        if d >= cutoff:
+            past = r
+            break
+    if past is None:
+        past = pts[0]
+    try:
+        days = (cur_day - datetime.fromisoformat(past["date"]).date()).days
+    except (ValueError, KeyError):
+        return None
+    if days <= 0:
+        return None
+    from_v = past[field]
+    to_v = current[field]
+    if not from_v:  # avoid div-by-zero; a rise from 0 isn't a contraction
+        return None
+    pct = round(100 * (to_v - from_v) / from_v)
+    return (from_v, to_v, pct, days)
+
+
+def usage_contraction(account_id: str, window_days: int = 14, drop_pct: int = 20) -> dict | None:
+    """Detect a SUDDEN contraction in active users (logins_7d) or seats over a rolling
+    window (default 14 days), independent of renewal date (V5 UC1/UC2).
+
+    Returns a dict describing the drop, with `contracted` True when logins OR seats fell
+    by more than `drop_pct`. Returns None when there isn't enough comparable history for
+    either signal (data-gap, never fabricated). The seat side only fires when the
+    Entitlements system has supplied seat counts in the snapshots; the login side works
+    from live Pendo logins today."""
+    rows = history_for(account_id)
+    logins = _pct_change_over_window(rows, "logins_7d", window_days)
+    seats = _pct_change_over_window(rows, "seats", window_days)
+    if logins is None and seats is None:
+        return None
+
+    logins_drop = bool(logins and logins[2] <= -drop_pct)
+    seats_drop = bool(seats and seats[2] <= -drop_pct)
+    driver = ("both" if logins_drop and seats_drop
+              else "logins" if logins_drop
+              else "seats" if seats_drop
+              else None)
+    return {
+        "contracted": bool(driver),
+        "driver": driver,
+        "window_days": window_days,
+        "threshold_pct": drop_pct,
+        "logins_from": logins[0] if logins else None,
+        "logins_to": logins[1] if logins else None,
+        "logins_pct_change": logins[2] if logins else None,
+        "seats_from": seats[0] if seats else None,
+        "seats_to": seats[1] if seats else None,
+        "seats_pct_change": seats[2] if seats else None,
+        "days": (logins[3] if logins else (seats[3] if seats else None)),
     }
 
 

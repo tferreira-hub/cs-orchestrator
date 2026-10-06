@@ -76,6 +76,7 @@ RULE_CHURNED_RECOVERY = "churned_account_recovery"       # P2 MUST_PROTECT (Stra
 RULE_SCALED_EXCEPTION = "scaled_exception_escalation"    # P2 MUST_PROTECT (Scaled exception)
 RULE_DAY15_PAYMENT = "day15_payment_strategic"           # P2 MUST_PROTECT (Day-15 high-ARR Strategic)
 RULE_OVERDUE_RENEWAL = "overdue_renewal_escalation"      # P2 MUST_PROTECT (renewal past due)
+RULE_SEAT_CONTRACTION = "seat_user_contraction"          # P2 MUST_PROTECT (sudden >20% seat/user drop, 14d)
 RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
 RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
@@ -88,6 +89,7 @@ RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategi
 RULE_PRIORITY = {
     RULE_PREDICTIVE_RISK: 1,
     RULE_CHURNED_RECOVERY: 2,
+    RULE_SEAT_CONTRACTION: 2,
     RULE_SCALED_EXCEPTION: 2,
     RULE_DAY15_PAYMENT: 2,
     RULE_OVERDUE_RENEWAL: 2,
@@ -286,6 +288,38 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
             "Executive outreach to Finance Contact to prevent service disruption.",
             f"Hi {(_first_contact(hs,'Finance Contact') or f'{name} Finance team')}, our records show an invoice about {stripe.get('days_past_due')} days past due. I want to make sure there's no disruption to your service. Could you point me to the right person to resolve it?")
     # Scaled day_15_plus => auto-suspend, NO task (intentionally omitted)
+
+    # --- MUST_PROTECT: sudden seat/user contraction (V5 UC1/UC2) ---
+    # A sharp drop in active users (logins) or seats within a rolling 14-day window is a
+    # genuine churn-risk signal INDEPENDENT of the renewal date. Deterministic, computed
+    # from the health-history snapshots (logins from live Pendo today; seats from
+    # Entitlements when connected). Honest: fires only on real history; a data-gap yields
+    # no task. Not churned (that has its own recovery rule).
+    if churn_status != "churned":
+        contraction = None
+        try:  # guarded: history lives in platform/; absent in the bare dry-run CLI
+            import history as _history  # noqa: E402
+            contraction = _history.usage_contraction(account_id, window_days=14, drop_pct=20)
+        except Exception:  # noqa: BLE001
+            contraction = None
+        if contraction and contraction.get("contracted"):
+            risk_fired = True
+            drv = contraction.get("driver")
+            parts = []
+            if contraction.get("logins_pct_change") is not None and drv in ("logins", "both"):
+                parts.append(f"logins {contraction['logins_from']}->{contraction['logins_to']} ({contraction['logins_pct_change']}%)")
+            if contraction.get("seats_pct_change") is not None and drv in ("seats", "both"):
+                parts.append(f"seats {contraction['seats_from']}->{contraction['seats_to']} ({contraction['seats_pct_change']}%)")
+            add(RULE_SEAT_CONTRACTION, 2, "MUST_PROTECT",
+                "Sudden seat/user contraction (14d)",
+                {"driver": drv, "window_days": contraction.get("window_days"),
+                 "threshold_pct": contraction.get("threshold_pct"),
+                 "logins_pct_change": contraction.get("logins_pct_change"),
+                 "seats_pct_change": contraction.get("seats_pct_change"),
+                 "detail": "; ".join(parts),
+                 "_source": "entitlements-seats" if drv == "seats" else ("pendo-logins" if drv == "logins" else "pendo-logins+entitlements-seats")},
+                "Investigate the drop: confirm with the Primary Champion / Admin whether seats or "
+                "usage were intentionally reduced, assess renewal/churn risk, and log the finding.")
 
     # --- MUST_EXPAND: expansion triggers (healthy only) ---
     healthy = score < 0.4 and not sev1 and churn_status != "churned"
