@@ -1,0 +1,9 @@
+# This is a SEPARATE stack applied in the Data Platform account (503561421603) with
+# AWS_PROFILE=DataPlatform. It uses LOCAL state by default; do not commit state or the
+# rendered .tf (copy from the .tf.example to apply). The Data Platform team should decide
+# on a remote backend (S3/Dynamo in 503561421603) for durable, shared state.
+cs-platform-churn-reader.tf
+terraform.tfstate
+terraform.tfstate.*
+.terraform/
+.terraform.lock.hcl

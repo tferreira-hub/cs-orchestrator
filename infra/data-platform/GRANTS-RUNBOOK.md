@@ -14,8 +14,16 @@ Workgroup: `data-platform-redshift-warehouse-wg-prod`
 `cs-platform-churn-reader` in 503561421603, trusting the CS Platform task role
 `arn:aws:iam::350067031910:role/cs-platform-task`, with least-privilege Redshift Data API
 read + `redshift-serverless:GetCredentials` scoped to the prod workgroup. Apply via the
-`.tf.example` stack (rename to `.tf`, `AWS_PROFILE=DataPlatform terraform apply`). It is
-idempotent with the role that already exists.
+`.tf.example` stack (copy to `cs-platform-churn-reader.tf`, `AWS_PROFILE=DataPlatform
+terraform apply`). It is idempotent with the role that already exists.
+
+**Status (2026-10): the role is now Terraform-managed.** It was `terraform import`ed
+(`aws_iam_role.churn_reader` + `aws_iam_role_policy.churn_read`) and applied; the live role
+carries `IaC=terraform`. Trust (`cs-platform-task`) and the read policy were verified
+unchanged by the apply. CAVEAT: this stack currently uses **local state** (no remote
+backend). The Data Platform team should configure a remote backend (S3 + DynamoDB in
+503561421603) for durable, shared state; `.gitignore` keeps local state/rendered `.tf` out
+of git in the meantime.
 
 ## 2. Redshift object grants
 Redshift maps the assumed IAM role to a DB user named `IAMR:cs-platform-churn-reader`,

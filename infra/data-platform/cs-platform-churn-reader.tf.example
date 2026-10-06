@@ -70,6 +70,7 @@ data "aws_iam_policy_document" "assume" {
 
 resource "aws_iam_role" "churn_reader" {
   name               = "cs-platform-churn-reader"
+  description        = "Cross-account read-only role for the CS Platform ECS task to read the churn model via the Redshift Data API."
   assume_role_policy = data.aws_iam_policy_document.assume.json
 
   tags = {
