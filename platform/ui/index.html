@@ -61,7 +61,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .app{display:grid;grid-template-columns:var(--side-w) 1fr;min-height:100vh;transition:grid-template-columns .18s ease}
 .app.side-collapsed{grid-template-columns:var(--side-w-collapsed) 1fr}
 
-/* Sidebar — Planhat-style light, flat, collapsible */
+/* Sidebar, Planhat-style light, flat, collapsible */
 .side{background:var(--side-bg);color:var(--side-ink);border-right:1px solid var(--side-line);padding:14px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;overflow-x:hidden}
 /* Thin, subtle scrollbar so a long nav does not show a chunky OS bar. */
 .side{scrollbar-width:thin;scrollbar-color:#d4dae6 transparent}
@@ -94,7 +94,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .navsection.collapsed>.ns-head .ns-caret{transform:rotate(-90deg)}
 .navsection.collapsed>.nav{display:none}
 .navsection>.nav{padding-left:6px;margin-top:1px;position:relative}
-/* Faint guide rail connecting a section's child items — reads as a real nested nav. */
+/* Faint guide rail connecting a section's child items, reads as a real nested nav. */
 .navsection>.nav::before{content:"";position:absolute;left:20px;top:2px;bottom:4px;width:1px;background:var(--side-line)}
 .navsection>.nav button{padding-left:34px}
 /* Section icon colors (Planhat's small colored section glyphs) */
@@ -159,7 +159,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .src.live{background:var(--greenbg);color:var(--green)}
 .src.sample{background:var(--amberbg);color:var(--amber)}
 .nc{display:inline-block;font-size:.9em;font-weight:600;color:var(--muted);background:#f1f3f8;border:1px dashed #cbd2df;border-radius:6px;padding:1px 8px}
-/* Connector live, but this account has no record in that source — distinct from 'not connected' (off) and plain 'no data' (field empty). */
+/* Connector live, but this account has no record in that source, distinct from 'not connected' (off) and plain 'no data' (field empty). */
 .norec{display:inline-block;font-size:.85em;font-weight:500;color:var(--amber);background:var(--amberbg);border:1px solid #f0dcae;border-radius:6px;padding:1px 8px}
 /* Whole-book roster row: data loads on open. Honest, calm styling (not the dashed "not connected"). */
 .roster-cell{display:inline-block;font-size:.82em;color:var(--ink2);font-style:italic}
@@ -194,7 +194,7 @@ tr.row-roster:hover td{opacity:1}
 .panel .head{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 .panel .head h2{font-size:1em;font-weight:700;letter-spacing:-.01em}
 .panel .head .note{font-size:.75em;color:var(--muted);font-weight:500}
-/* Move-to-pooled module — systemised layout */
+/* Move-to-pooled module, systemised layout */
 .mp-wrap{padding:18px 20px}
 .mp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
 .mp-stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
@@ -961,7 +961,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
     <div class="navsection collapsed" data-sec="scaled">
       <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>Scaled Customer Success</span><span class="ns-caret">▾</span></button>
       <div class="nav">
-        <button data-v="scaled" onclick="go('scaled')" title="Scaled Customer Success"><span class="ico">◐</span> <span class="label">Scaled Customer Success</span></button>
+        <button data-v="scaled" onclick="go('scaled')" title="Scaled Customer Success"><span class="ico">◐</span> <span class="label">Overview</span></button>
       </div>
     </div>
 
@@ -1388,7 +1388,7 @@ function ccTab(tab){
   else if(tab==='renewals'){ renderCcRenewals(); }
   window.scrollTo({top:0,behavior:'instant'});
 }
-// My Renewals tab — built from live accounts that carry a renewal date/forecast.
+// My Renewals tab, built from live accounts that carry a renewal date/forecast.
 function renderCcRenewals(){
   const host=document.getElementById('cc-pane-renewals'); if(!host||!DATA)return;
   const rows=filteredAccounts().filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
@@ -1417,7 +1417,7 @@ function scaledTab(tab){
   else if(tab==='inbox') renderInboundQueue();
   window.scrollTo({top:0,behavior:'instant'});
 }
-// Inbound Queue — Option A channels -> triaged tickets the pooled team works like an inbox.
+// Inbound Queue, Option A channels -> triaged tickets the pooled team works like an inbox.
 function renderInboundQueue(){
   const host=document.getElementById('sc-pane-inbox'); if(!host)return;
   host.innerHTML='<div class="panel"><div class="head"><h2>Inbound Queue</h2><span class="note">5-channel intake · triaged + round-robined</span></div><div class="body pad" id="inbox-body"><span class="muted">Loading…</span></div></div>';
@@ -1425,7 +1425,7 @@ function renderInboundQueue(){
     const b=document.getElementById('inbox-body'); if(b)b.innerHTML='<span class="muted">Inbound queue unavailable.</span>';
   });
 }
-function _channelLabel(c){return ({zendesk_misroute:'Zendesk misroute',slack_call:'Slack call-log',mailbox:'Mailbox',campaign_reply:'Campaign reply',high_intent_form:'High-intent form'}[c]||c||'—');}
+function _channelLabel(c){return ({zendesk_misroute:'Zendesk misroute',slack_call:'Slack call-log',mailbox:'Mailbox',campaign_reply:'Campaign reply',high_intent_form:'High-intent form'}[c]||c||'-');}
 function _renderInbox(d){
   const b=document.getElementById('inbox-body'); if(!b)return;
   const tickets=d.tickets||[];
@@ -1434,9 +1434,9 @@ function _renderInbox(d){
     '<tr>'+
       '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">'+escapeHtml(_channelLabel(t.channel))+'</span></td>'+
       '<td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="muted" style="font-size:.8em">'+escapeHtml(t.from||'')+'</div></td>'+
-      '<td>'+escapeHtml(t.intent||'—')+'</td>'+
+      '<td>'+escapeHtml(t.intent||'-')+'</td>'+
       '<td>'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
-      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">—</span>')+'</td>'+
+      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
       '<td>'+(t.sla_breached?'<span class="pill" style="background:#fdecec;border:1px solid #f3c2c2;color:#b42318;padding:2px 8px;border-radius:10px">SLA breached</span>':(t.needs_reassign?'<span class="mp-tag">reassign</span>':'<span class="pill pln" style="padding:2px 8px">'+(t.status||'open')+'</span>'))+'</td>'+
       '<td style="text-align:right">'+(t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted" style="font-size:.8em">'+escapeHtml(t.status)+'</span>')+'</td>'+
     '</tr>').join('');
@@ -1452,7 +1452,7 @@ function resolveInbound(id){
   fetch('/api/inbound/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id,status:'resolved'})})
     .then(()=>renderInboundQueue());
 }
-// The Pool — scaled/low-touch accounts (low ARR), with a Growth Potential column (Planhat).
+// The Pool, scaled/low-touch accounts (low ARR), with a Growth Potential column (Planhat).
 function renderThePool(){
   const host=document.getElementById('sc-pane-pool'); if(!host||!DATA)return;
   const pool=filteredAccounts().filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
@@ -1513,16 +1513,16 @@ function _renderPooledMove(d){
     return '<tr class="'+(locked?'locked':'')+'">'+
       '<td style="width:38px;text-align:center"><input type="checkbox" class="pool-pick" value="'+escapeHtml(a.account_id)+'" onchange="_poolPick(this)"'+(locked?' disabled':(checked?' checked':''))+'></td>'+
       '<td><span class="mp-co">'+escapeHtml(a.name||a.account_id)+'</span>'+tag+'</td>'+
-      '<td style="color:var(--ink2)">'+escapeHtml(a.segment||'—')+'</td>'+
+      '<td style="color:var(--ink2)">'+escapeHtml(a.segment||'-')+'</td>'+
       '<td style="color:var(--ink2)">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span style="color:var(--muted)">unassigned</span>')+'</td>'+
-      '<td class="mono" style="text-align:right">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span style="color:var(--muted)">—</span>')+'</td></tr>';
+      '<td class="mono" style="text-align:right">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span style="color:var(--muted)">-</span>')+'</td></tr>';
   }).join('');
   b.innerHTML=
     '<div class="mp-wrap">'+
       '<div class="mp-stats">'+
         '<div class="mp-stat"><div class="l">In cohort</div><div class="v">'+(d.count||0)+'</div></div>'+
         '<div class="mp-stat accent"><div class="l">To move</div><div class="v">'+movable.length+'</div></div>'+
-        '<div class="mp-stat"><div class="l">Cohort ARR</div><div class="v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'—')+'</div></div>'+
+        '<div class="mp-stat"><div class="l">Cohort ARR</div><div class="v">'+(d.total_arr_usd!=null?fmt(d.total_arr_usd):'-')+'</div></div>'+
         '<div class="mp-stat"><div class="l">Current owners</div><div class="v">'+owners.length+'</div></div>'+
       '</div>'+
       '<p class="mp-desc">Select the accounts to move and the pooled team to assign them to. The platform sets <code>cs_customer_tier = Pooled</code> in HubSpot, assigns the chosen team, and removes individual ownership so they join the pooled round-robin queue. Owner-scoped, audited, and reversible. Rows that are already pooled or outside your book are locked.</p>'+
@@ -1566,13 +1566,13 @@ function runMoveToPooled(apply,btn){
       if(s.errors)chips.push(['Errors',s.errors]);
       const banner=apply
         ? '<div class="mp-banner ok"><strong>✓ Applied in HubSpot.</strong> '+(s.moved||0)+' account'+((s.moved===1)?'':'s')+' moved to “'+escapeHtml(team)+'”. The list refreshes below.</div>'
-        : '<div class="mp-banner info"><strong>Dry-run only — nothing written.</strong> '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would move to “'+escapeHtml(team)+'”. Click <strong>Move selected to pooled</strong> to apply.</div>';
+        : '<div class="mp-banner info"><strong>Dry-run only, nothing written.</strong> '+(s.dry_run||0)+' account'+((s.dry_run===1)?'':'s')+' would move to “'+escapeHtml(team)+'”. Click <strong>Move selected to pooled</strong> to apply.</div>';
       if(res)res.innerHTML=banner+'<div class="mp-chips">'+chips.map(c=>'<span class="mp-chip">'+c[0]+': <strong>'+c[1]+'</strong></span>').join('')+'</div>';
       if(apply) setTimeout(()=>{loadPooledMovePanel(); if(typeof refresh==='function')refresh();},800);
     }).catch(()=>{ if(res)res.innerHTML='<div class="mp-banner err">Request failed. Please retry.</div>'; })
     .finally(()=>{ buttons.forEach(x=>x.disabled=false); });
 }
-// Pooled Dashboard — aggregate pool metrics (Total ARR, count, phase distribution).
+// Pooled Dashboard, aggregate pool metrics (Total ARR, count, phase distribution).
 function renderPooledDashboard(){
   const host=document.getElementById('sc-pane-dashboard'); if(!host||!DATA)return;
   const pool=filteredAccounts().filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
@@ -1589,7 +1589,7 @@ function renderPooledDashboard(){
   '<div class="panel" id="csm-presence-panel" style="margin-top:16px"><div class="head"><h2>Pooled team availability</h2><span class="note">Feeds the inbound round-robin</span></div><div class="body pad" id="csm-presence-body"><span class="muted">Loading…</span></div></div>';
   loadCsmPresence();
 }
-// CSM presence feed — Available/OOO toggles that drive the inbound round-robin (WoW §3).
+// CSM presence feed, Available/OOO toggles that drive the inbound round-robin (WoW §3).
 function loadCsmPresence(){
   const b=document.getElementById('csm-presence-body'); if(!b)return;
   fetch('/api/csm/availability').then(r=>r.json()).then(d=>{
@@ -1631,7 +1631,7 @@ function renderMyDashboard(){
   const host=document.getElementById('md-pane-dashboard'); if(!host||!DATA)return;
   // Open Expansion ARR reads the revenue-motion cache, which is normally warmed by the
   // main Dashboard. If a user lands on My Dashboard first it is null, so lazily fetch it
-  // once and re-render — the data exists (Command Center shows it), it just was not loaded here.
+  // once and re-render, the data exists (Command Center shows it), it just was not loaded here.
   if(_rmCache===null && !window._mdRmLoading){
     window._mdRmLoading=true;
     api('/api/revenue-motion').then(r=>r.json()).then(j=>{_rmCache=j;}).catch(()=>{}).finally(()=>{window._mdRmLoading=false; if(_myDashTab==='dashboard') renderMyDashboard();});
@@ -1648,7 +1648,7 @@ function renderMyDashboard(){
   const atRisk=low;
   const p1=tasks.filter(t=>t.priority===1).length;
   const avgHealth=accts.filter(a=>a.health&&a.health.computable).length?Math.round(accts.filter(a=>a.health&&a.health.computable).reduce((s,a)=>s+a.health.score,0)/accts.filter(a=>a.health&&a.health.computable).length):0;
-  // Usage recency (live Pendo) — DAU/WAU/MAU proxy by active-window counts.
+  // Usage recency (live Pendo), DAU/WAU/MAU proxy by active-window counts.
   const uacc=accts.filter(a=>a.usage_days_since_visit!=null);
   const active7=uacc.filter(a=>a.usage_days_since_visit<=7).length;
   const active30=uacc.filter(a=>a.usage_days_since_visit<=30).length;
@@ -1671,7 +1671,7 @@ function renderMyDashboard(){
   const _days=d=>d?((new Date(d)-today)/86400000):null;
   const withArr=a=>typeof a.arr_usd==='number'?a.arr_usd:0;
   // (A) % ARR renewing in the next 60 days (HubSpot renewal_date + ARR). Denominator is the
-  // ARR of accounts that actually CARRY a renewal date — including the ~1.3k roster rows with
+  // ARR of accounts that actually CARRY a renewal date, including the ~1.3k roster rows with
   // no date would make the % meaningless. Honest "no data" when no dates are present.
   const datedAccts=accts.filter(a=>a.renewal_date);
   const arrBase=datedAccts.reduce((s,a)=>s+withArr(a),0);
@@ -1690,7 +1690,7 @@ function renderMyDashboard(){
   const ttrMax=Math.max(1,...Object.values(ttrB));
   const ttrHas=Object.values(ttrB).some(v=>v>0);
   const wTtr=ttrHas?'<div class="cc-dist" style="height:130px">'+Object.entries(ttrB).map(([k,v])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+v+'</span><div class="cc-distbar" style="height:'+Math.round((v/ttrMax)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+k+'</div></div>').join('')+'</div>':'<div class="empty">No renewal dates set in HubSpot for this selection.</div>';
-  // (D) Portfolio development — health trajectory from DATA.health_history. With 2+ daily
+  // (D) Portfolio development, health trajectory from DATA.health_history. With 2+ daily
   // snapshots we show the real trend; with exactly 1 we show today's baseline honestly
   // (the data IS connected, there's just one point yet); with none we compute today's avg
   // from the current scored accounts so the card is never a dead "not connected".
@@ -1708,7 +1708,7 @@ function renderMyDashboard(){
   }else{
     wDev='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">Health trajectory appears once accounts carry a computable health score.</div>';
   }
-  // (E) Open expansion ARR — pipeline (computable) + honest not-connected for booked.
+  // (E) Open expansion ARR, pipeline (computable) + honest not-connected for booked.
   const rc=(_rmCache&&_rmCache.revenue_change)||null;
   let wExp;
   if(rc){
@@ -1718,7 +1718,7 @@ function renderMyDashboard(){
   }else{
     wExp='<div class="nc">not connected</div>';
   }
-  // (F) CSAT distribution (Zendesk csat_30d) — the honest substitute for NPS (no NPS source).
+  // (F) CSAT distribution (Zendesk csat_30d), the honest substitute for NPS (no NPS source).
   const csatVals=accts.map(a=>a.connected&&a.connected.zendesk?(a.csat_30d!=null?a.csat_30d:(a.zendesk&&a.zendesk.csat_30d)):null).filter(v=>typeof v==='number');
   let wCsat;
   if(csatVals.length){
@@ -1729,11 +1729,11 @@ function renderMyDashboard(){
   }else{
     wCsat='<div class="nc">not connected</div><div class="muted" style="font-size:.78em;margin-top:4px">CSAT (Zendesk) stands in for NPS. There is no NPS survey source connected.</div>';
   }
-  // (G) QBRs due — Strategic accounts entering the renewal cadence window (honest substitute
+  // (G) QBRs due, Strategic accounts entering the renewal cadence window (honest substitute
   // for "Overdue QBRs"; there is no QBR scheduling source, so we cannot show "overdue").
-  // (G) QBRs due — accounts worth a Quarterly Business Review in the renewal cadence
+  // (G) QBRs due, accounts worth a Quarterly Business Review in the renewal cadence
   // window. "Strategic" is defined by business weight (Strategic tier, OR top-decile ARR,
-  // OR at-risk health), not a specific segment label — this book uses Agency/Corporate
+  // OR at-risk health), not a specific segment label, this book uses Agency/Corporate
   // tiers, so a label match would never fire. Honest substitute for "Overdue QBRs"
   // (no QBR-completion source exists, so we show "due", not "overdue").
   const _arrVals=accts.map(a=>typeof a.arr_usd==='number'?a.arr_usd:0).filter(v=>v>0).sort((a,b)=>b-a);
@@ -1750,7 +1750,7 @@ function renderMyDashboard(){
     ? '<div class="mdw-big">'+qbrDue.length+'</div><div class="muted" style="font-size:.78em;margin-top:4px">High-value / at-risk accounts within 120d of renewal (schedule a QBR). No QBR-completion source, so "overdue" is not shown.</div>'
     : '<div class="empty">No high-value accounts are within 120 days of renewal in this selection.</div>';
 
-  // Renewing next 90 days (live renewal dates) — continues below.
+  // Renewing next 90 days (live renewal dates), continues below.
   // Compact KPI strip.
   const kpi=(l,v,cls)=>'<div class="md-kpi"><div class="md-kpi-v '+(cls||'')+'">'+v+'</div><div class="md-kpi-l">'+l+'</div></div>';
   const strip='<div class="md-kpis">'+
@@ -1874,7 +1874,7 @@ function renderPortfolioHealth(){
   const countCols=[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']];
   if(b.notScored>0)countCols.push(['Not scored',b.notScored,'var(--muted)']);
   const countBars='<div class="cc-dist" style="height:130px">'+countCols.map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1].toLocaleString()+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
-  // Average health by segment — computed live.
+  // Average health by segment, computed live.
   const segMap={};filteredAccounts().forEach(a=>{if(a.health&&a.health.computable){const s=a.segment||'Unsegmented';(segMap[s]=segMap[s]||[]).push(a.health.score);}});
   const segRows=Object.entries(segMap).map(function(e){const avg=Math.round(e[1].reduce((s,x)=>s+x,0)/e[1].length);const band=avg>=75?'g':avg>=50?'a':'r';return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(e[0])+'</span><span class="seg-val">'+avg+' <span class="pill '+band+'">'+e[1].length+'</span></span></div><div class="hbar" style="width:100%"><span class="hfill" style="width:'+avg+'%;background:'+(band==='g'?'var(--green)':band==='a'?'var(--amber)':'var(--red)')+'"></span></div></div>';}).join('');
   const grid='<div class="mdw-grid">'+
@@ -1955,9 +1955,9 @@ function _renderMonthlyReview(d){
   const statusPill=s=>'<span class="pill '+(s==='approved'?'pln':'')+'" style="background:var(--surface);border:1px solid var(--line);padding:3px 9px;border-radius:12px">'+s+'</span>';
   const rows=(d.accounts||[]).map(a=>
     '<tr><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong>'+(a.missing_primary_admin?' <span class="mp-tag">no admin</span>':'')+'</td>'+
-    '<td class="mono" style="text-align:right">'+(a.metrics&&a.metrics.licence_utilization_pct!=null?a.metrics.licence_utilization_pct+'%':'—')+'</td>'+
+    '<td class="mono" style="text-align:right">'+(a.metrics&&a.metrics.licence_utilization_pct!=null?a.metrics.licence_utilization_pct+'%':'-')+'</td>'+
     '<td>'+statusPill(a.status)+'</td>'+
-    '<td style="color:var(--ink2);max-width:260px">'+(a.comment?escapeHtml(a.comment):'<span class="muted">—</span>')+'</td>'+
+    '<td style="color:var(--ink2);max-width:260px">'+(a.comment?escapeHtml(a.comment):'<span class="muted">-</span>')+'</td>'+
     '<td style="text-align:right;white-space:nowrap">'+
       '<button class="btn btn-ghost" style="padding:4px 9px" onclick="reviewComment(\''+escapeHtml(a.account_id)+'\')">Comment</button> '+
       '<button class="btn" style="padding:4px 9px"'+(a.status==='approved'?' disabled':'')+' onclick="reviewApprove(\''+escapeHtml(a.account_id)+'\')">Approve</button>'+
@@ -2008,7 +2008,7 @@ function _renderRhythm(d){
       '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">P'+(t.priority||'-')+'</span></td>'+
       '<td><strong>'+escapeHtml(t.account||t.account_id)+'</strong></td>'+
       '<td style="color:var(--ink2)">'+escapeHtml(t.trigger||'')+'</td>'+
-      '<td class="muted" style="white-space:nowrap">'+(t.due_on?escapeHtml(String(t.due_on).slice(0,10)):'—')+'</td></tr>').join('');
+      '<td class="muted" style="white-space:nowrap">'+(t.due_on?escapeHtml(String(t.due_on).slice(0,10)):'-')+'</td></tr>').join('');
   const block=(key)=>{
     const bl=b[key]; if(!bl)return '';
     if(key==='monday_review'){
@@ -2125,7 +2125,7 @@ function renderNotifications(){
 }
 function setNotifTab(t){_notifTab=t;renderNotifications();}
 
-// ===== Data Model — built from the REAL fields we ingest per source =====
+// ===== Data Model, built from the REAL fields we ingest per source =====
 // This documents what our integration layer actually pulls (adapters -> _live_account),
 // not a borrowed catalog. Each field: [Display Name, api key, Type]. Source = the model key.
 const DM_SOURCE_LABEL={hubspot:'HubSpot',zendesk:'Zendesk',usage:'Pendo',stripe:'Stripe',churn:'Churn Model',platform:'Platform (computed)'};
@@ -2170,7 +2170,7 @@ function renderDataModel(){
 function dmSelect(m){_dmModel=m;renderDataModel();}
 function dmFilter(q){q=(q||'').toLowerCase();document.querySelectorAll('#dm-table tbody tr').forEach(function(tr){tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';});}
 
-// ===== Data Explorer — live company/field exploration =====
+// ===== Data Explorer, live company/field exploration =====
 // Field groups map to REAL account values so selected columns show live data.
 const DE_FIELDS={
  'Default':[['Name',a=>escapeHtml(a.name||a.account_id)],['Owner',a=>a.csm_owner?escapeHtml(a.csm_owner):'-'],['Phase',a=>a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-'],['Segment',a=>a.segment?escapeHtml(a.segment):'-'],['Customer Status',a=>a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-']],
@@ -2222,14 +2222,14 @@ function renderRiskHealth(){
   const countBars='<div class="cc-dist" style="height:130px">'+[['At Risk',b.atRisk,'var(--red)'],['Uncertain',b.unc,'var(--amber)'],['Healthy',b.healthy,'var(--green)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxC)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Portfolio Health</h2></div><div class="body pad"><div class="callout" style="margin-bottom:16px">Health scoring surfaces risk and opportunity across the customer base. This risk view slices health by cohort to focus mitigation.</div>'+tiles+'<div class="mdw-grid">'+_widget('Count of companies by health',countBars,'wide')+'</div></div></div>';
 }
-// Risk Mitigation Strategy — accounts whose live health is below the healthy band.
+// Risk Mitigation Strategy, accounts whose live health is below the healthy band.
 // Health scale is 0–100 (engine.py:257): red = score < 50 ("at risk"), amber = 50–74
 // ("watch"), green = 75+ ("healthy"). This page defaults to the *saveable* book: at-risk
 // and watch accounts that have NOT already churned, worst health first. Controls below
 // let the CSM re-sort and fold in already-churned accounts or hide the watch band.
 // _rmSort: 'health' (worst first) | 'arr' (largest exposure first) | 'renewal' (soonest first)
 // _rmBand: 'risk' (red only) | 'both' (red+amber, default)
-// _rmChurned: include already-churned accounts (default false — focus on saveable)
+// _rmChurned: include already-churned accounts (default false, focus on saveable)
 let _rmSort='health', _rmBand='both', _rmChurned=false;
 function rmSet(k,v){ if(k==='sort')_rmSort=v; else if(k==='band')_rmBand=v; else if(k==='churned')_rmChurned=!_rmChurned; renderRiskMitigation(); }
 function renderRiskMitigation(){
@@ -2252,7 +2252,7 @@ function renderRiskMitigation(){
   };
   shown.sort(sorters[_rmSort]||sorters.health);
   // ARR exposure rollup: how much live revenue sits in each risk band (saveable only),
-  // plus how much is already gone to churn — the numbers a CSM/leader actually acts on.
+  // plus how much is already gone to churn, the numbers a CSM/leader actually acts on.
   const arrOf=list=>list.reduce((s,a)=>s+(a.arr_usd||0),0);
   const redSave=saveable.filter(a=>a.health.band==='red');
   const amberSave=saveable.filter(a=>a.health.band==='amber');
@@ -2325,7 +2325,7 @@ function objAdoptTab(tab){
   ({adoption:renderProdAdoption,insights:renderAdoptInsights}[tab]||function(){})();
   window.scrollTo({top:0,behavior:'instant'});
 }
-// Product Adoption — REAL: this is data we have per account.
+// Product Adoption, REAL: this is data we have per account.
 function renderProdAdoption(){
   const host=document.getElementById('oa-pane-adoption'); if(!host||!DATA)return;
   const accts=filteredAccounts();
@@ -2346,7 +2346,7 @@ function renderProdAdoption(){
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage Trend</th><th>Last seen</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="empty" style="padding:24px">No usage-connected accounts.</td></tr>')+'</tbody></table></div></div>';
   _enrichAndRerender(accts);
 }
-// ===== Pooled CS — pooled cohort (authoritative from HubSpot tier, segment fallback) =====
+// ===== Pooled CS, pooled cohort (authoritative from HubSpot tier, segment fallback) =====
 // Pooled CS uses a two-level nav: leaf (Inbox/Process/NRR) -> sub-tab -> page.
 const POOLED_LEAVES={
   inbox:{label:'Inbox',tabs:[['inbox','Inbox'],['escalations','Escalations'],['responserates','Response Rates']]},
@@ -2522,7 +2522,7 @@ function renderPooledLowUsageSeq(){
     '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Idle 28+ days</span><span class="fb-count">'+rows.length+' to enrol</span>'+(bulk?('<span style="margin-left:auto">'+bulk+'</span>'):'')+'</div>'+
     '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>ARR</th><th>Usage recency</th><th>Sequence</th></tr></thead><tbody id="seq-tbody">'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled accounts need re-engagement right now.</td></tr>')+'</tbody></table></div></div>';
 }
-// Guarded sequence enrolment — mirrors the HubSpot write-back safety (dry-run by default).
+// Guarded sequence enrolment, mirrors the HubSpot write-back safety (dry-run by default).
 async function enrolSequence(id){
   const cell=document.getElementById('seqstate-'+id); if(cell)cell.innerHTML='<span class="muted">Enrolling…</span>';
   try{
@@ -2572,7 +2572,7 @@ function renderAdoptInsights(){
   let a0=0,a1=0,a2=0;accts.forEach(a=>{const d=a.usage_days_since_visit;if(d<=14)a0++;else if(d<=28)a1++;else a2++;});
   const maxU=Math.max(1,a0,a1,a2);
   const bars='<div class="cc-dist" style="height:130px">'+[['Active (\u226414d)',a0,'var(--green)'],['Cooling (15-28d)',a1,'var(--amber)'],['Idle (>28d)',a2,'var(--red)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxU)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
-  // Top adopters — most recently active accounts (real Pendo recency).
+  // Top adopters, most recently active accounts (real Pendo recency).
   const top=accts.slice().sort((x,y)=>(x.usage_days_since_visit)-(y.usage_days_since_visit)).slice(0,10);
   const rows=top.map(a=>{const circle=a.health&&a.health.computable?'<span class="hcircle '+hband(a.health.band)+'">'+a.health.score+'</span>':'<span class="hcircle hc-none">–</span>';const dsv=a.usage_days_since_visit;return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td class="muted">'+(dsv===0?'today':dsv+'d ago')+'</td></tr>';}).join('');
   host.innerHTML=_mdFilterBar()+'<div class="panel"><div class="head"><h2>Adoption Insights</h2><span class="note">Usage recency from live Pendo signals</span></div><div class="body pad"><div class="mdw-grid"><div class="mdw wide"><div class="mdw-h">Usage recency distribution</div><div class="mdw-b">'+bars+'</div></div></div></div></div>'+
@@ -2770,7 +2770,7 @@ function renderCharts(portfolio,kpis,rm){
       : '<div class="chartcard"><h3>Gross revenue retention</h3><div class="cc-sub">Awaiting live churn data</div><div class="cc-body"><span class="muted" style="font-size:.8em">GRR needs live churned ARR from Redshift or HubSpot.</span></div></div>';
   }
 
-  // 3b. Net revenue retention (NDR) gauge vs 100% target — from the warehouse ARR series.
+  // 3b. Net revenue retention (NDR) gauge vs 100% target, from the warehouse ARR series.
   let c3b;
   if(ret.ndr_computable&&typeof ret.ndr_pct==='number'){
     c3b='<div class="chartcard"><h3>Net revenue retention</h3><div class="cc-sub">Target 100% · '+(ret.ndr_accounts||0)+' accounts with history</div><div class="cc-body"><div class="cc-center">'
@@ -2959,7 +2959,7 @@ function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.t
 
 // ===== My Command Center top band (mirrors Planhat's Command Center) =====
 // Three headline metrics + Upcoming Meetings, Company Distribution by Health,
-// and Upcoming Renewals — all from live signals; honest "not connected" otherwise.
+// and Upcoming Renewals, all from live signals; honest "not connected" otherwise.
 async function renderCommandCenter(){
   const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
   const tasks=filteredTasks(), accts=filteredAccounts();
@@ -3028,7 +3028,7 @@ async function renderCommandCenter(){
   if(!meetingsBody) meetingsBody='<tr><td colspan="4" class="empty" style="padding:20px">No meetings to prepare right now.</td></tr>';
   const meetingsPanel='<div class="panel"><div class="head"><h2>Meeting Preparation</h2><span class="note">Upcoming calls and reviews to prepare for</span></div>'+
     '<div class="body"><table class="mtg-table"><thead><tr><th>Company</th><th>Due Date</th><th>Action</th><th>Involved Contacts</th></tr></thead><tbody>'+meetingsBody+'</tbody></table></div></div>';
-  // Company Distribution by Health — bars sized by ARR in each band (Low/Medium/High),
+  // Company Distribution by Health, bars sized by ARR in each band (Low/Medium/High),
   // PLUS an honest "Not scored" bucket for whole-book roster accounts that have no live
   // signals yet (health.computable === false). Without this, ~1300 roster rows would all
   // land in "Medium" and misrepresent portfolio health.
@@ -3046,12 +3046,12 @@ async function renderCommandCenter(){
   const distBar=(lbl,arr,n,col)=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(arr)+'</span><div class="cc-distbar" style="height:'+Math.max(4,Math.round((n/maxN)*100))+'%;background:'+col+'"></div></div><div class="cc-distlbl">'+lbl+'<span class="cc-distsub">'+n.toLocaleString()+' accts</span></div></div>';
   const dist='<div class="panel"><div class="head"><h2>Company Distribution by Health</h2>'+(nNS>0?'<span class="note">'+nNS.toLocaleString()+' not scored yet (open to enrich)</span>':'')+'</div><div class="body pad"><div class="cc-dist" style="height:150px">'+
     distBar('Low',arrLow,nLow,'var(--red)')+distBar('Medium',arrMed,nMed,'var(--amber)')+distBar('High',arrHigh,nHigh,'var(--green)')+(nNS>0?distBar('Not scored',arrNS,nNS,'var(--muted,#8aa)'):'')+'</div></div></div>';
-  // Portfolio Growth — ARR by segment (real live breakdown, largest first).
+  // Portfolio Growth, ARR by segment (real live breakdown, largest first).
   const segs=(exec.by_segment||[]).filter(s=>s.arr_usd>0).sort((a,b)=>b.arr_usd-a.arr_usd);
   const maxSeg=Math.max(1,...segs.map(s=>s.arr_usd));
   const growthBars=segs.length?segs.map(s=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+mfmt(s.arr_usd)+'</span><div class="cc-distbar" style="height:'+Math.round((s.arr_usd/maxSeg)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml((s.segment||'').replace(' Users',''))+'</div></div>').join(''):'<div class="empty" style="width:100%">No segmented ARR available.</div>';
   const growth='<div class="panel"><div class="head"><h2>Portfolio Growth</h2><span class="note">ARR by segment</span></div><div class="body pad"><div class="cc-dist" style="height:150px">'+growthBars+'</div></div></div>';
-  // Renewals by Month — live ARR up for renewal across the next 12 months (from HubSpot
+  // Renewals by Month, live ARR up for renewal across the next 12 months (from HubSpot
   // renewal_date + ARR), laid out as a compact month strip starting at the current month
   // so it reads chronologically. An Overdue column leads so past-due revenue is not hidden.
   const _rbmAsOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
@@ -3083,7 +3083,7 @@ async function renderCommandCenter(){
   const renTotal=overdueArr12+fwd.reduce((s,v)=>s+v,0);
   const renByMonth='<div class="panel"><div class="head"><h2>Renewals by Month</h2><span class="note">'+(anyRen?(mfmt(renTotal)+' up for renewal, next 12 months'):'Next 12 months')+'</span></div><div class="body pad"><div class="cc-months">'+
     (anyRen?moCols:'<div class="empty" style="width:100%">No renewal dates in HubSpot for this selection.</div>')+'</div></div></div>';
-  // Renewal Forecast — the deterministic outcome mix across dated accounts, drawn as a
+  // Renewal Forecast, the deterministic outcome mix across dated accounts, drawn as a
   // horizontal proportion bar + legend. A stacked bar reads a MIX far better than four
   // separate columns, and categories with no accounts simply drop out (no empty "0" bar).
   let fcRen=0,fcChurn=0,fcExp=0,fcNone=0, fcRenArr=0,fcChurnArr=0,fcExpArr=0,fcNoneArr=0;
@@ -3107,7 +3107,7 @@ async function renderCommandCenter(){
   const mixLeg='<div class="cc-mixleg">'+fcSegs.map(s=>'<div class="cc-mixrow"><i style="background:'+s.col+'"></i><span class="cc-mixname">'+escapeHtml(s.name)+'</span><span class="cc-mixn">'+s.n+' acct'+(s.n===1?'':'s')+'</span><span class="cc-mixval">'+mfmt(s.arr)+'</span></div>').join('')+'</div>';
   const forecastMix='<div class="panel"><div class="head"><h2>Renewal Forecast</h2><span class="note">'+(fcTotal?(fcTotal+' dated '+(fcTotal===1?'account':'accounts')):'Deterministic outcome mix')+'</span></div><div class="body pad">'+
     (fcTotal?(mixBar+mixLeg):'<div class="empty" style="width:100%">No dated renewals to forecast yet.</div>')+'</div></div>';
-  // Upcoming Renewals — exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
+  // Upcoming Renewals, exact Planhat columns: Name, Company, ARR, End Date, AI Forecast ARR, AI Forecast, AI Forecast Summary.
   // Organised by urgency: OVERDUE line items (end date already passed, not churned) first and
   // flagged, then genuinely upcoming renewals in date order. In this book most dated renewals
   // are already in the past, so plain date-ascending buried the actionable overdue set and
@@ -3157,7 +3157,7 @@ async function renderCommandCenter(){
   const brief=document.getElementById('daily-brief'); if(brief&&brief.closest('.panel')) brief.closest('.panel').style.display='none';
 }
 
-// ===== Reports — embedded Tableau dashboards (Embedding API v3 + Connected App SSO) =====
+// ===== Reports, embedded Tableau dashboards (Embedding API v3 + Connected App SSO) =====
 // CS keeps Tableau as the source of truth and embeds the existing dashboards here rather
 // than replicating them. We load the official Embedding API v3 web component, fetch a
 // short-lived Connected App "direct trust" JWT minted server-side for the signed-in CSM
@@ -3253,7 +3253,7 @@ function _tableauNotConfigured(cfg){
   const rows=missing.length?('<ul class="muted" style="margin:10px 0 0 18px;line-height:1.7">'+missing.map(m=>'<li><code>'+escapeHtml(m)+'</code></li>').join('')+'</ul>'):'';
   host.innerHTML='<div class="panel"><div class="head"><h2>Tableau Reports</h2><span class="note">Not connected yet</span></div>'+
     '<div class="body pad"><div class="callout">Tableau embedding is ready in the platform but needs the Connected App details from your Tableau admin to go live. '+
-    'Keep using your existing Tableau dashboards — once connected, they appear here with single sign-on (no second login).'+rows+
+    'Keep using your existing Tableau dashboards, once connected, they appear here with single sign-on (no second login).'+rows+
     '<div class="muted" style="margin-top:14px;font-size:.86em">Create a <strong>Direct Trust Connected App</strong> in Tableau (Settings → Connected Apps), add this platform\'s domain to its allowlist, then set the variables above plus <code>TABLEAU_SERVER_URL</code>, <code>TABLEAU_SITE</code> and <code>TABLEAU_VIEWS</code>.</div>'+
     '</div></div></div>';
 }
@@ -3269,7 +3269,7 @@ async function renderTableauReports(){
   _tableauMount();
 }
 
-// ===== Payment Risk Report — live from Stripe dunning + HubSpot + JobAdder admin =====
+// ===== Payment Risk Report, live from Stripe dunning + HubSpot + JobAdder admin =====
 // Four pages: Payment failed, Access risk (7d), Access risk (14d), Cancellation risk.
 // Every row is derived live; nothing is pasted. Columns mirror the manual report:
 // Customer | JobAdder ID | Billing contact | CSM | Billing info (Stripe) | Access impact (admin).
@@ -3328,10 +3328,10 @@ async function renderPaymentRisk(){
 
 // ── V5 views: Onboarding governance, Team Leaderboard, Exec F2F ──
 // Uses the real design system: a `.stats` grid of `.stat` cards (.l label / .v value
-// (.warn|.good) / .d detail), `.panel`/`.head`/`.body`, and `.tbl` tables — matching
+// (.warn|.good) / .d detail), `.panel`/`.head`/`.body`, and `.tbl` tables, matching
 // the Command Center and Payment Risk pages.
 function _stat(label,value,detail,tone){
-  const v=(value==null||value==='')?'<span class="muted">—</span>':value;
+  const v=(value==null||value==='')?'<span class="muted">-</span>':value;
   const vc=tone==='warn'?' warn':tone==='good'?' good':'';
   return '<div class="stat"><div class="l">'+escapeHtml(label)+'</div>'+
     '<div class="v'+vc+'">'+v+'</div>'+
@@ -3344,7 +3344,7 @@ function _pctTone(v,target){ // tone for a "higher is better" KPI vs a target
 }
 // Command-Center-caliber hero stat (big value, label, optional sub) in a .cc-headline band.
 function _bigStat(label,value,sub,tone){
-  const v=(value==null||value==='')?'—':value;
+  const v=(value==null||value==='')?'-':value;
   const vc=tone==='warn'?' warn':tone==='good'?' good':'';
   return '<div class="cc-big"><div class="cc-big-l">'+escapeHtml(label)+'</div>'+
     '<div class="cc-big-v'+vc+'">'+v+'</div>'+
@@ -3369,8 +3369,8 @@ async function renderOnboarding(){
   const strip=_heroBand([
     _bigStat('Active projects', d.active_projects),
     _bigStat('Stalled before handoff', d.stalled_projects, d.stalled_projects>0?'needs attention':'all on track', d.stalled_projects>0?'warn':'good'),
-    _bigStat('Avg days in onboarding', d.avg_days_in_onboarding!=null?d.avg_days_in_onboarding:'—', d.avg_days_in_onboarding!=null?'days':null),
-    _bigStat('On-time handoff', hp!=null?hp+'%':'—', 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed', _pctTone(hp,d.handoff_on_time_target_pct)),
+    _bigStat('Avg days in onboarding', d.avg_days_in_onboarding!=null?d.avg_days_in_onboarding:'-', d.avg_days_in_onboarding!=null?'days':null),
+    _bigStat('On-time handoff', hp!=null?hp+'%':'-', 'target '+d.handoff_on_time_target_pct+'% · '+(d.handoff_completed||0)+' completed', _pctTone(hp,d.handoff_on_time_target_pct)),
   ]);
   const projs=(d.projects||[]);
   const maxDays=Math.max(1,...projs.map(p=>p.days_in_onboarding||0));
@@ -3381,10 +3381,10 @@ async function renderOnboarding(){
     const stTone=/(stall|block|risk|hold)/.test(st)?'warn':/(progress|new|kick)/.test(st)?'':'ok';
     return '<div class="lb-row">'+
       '<div class="lb-main"><div class="lb-name">'+escapeHtml(p.name||p.account_id||'')+(p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'')+'</div>'+
-        '<div class="lb-sub">'+escapeHtml(p.project_name||'—')+' · owner '+escapeHtml(p.owner||'—')+'</div></div>'+
+        '<div class="lb-sub">'+escapeHtml(p.project_name||'-')+' · owner '+escapeHtml(p.owner||'-')+'</div></div>'+
       '<div class="lb-metrics">'+
-        '<div class="lb-metric"><div class="n">'+(dz==null?'—':dz)+'</div><div class="k">Days in</div></div>'+
-        '<div style="flex:0 0 auto">'+(p.status?'<span class="pill '+stTone+'">'+escapeHtml(p.status)+'</span>':'<span class="muted">—</span>')+'</div>'+
+        '<div class="lb-metric"><div class="n">'+(dz==null?'-':dz)+'</div><div class="k">Days in</div></div>'+
+        '<div style="flex:0 0 auto">'+(p.status?'<span class="pill '+stTone+'">'+escapeHtml(p.status)+'</span>':'<span class="muted">-</span>')+'</div>'+
       '</div>'+bar+
       '<div class="lb-comp">'+(p.stalled?'<span class="pill warn">'+escapeHtml((p.stall_reasons||[]).join(', ')||'stalled')+'</span>':'<span class="pill ok">on track</span>')+'</div>'+
       '</div>';
@@ -3404,7 +3404,7 @@ async function renderLeaderboard(){
   const wc=d.weekly_target_compliance_pct;
   const byWorkload = d.ranking_basis==='workload';
   const strip=_heroBand([
-    _bigStat('Weekly target compliance', wc!=null?wc+'%':'—', 'target '+d.weekly_target_compliance_target_pct+'%', _pctTone(wc,d.weekly_target_compliance_target_pct)),
+    _bigStat('Weekly target compliance', wc!=null?wc+'%':'-', 'target '+d.weekly_target_compliance_target_pct+'%', _pctTone(wc,d.weekly_target_compliance_target_pct)),
     _bigStat('CSMs ranked', board.length),
     _bigStat('Ranked by', byWorkload?'Workload':'Completion', byWorkload?'no completions logged yet':'week-ending completion'),
   ], 3);
@@ -3451,7 +3451,7 @@ async function renderF2F(){
   catch(e){ if(e&&e.message==='unauthenticated')return; host.innerHTML='<div class="panel"><div class="body pad"><div class="empty">Could not load F2F cadence.</div></div></div>'; return; }
   const tp=d.tier1_exec_touchpoint_pct;
   const strip=_heroBand([
-    _bigStat('Tier-1 exec touchpoint', tp!=null?tp+'%':'—', 'target '+d.target_pct+'% · '+d.cadence_window_days+'d window', _pctTone(tp,d.target_pct)),
+    _bigStat('Tier-1 exec touchpoint', tp!=null?tp+'%':'-', 'target '+d.target_pct+'% · '+d.cadence_window_days+'d window', _pctTone(tp,d.target_pct)),
     _bigStat('Tier-1 strategic accounts', d.tier1_strategic_accounts),
     _bigStat('With in-window F2F', d.with_in_window_touchpoint),
     _bigStat('Overdue', (d.overdue_accounts||[]).length, null, ((d.overdue_accounts||[]).length>0?'warn':'good')),
@@ -3459,7 +3459,7 @@ async function renderF2F(){
   const od=(d.overdue_accounts||[]);
   const card=a=>'<div class="f2f-card">'+
     '<div class="nm">'+escapeHtml(a.name||a.account_id||'')+'</div>'+
-    '<div class="mt">Owner: <b>'+escapeHtml(a.owner||'—')+'</b></div>'+
+    '<div class="mt">Owner: <b>'+escapeHtml(a.owner||'-')+'</b></div>'+
     '<div class="mt">Exec Sponsor: '+(a.exec_sponsor?('<b>'+escapeHtml(a.exec_sponsor)+'</b>'):'<span class="pill warn">not tagged</span>')+'</div>'+
     '<div class="mt">Last F2F: '+(a.last_f2f?('<b>'+escapeHtml(a.last_f2f)+'</b>'):'<span class="never">never</span>')+'</div>'+
     '</div>';
@@ -3719,7 +3719,7 @@ function _acctTableInner(rows){
     '<th>(AI) Latest News</th><th>(AI) Account Summary</th></tr></thead>';
   // A roster row has not been deep-enriched yet; it carries only the cheap whole-book fields
   // (name/segment/ARR/phase). Live-only signals (CSM score, usage, business health) load when
-  // the account is opened — we show an honest "open to load", NOT a misleading "not connected".
+  // the account is opened, we show an honest "open to load", NOT a misleading "not connected".
   const ROSTER='<span class="roster-cell" title="Live signals load when you open this account">roster</span>';
   const body=list.map(a=>{
     const roster=(a.enriched===false);
@@ -3735,12 +3735,12 @@ function _acctTableInner(rows){
     const phase=haveHs?(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):ND):NC;
     const usage=roster?ROSTER:usageTrend(a);
     const renews=haveHs?renewalDays(a.renewal_date):NC;
-    // (AI) Business Health — a numeric pill from the computed health score (mirrors Planhat's column).
+    // (AI) Business Health, a numeric pill from the computed health score (mirrors Planhat's column).
     const bh=h&&h.computable?'<span class="bhpill '+hband(h.band)+'" title="Computed business health '+h.score+'/100">'+h.score+'</span>':(roster?ROSTER:ND);
-    // (AI) Latest News — Planhat sources this from an external AI news feed. We have no such
+    // (AI) Latest News, Planhat sources this from an external AI news feed. We have no such
     // live source, so we mark it not connected rather than fabricate a headline.
     const news='<span class="nc">not connected</span>';
-    // (AI) Account Summary — a FACTUAL snapshot from live fields (no hallucinated prose).
+    // (AI) Account Summary, a FACTUAL snapshot from live fields (no hallucinated prose).
     const summary=roster?ROSTER:accountSummary(a);
     return '<tr class="click'+(roster?' row-roster':'')+'" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')">'+
       '<td class="col-check"><input type="checkbox" onclick="event.stopPropagation()" aria-label="Select row"></td>'+
@@ -3821,7 +3821,7 @@ function renewalDays(dateStr){
   const cls=days<=60?'rd-soon':days<=120?'rd-near':'';
   return '<span class="mono rdays '+cls+'" title="Renews '+escapeHtml(dateStr)+'">'+days+' days</span>';
 }
-// Usage Trend — a recency bar from the live Pendo "days since last visit" signal.
+// Usage Trend, a recency bar from the live Pendo "days since last visit" signal.
 // Fewer idle days = fuller/greener bar. "no data" when the usage source is off.
 function usageTrend(a){
   if(!(a.connected&&a.connected.usage)) return '<span class="nc">not connected</span>';
@@ -3833,7 +3833,7 @@ function usageTrend(a){
   const label=dsv===0?'active today':dsv+'d idle';
   return '<span class="utrend" title="'+label+'"><span class="utbar"><span class="utfill" style="width:'+level+'%;background:'+col+'"></span></span><span class="utval">'+dsv+'</span></span>';
 }
-// (AI) Account Summary — a FACTUAL one-line snapshot from live fields (no hallucination).
+// (AI) Account Summary, a FACTUAL one-line snapshot from live fields (no hallucination).
 function accountSummary(a){
   if(!(a.connected&&a.connected.hubspot)) return '<span class="nc">not connected</span>';
   const bits=[];
@@ -4231,7 +4231,7 @@ function renderAgentConversation(){
   out.innerHTML=agentConversation.map(turn=>'<div class="agent-turn '+turn.role+'"><div class="agent-avatar">'+(turn.role==='user'?'YOU':'CS')+'</div><div class="agent-bubble">'+turn.content+'</div></div>').join('');
 }
 function resolveCsmOwner(question){
-  // When the user is authenticated, the agent inherits that identity directly —
+  // When the user is authenticated, the agent inherits that identity directly,
   // no need to ask the user who they are. Their portfolio is already scoped
   // server-side, so we pass the authenticated name as the owner context.
   if(window.CS_PRINCIPAL&&window.CS_PRINCIPAL.authenticated){
@@ -4403,7 +4403,7 @@ function _renderGaps(){
 // Transparent health-score breakdown (mirrors Planhat's factor scorecard). Renders the
 // engine's health.reasons as a factor list: starts at 100, applies each penalty/bonus,
 // ends at the engine's own total score + RAG band. Every figure is parsed from the
-// reason strings the engine produced (e.g. "churn risk 72% (-29)") — nothing invented.
+// reason strings the engine produced (e.g. "churn risk 72% (-29)"), nothing invented.
 function healthBreakdownHtml(health){
   if(!health||!health.computable) return '';
   const reasons=health.reasons||[];
@@ -4522,7 +4522,7 @@ function renderCompanyPage(id,d){
   // Health drivers + trend (reuse existing builders)
   const spark=sparkline((d.health_history||[]).map(r=>r.health));
   const driversHtml='<div class="callout">'+(health.computable?((health.reasons||[]).map(escapeHtml).join('<br>')||'Healthy across the board'):'<span class="nc">Not enough live signal to compute a health score</span>')+'</div>';
-  // Key metrics grid — the live signal detail (was previously only in the drawer).
+  // Key metrics grid, the live signal detail (was previously only in the drawer).
   const km=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
   const churnVal=conn.churn?(ch.churn_status?escapeHtml(ch.churn_status):(ch.ml_churn_score!=null?Math.round(ch.ml_churn_score*100)+'%'+(ch.computed?' <span class="muted" style="font-weight:400;font-size:.85em">computed</span>':' <span class="muted" style="font-weight:400;font-size:.85em">Redshift</span>'):ND)):NC;
   const payVal=conn.stripe?(function(){var stage=st.dunning_stage||'none';if(stage==='none'){return (st.past_due_invoices>0)?'<span class="pill a">'+st.past_due_invoices+' past-due</span>':'<span class="pill g">Up to date</span>';}return '<span class="pill r">'+escapeHtml(stage.replace(/_/g,' '))+'</span>';})():NC;
@@ -4629,11 +4629,11 @@ function _onboardingBoardPanel(id,d){
     const hTone=(healthLc==='red'||healthLc==='at_risk')?'warn':(healthLc==='green'?'ok':'');
     const kv=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
     bodyHtml='<div class="cp-kmgrid">'+
-      kv('Project',ob.project_name?escapeHtml(ob.project_name):'<span class="muted">—</span>')+
-      kv('Status',ob.status?'<span class="pill '+(stTone||'')+'">'+escapeHtml(ob.status)+'</span>':'<span class="muted">—</span>')+
-      kv('Project health',ob.health?'<span class="pill '+(hTone||'')+'">'+escapeHtml(ob.health)+'</span>':'<span class="muted">—</span>')+
-      kv('Start date',ob.start_date?escapeHtml(ob.start_date):'<span class="muted">—</span>')+
-      kv('Due date',ob.due_date?escapeHtml(ob.due_date):'<span class="muted">—</span>')+
+      kv('Project',ob.project_name?escapeHtml(ob.project_name):'<span class="muted">-</span>')+
+      kv('Status',ob.status?'<span class="pill '+(stTone||'')+'">'+escapeHtml(ob.status)+'</span>':'<span class="muted">-</span>')+
+      kv('Project health',ob.health?'<span class="pill '+(hTone||'')+'">'+escapeHtml(ob.health)+'</span>':'<span class="muted">-</span>')+
+      kv('Start date',ob.start_date?escapeHtml(ob.start_date):'<span class="muted">-</span>')+
+      kv('Due date',ob.due_date?escapeHtml(ob.due_date):'<span class="muted">-</span>')+
     '</div>';
   }
   return '<div class="cp-section" data-cpt="overview planning"><div class="cp-shead"><h2>Implementation board</h2><span class="cp-cnt">Rocket Lane</span></div>'+bodyHtml+'</div>';
@@ -4645,21 +4645,21 @@ function _roiAiPanel(id,d){
   const prov=(d.sources||{}).roi_ai;
   let bodyHtml;
   if(prov===undefined || prov==='not_live'){
-    bodyHtml='<div class="callout"><span class="nc">ROI AI not connected</span> <span class="muted">— telemetry arrives via the signed ROI AI webhook.</span></div>';
+    bodyHtml='<div class="callout"><span class="nc">ROI AI not connected</span> <span class="muted"> telemetry arrives via the signed ROI AI webhook.</span></div>';
   } else if(roi.adoption_score==null){
     bodyHtml='<div class="callout"><span class="muted">No ROI AI telemetry received for this account yet.</span></div>';
   } else {
     const sc=roi.adoption_score;
     const tone=sc>=75?'good':sc<25?'warn':'';
     const trend=String(roi.trend||'').toLowerCase();
-    const trendPill=trend?('<span class="pill '+(trend==='up'?'ok':trend==='down'?'warn':'')+'">'+escapeHtml(roi.trend)+'</span>'):'<span class="muted">—</span>';
+    const trendPill=trend?('<span class="pill '+(trend==='up'?'ok':trend==='down'?'warn':'')+'">'+escapeHtml(roi.trend)+'</span>'):'<span class="muted">-</span>';
     const kv=(k,v)=>'<div class="cp-km"><div class="cp-km-l">'+k+'</div><div class="cp-km-v">'+v+'</div></div>';
     bodyHtml='<div class="cp-kmgrid">'+
       kv('Adoption score','<span class="'+(tone==='good'?'good':tone==='warn'?'warn':'')+'" style="font-weight:800">'+sc+'/100</span>')+
       kv('Trend',trendPill)+
-      kv('Active ROI users',roi.active_roi_users!=null?roi.active_roi_users:'<span class="muted">—</span>')+
-      kv('ROI realized',roi.roi_realized_usd!=null?fmt(roi.roi_realized_usd):'<span class="muted">—</span>')+
-      kv('As of',roi.metric_date?escapeHtml(roi.metric_date):'<span class="muted">—</span>')+
+      kv('Active ROI users',roi.active_roi_users!=null?roi.active_roi_users:'<span class="muted">-</span>')+
+      kv('ROI realized',roi.roi_realized_usd!=null?fmt(roi.roi_realized_usd):'<span class="muted">-</span>')+
+      kv('As of',roi.metric_date?escapeHtml(roi.metric_date):'<span class="muted">-</span>')+
     '</div><div class="muted" style="margin-top:8px;font-size:.82em">ROI AI adoption is a modest input to the business health score.</div>';
   }
   return '<div class="cp-section" data-cpt="overview usage"><div class="cp-shead"><h2>ROI AI adoption</h2><span class="cp-cnt">product telemetry</span></div>'+bodyHtml+'</div>';
@@ -4830,7 +4830,7 @@ async function applyTagRole(id,email,btn){
 // Expansion deal (CSQL) creation (increment 5): a CSM routes an expansion opportunity to
 // HubSpot without leaving the platform. Two-gated, owner-scoped, audited server-side.
 function _csqlPanel(id,d){
-  const hs=d.hubspot||{}; const nm=escapeHtml((hs.name||id)+' — expansion');
+  const hs=d.hubspot||{}; const nm=escapeHtml((hs.name||id)+', expansion');
   return '<div class="cp-section" data-cpt="planning revenue"><div class="cp-shead"><h2>Create expansion deal (CSQL)</h2></div>'+
     '<div class="writeback" style="background:#fff">Route an expansion opportunity into HubSpot as a deal (CSQL):'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">'+
@@ -4874,7 +4874,7 @@ async function loadDigestPreview(id){
   const row=(label,val,suffix)=>'<div class="dc-row"><span>'+label+'</span><b>'+(val!=null&&val!==''?escapeHtml(String(val))+(suffix||''):'<span class="muted">no data</span>')+'</b></div>';
   const cta=g.expansion_cta?'<div class="callout" style="margin:8px 0;background:#eefaf0;border-color:#bfe6cb">Licence utilisation ≥ 85% → the digest includes an inline <b>Add Seats / Upgrade</b> expansion CTA.</div>':'';
   const recipient=g.missing_primary_admin
-    ? '<div class="supp" style="margin:0 0 10px">No <b>Primary Admin</b> tagged — tag one (above) before the digest can be sent.</div>'
+    ? '<div class="supp" style="margin:0 0 10px">No <b>Primary Admin</b> tagged, tag one (above) before the digest can be sent.</div>'
     : '<div style="margin:0 0 10px">Recipient: <b>'+escapeHtml(g.recipient_name||g.recipient||'')+'</b> ('+escapeHtml(g.recipient||'')+')</div>';
   wrap.innerHTML=recipient+
     '<div class="muted" style="font-size:.82em;margin-bottom:6px">'+escapeHtml(g.period||'')+' · from live signals</div>'+
@@ -4899,7 +4899,7 @@ async function applySendDigest(id,btn){
     if(r.status===403){ if(status)status.textContent='You can only send digests for accounts you own.'; }
     else if(res.sent){ if(status)status.textContent='Sent to '+escapeHtml(res.recipient||'Primary Admin')+' ✓'; }
     else if(res.mode==='no-recipient'){ if(status)status.textContent='No Primary Admin tagged.'; }
-    else if(res.mode==='no-email-provider'){ if(status)status.textContent='Prepared — no email provider connected yet.'; }
+    else if(res.mode==='no-email-provider'){ if(status)status.textContent='Prepared, no email provider connected yet.'; }
     else if(res.mode==='dry-run'){ if(status)status.textContent='Prepared (writes disabled on this environment).'; }
     else { if(status)status.textContent='Prepared (not applied).'; }
   }catch(e){ if(status)status.textContent='Could not send the digest.'; }

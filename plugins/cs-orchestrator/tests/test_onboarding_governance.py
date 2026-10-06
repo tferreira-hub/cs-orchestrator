@@ -41,25 +41,30 @@ def _projects():
 
 
 def _roster():
-    def acct(aid, owner_id, name):
-        return {aid: {"hubspot": {"name": name, "csm_owner": name + " CSM", "csm_owner_id": owner_id,
-                                  "account_id": aid}, "sources": {"hubspot": "live"}}}
-    d = {}
-    d.update(acct("au1-active", "o1", "ActiveCo"))
-    d.update(acct("au1-stalled", "o1", "StalledCo"))
-    d.update(acct("au1-ontime", "o2", "OnTimeCo"))
-    d.update(acct("au1-late", "o2", "LateCo"))
-    return d
+    # Full lightweight book rows (what list_all_companies returns): name + owner_id.
+    def row(name, owner_id, aid):
+        return {"name": name, "account_id": aid, "owner_id": owner_id, "csm_owner": name + " CSM",
+                "company_id": aid}
+    return [
+        row("ActiveCo", "o1", "au1-active"),
+        row("StalledCo", "o1", "au1-stalled"),
+        row("OnTimeCo", "o2", "au1-ontime"),
+        row("LateCo", "o2", "au1-late"),
+    ]
 
 
 def _patch(monkeypatch, rocket_live=True, projects=None):
     import engine, dataaccess
     from adapters import sources
-    monkeypatch.setattr(dataaccess, "all_accounts", _roster)
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {})
     monkeypatch.setattr(dataaccess, "live_sources",
                         lambda: (["HubSpot", "Rocket Lane"] if rocket_live else ["HubSpot"]))
     monkeypatch.setattr(sources.ROCKET_LANE, "list_active_projects",
                         lambda *a, **k: (projects if projects is not None else _projects()))
+    monkeypatch.setattr(sources.HUBSPOT, "live", lambda: True)
+    monkeypatch.setattr(sources.HUBSPOT, "list_all_companies", lambda *a, **k: _roster())
+    monkeypatch.setattr(sources.HUBSPOT, "_owner_name", lambda oid: {"o1": "ActiveCo CSM", "o2": "OnTimeCo CSM"}.get(str(oid)))
+    monkeypatch.setattr(dataaccess, "_ADAPTERS", True, raising=False)
     monkeypatch.setenv("CS_TODAY", "2026-10-06")
     engine.set_principal(None)
     return engine
@@ -111,9 +116,9 @@ def test_governance_handoff_kpi_none_when_no_completions(monkeypatch):
 
 
 def test_governance_admin_sees_unmatched_projects(monkeypatch):
-    # A project whose company is not in the roster still shows for an admin (owner '—').
+    # A project whose company is not in the roster still shows for an admin (owner '-').
     engine = _patch(monkeypatch, projects=[_proj("GhostCo", "In Progress", "2026-09-01", "2026-12-01")])
     g = engine.onboarding_governance()
     assert g["active_projects"] == 1
     row = g["projects"][0]
-    assert row["name"] == "GhostCo" and row["matched_account"] is False and row["owner"] == "—"
+    assert row["name"] == "GhostCo" and row["matched_account"] is False and row["owner"] == "-"

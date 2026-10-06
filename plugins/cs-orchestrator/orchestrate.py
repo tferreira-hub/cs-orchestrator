@@ -36,7 +36,7 @@ def _today() -> date:
 
     Reads CS_TODAY (the demo/business-date anchor) when set, otherwise the real
     current date. This mirrors engine.py's date handling exactly, so the rules
-    engine and the platform's renewal forecast always agree on "today" — a module
+    engine and the platform's renewal forecast always agree on "today", a module
     constant resolved at import time would freeze the date for the life of a
     long-running server and, with CS_TODAY unset, silently use a stale default.
     """
@@ -243,7 +243,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
             drivers.append(churn_source)
         # A computed score (derived from live signals when no ML model is connected) is
         # NOT an ML churn prediction. It must not fire the Priority-1 Predictive Risk
-        # Playbook on its own — that threshold is calibrated for the ML model output.
+        # Playbook on its own, that threshold is calibrated for the ML model output.
         # Computed scores still contribute to other drivers (Pendo risk, Sev-1, etc.)
         # and to the health score, so the account remains visible when other signals fire.
         if score >= CHURN_RISK and churn_is_ml:
@@ -403,7 +403,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     # Protect is the owning intervention when the same inactivity signal is also
     # driving churn risk. Keep the queue actionable instead of duplicating work.
     # This block is Strategic-only (guarded below), so the task is always P5 with the
-    # Strategic adoption action — no Scaled branch is reachable here.
+    # Strategic adoption action, no Scaled branch is reachable here.
     if adoption_drivers and segment == "Strategic" and not risk_fired and stage != "day_15_plus":
         adoption_priority = 5
         adoption_action = ("Initiate the adoption playbook: review activation blockers, contact the Primary Champion / Admin, "
