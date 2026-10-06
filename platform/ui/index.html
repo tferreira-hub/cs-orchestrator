@@ -4048,9 +4048,12 @@ async function loadIntegrations(){
     const cls=state==='live'?'g':(state==='config'?'a':(state==='pending'?'nc2':'nc2'));
     const access=c.access||c.direction;
     const detail=c.detail?'<div class="intdetail '+(state==='config'?'cfg':'pend')+'">'+escapeHtml(c.detail)+'</div>':'';
+    // An inbound webhook does not PULL - data is pushed to us. Label it accurately.
+    const isInbound=/webhook/i.test(c.direction||'')||/webhook/i.test(c.category||'');
+    const ingestLabel=isInbound?'Receives':'Pulls';
     return '<div class="intcard"><div class="top"><div><h3>'+escapeHtml(c.system)+'</h3><div class="cat">'+escapeHtml(c.category)+'</div></div><span class="pill '+cls+'">'+escapeHtml(c.status)+'</span></div>'+
       '<div class="dirbadge">'+escapeHtml(access)+'</div>'+detail+
-      '<div class="rows"><b>Pulls:</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+((c.writes&&c.writes.length)?'<br><b>Writes:</b> '+c.writes.map(escapeHtml).join(', '):'')+'</div></div>';
+      '<div class="rows"><b>'+ingestLabel+':</b> '+(c.pulls.map(escapeHtml).join(', ')||'-')+(c.pushes.length?'<br><b>Pushes:</b> '+c.pushes.map(escapeHtml).join(', '):'')+((c.writes&&c.writes.length)?'<br><b>Writes:</b> '+c.writes.map(escapeHtml).join(', '):'')+'</div></div>';
   }).join('');
 }
 async function loadAudit(){
