@@ -1,10 +1,11 @@
 """Tests for engine.onboarding_governance() — the Rocket Lane implementation/onboarding
-governance view (V5 UC3). Covers active-project counting, stalled-before-handoff alerts,
-the on-time handoff KPI, owner-scoping, and the honest 'not connected' state."""
+governance view (V5 UC3). Source-first: it pulls projects from RocketLane.list_active_projects()
+directly and joins them to the account roster by company name for the CSM owner + scoping.
+Covers active/stalled counting, the on-time handoff KPI, owner-scoping, and the honest
+'not connected' state."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -24,50 +25,41 @@ def _clear_principal():
     engine.set_principal(None)
 
 
-def _acct(aid, owner_id, name, onboarding, csm="Owner"):
-    return {aid: {
-        "hubspot": {"name": name, "segment": "Strategic", "arr_usd": 50000,
-                    "csm_owner": csm, "csm_owner_id": owner_id, "contacts": [],
-                    "account_id": aid,
-                    "instances": [{"instance_id": aid, "instance_type": "primary"}]},
-        "sources": {"hubspot": "live", "onboarding": "live"},
-        "zendesk": {}, "usage": {}, "churn": {}, "stripe": {}, "jiminny": {},
-        "onboarding": onboarding, "metrics": {},
-    }}
+def _proj(company, status, start, due, health=None):
+    return {"company_name": company, "company_id": None, "project_name": company + " Onboarding",
+            "status": status, "start_date": start, "due_date": due, "archived": False,
+            "owner": "Impl Team", "health": health, "_source": "rocket-lane-live"}
 
 
-def _book():
-    data = {}
-    # Active + healthy, in onboarding 20 days.
-    data.update(_acct("au1-active", "o1", "ActiveCo", {
-        "_matched": True, "status": "In Progress", "health": "green",
-        "project_name": "ActiveCo Onboarding", "start_date": "2026-09-16",
-        "due_date": "2026-12-01", "archived": False}))
-    # Stalled (red health), should surface as stalled-before-handoff.
-    data.update(_acct("au1-stalled", "o1", "StalledCo", {
-        "_matched": True, "status": "blocked", "health": "red",
-        "project_name": "StalledCo Onboarding", "start_date": "2026-08-01",
-        "due_date": "2026-09-15", "archived": False}))
-    # Completed on time (today 2026-10-06 <= due 2026-10-10).
-    data.update(_acct("au1-ontime", "o2", "OnTimeCo", {
-        "_matched": True, "status": "completed", "health": "green",
-        "project_name": "OnTimeCo", "start_date": "2026-08-01",
-        "due_date": "2026-10-10", "archived": True}))
-    # Completed late (today > due) -> counts against the handoff KPI.
-    data.update(_acct("au1-late", "o2", "LateCo", {
-        "_matched": True, "status": "completed", "health": "green",
-        "project_name": "LateCo", "start_date": "2026-06-01",
-        "due_date": "2026-08-01", "archived": True}))
-    # No matched Rocket Lane project -> contributes nothing (data-gap).
-    data.update(_acct("au1-nomatch", "o3", "NoMatchCo", {"_matched": False, "status": None}))
-    return data
+def _projects():
+    return [
+        _proj("ActiveCo", "In Progress", "2026-09-16", "2026-12-01", "green"),
+        _proj("StalledCo", "blocked", "2026-08-01", "2026-09-15", "red"),
+        _proj("OnTimeCo", "completed", "2026-08-01", "2026-10-10"),   # today <= due -> on-time
+        _proj("LateCo", "completed", "2026-06-01", "2026-08-01"),     # today > due -> late
+    ]
 
 
-def _patch(monkeypatch, rocket_live=True):
+def _roster():
+    def acct(aid, owner_id, name):
+        return {aid: {"hubspot": {"name": name, "csm_owner": name + " CSM", "csm_owner_id": owner_id,
+                                  "account_id": aid}, "sources": {"hubspot": "live"}}}
+    d = {}
+    d.update(acct("au1-active", "o1", "ActiveCo"))
+    d.update(acct("au1-stalled", "o1", "StalledCo"))
+    d.update(acct("au1-ontime", "o2", "OnTimeCo"))
+    d.update(acct("au1-late", "o2", "LateCo"))
+    return d
+
+
+def _patch(monkeypatch, rocket_live=True, projects=None):
     import engine, dataaccess
-    monkeypatch.setattr(dataaccess, "all_accounts", _book)
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _roster)
     monkeypatch.setattr(dataaccess, "live_sources",
                         lambda: (["HubSpot", "Rocket Lane"] if rocket_live else ["HubSpot"]))
+    monkeypatch.setattr(sources.ROCKET_LANE, "list_active_projects",
+                        lambda *a, **k: (projects if projects is not None else _projects()))
     monkeypatch.setenv("CS_TODAY", "2026-10-06")
     engine.set_principal(None)
     return engine
@@ -77,7 +69,7 @@ def test_governance_counts_active_and_stalled(monkeypatch):
     engine = _patch(monkeypatch)
     g = engine.onboarding_governance()
     assert g["connected"] is True
-    # active = In Progress + blocked (not the two completed, not the unmatched)
+    # active = In Progress + blocked (the two completed are excluded)
     assert g["active_projects"] == 2
     assert g["stalled_projects"] == 1
     assert {r["name"] for r in g["stalled"]} == {"StalledCo"}
@@ -85,20 +77,23 @@ def test_governance_counts_active_and_stalled(monkeypatch):
     assert g["handoff_completed"] == 2
     assert g["handoff_on_time_pct"] == 50
     assert g["handoff_on_time_target_pct"] == 90
-    # avg days-in-onboarding only over active projects, and is a real number
     assert isinstance(g["avg_days_in_onboarding"], int)
+    # Owner joined from the roster by company name.
+    active = next(r for r in g["projects"] if r["name"] == "ActiveCo")
+    assert active["owner"] == "ActiveCo CSM" and active["matched_account"] is True
 
 
 def test_governance_not_connected_is_honest(monkeypatch):
     engine = _patch(monkeypatch, rocket_live=False)
     g = engine.onboarding_governance()
     assert g["connected"] is False
+    assert g["active_projects"] == 0
     assert g["note"] and "not connected" in g["note"].lower()
 
 
 def test_governance_owner_scoped(monkeypatch):
     engine = _patch(monkeypatch)
-    # CSM owning only o1's accounts sees just those two projects (active + stalled).
+    # CSM owning o1 sees only ActiveCo + StalledCo projects (joined by company name).
     engine.set_principal({"email": "a@x.com", "name": "A", "role": "csm", "owner_id": "o1"})
     g = engine.onboarding_governance()
     names = {r["name"] for r in g["projects"]} | {r["name"] for r in g["stalled"]}
@@ -108,16 +103,17 @@ def test_governance_owner_scoped(monkeypatch):
 
 
 def test_governance_handoff_kpi_none_when_no_completions(monkeypatch):
-    import engine, dataaccess
-    # Only an active project, no completed ones -> KPI denominator 0 -> None (data-gap).
-    only_active = _acct("au1-a", "o1", "ActiveOnly", {
-        "_matched": True, "status": "In Progress", "health": "green",
-        "start_date": "2026-10-01", "due_date": "2026-12-01", "archived": False})
-    monkeypatch.setattr(dataaccess, "all_accounts", lambda: only_active)
-    monkeypatch.setattr(dataaccess, "live_sources", lambda: ["HubSpot", "Rocket Lane"])
-    monkeypatch.setenv("CS_TODAY", "2026-10-06")
-    engine.set_principal(None)
+    engine = _patch(monkeypatch, projects=[_proj("ActiveOnly", "In Progress", "2026-10-01", "2026-12-01")])
     g = engine.onboarding_governance()
     assert g["handoff_completed"] == 0
     assert g["handoff_on_time_pct"] is None
-    engine.set_principal(None)
+    assert g["active_projects"] == 1
+
+
+def test_governance_admin_sees_unmatched_projects(monkeypatch):
+    # A project whose company is not in the roster still shows for an admin (owner '—').
+    engine = _patch(monkeypatch, projects=[_proj("GhostCo", "In Progress", "2026-09-01", "2026-12-01")])
+    g = engine.onboarding_governance()
+    assert g["active_projects"] == 1
+    row = g["projects"][0]
+    assert row["name"] == "GhostCo" and row["matched_account"] is False and row["owner"] == "—"
