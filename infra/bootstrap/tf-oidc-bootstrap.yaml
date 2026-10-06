@@ -75,6 +75,7 @@ Resources:
               - "ecr:*"
               - "cognito-idp:*"
               - "elasticloadbalancing:*"
+              - "elasticfilesystem:*"
               - "logs:*"
               - "ec2:Describe*"
               - "ec2:*SecurityGroup*"
