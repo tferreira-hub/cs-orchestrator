@@ -679,6 +679,10 @@ class Handler(BaseHTTPRequestHandler):
                 # UC3 ML Churn Risk Matrix: the >=70% ML-churn cohort grouped by primary
                 # risk driver with ARR impact. Owner-scoped inside the engine.
                 self._json(200, engine.churn_risk_matrix()); return
+            if path == "/api/onboarding-governance":
+                # UC3 Rocket Lane implementation/onboarding governance (active projects,
+                # time-in-onboarding, stalled-before-handoff, on-time handoff KPI).
+                self._json(200, engine.onboarding_governance()); return
             if path == "/api/audit":
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
