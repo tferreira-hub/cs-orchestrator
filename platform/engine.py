@@ -550,6 +550,7 @@ def _expansion_qualified(account_id: str, account: dict) -> bool:
         orchestrate.RULE_EXPANSION_UTILIZATION,
         orchestrate.RULE_EXPANSION_API_SURGE,
         orchestrate.RULE_EXPANSION_ADOPTION,
+        orchestrate.RULE_EXPANSION_ROI_AI,
     }
     return any(t.get("rule_id") in expansion_rules for t in tasks)
 
@@ -3003,7 +3004,10 @@ def _capacity_per_csm() -> int:
 
 def _task_metrics(tasks: list[dict]) -> dict:
     events = _load_task_events()
-    today = date.today()
+    # Use the SAME business-date anchor (CS_TODAY) the tasks' created_on/due_on were
+    # stamped with, so overdue counts, SLA adherence and task age never skew when the
+    # platform runs on an anchored date. (_f2f_today honours CS_TODAY, else date.today.)
+    today = _f2f_today()
     completed = in_progress = overdue = 0
     ages = []
     overdue_ids = set()

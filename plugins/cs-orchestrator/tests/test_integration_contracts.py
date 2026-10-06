@@ -2112,3 +2112,16 @@ def test_adoption_score_uses_aggregation_counts_when_no_pct():
     r2 = engine.adoption_score(idle)
     assert r2["computable"] is True
     assert r2["score"] == 0, f"idle account should score 0, got {r2['score']}"
+
+
+def test_task_metrics_honours_cs_today(monkeypatch):
+    """_task_metrics must anchor overdue/age on CS_TODAY (the same date tasks are stamped
+    with), not the wall clock - otherwise KPIs/leaderboard overdue counts skew whenever
+    the platform runs on a business-date anchor. Regression for the date.today() bug."""
+    import engine
+    monkeypatch.setenv("CS_TODAY", "2026-12-01")
+    monkeypatch.setattr(engine, "_load_task_events", lambda: {})
+    tasks = [{"task_id": "t1", "created_on": "2026-11-01", "due_on": "2026-11-10", "priority": 2}]
+    m = engine._task_metrics(tasks)
+    assert m["overdue_tasks"] == 1, "task due 2026-11-10 is overdue vs CS_TODAY 2026-12-01"
+    assert m["average_task_age_days"] == 30.0, "age must be measured from CS_TODAY"

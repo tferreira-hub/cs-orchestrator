@@ -174,6 +174,10 @@ tr.row-roster:hover td{opacity:1}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 @keyframes warm-spin{to{transform:rotate(360deg)}}
 .warming-spin{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:warm-spin .8s linear infinite}
+.ingest-banner{display:flex;align-items:center;gap:10px;margin:0 32px;padding:10px 14px;border-radius:10px;background:#fff6ec;border:1px solid #f0c88a;color:#92400e;font-size:.86em}
+.ingest-banner .ib-ico{font-size:1.1em}
+.ingest-banner b{color:#78350f}
+.ingest-banner .ib-x{margin-left:auto;cursor:pointer;border:0;background:transparent;color:#92400e;font-size:1.1em;line-height:1}
 .content{padding:26px 32px 70px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
 .tbl{width:100%;border-collapse:collapse;font-size:.86em}
@@ -1040,6 +1044,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <div class="status"><span class="dot"></span> <span id="dataMode" class="modebadge sample">Checking sources</span> <span id="scopeBadge" class="src" style="display:none"></span> <span id="judgeBadge" class="src" style="display:none"></span> <span class="muted" id="asof"></span> <button class="topbar-jane" onclick="toggleAgentDock(true)"><span>✦</span> Ask Jane</button> <span id="principalBox" style="display:none;margin-left:10px"><span id="principalName" class="src live"></span> <a id="logoutLink" href="/logout" class="src" style="text-decoration:none">Sign out</a></span></div>
     </div>
     <div id="globalFilterMount" style="display:none;padding:0 0 2px"></div>
+    <div id="ingestBanner" style="display:none"></div>
     <div class="content">
       <section class="view on" id="v-dash">
         <div class="cc-tabs" id="cc-tabs">
@@ -3038,8 +3043,31 @@ async function boot(){
   else if(bh.indexOf('leading/')===0){ go('leading'); leadingTab(bh.slice('leading/'.length)); }
   else if(bh.indexOf('riskesc/')===0){ go('riskesc'); riskEscTab(bh.slice('riskesc/'.length)); }
   else { go(initialView()); }
+  checkIngestion();
 }
 function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.textContent=n;if(red&&n>0)e.classList.add('red');}
+
+// Data-ingestion warning banner (UC3): warn leadership when a CORE data source that
+// drives KPIs is not live, so GRR/health/risk numbers are never read as complete when
+// they are degraded. We only warn on core sources (HubSpot/Stripe/Zendesk/Churn) in a
+// 'configuration required / awaiting data' state - NOT the known access-pending vendors
+// (Jiminny/Rocket Lane) or ROI AI (awaiting first webhook), which would be noise.
+async function checkIngestion(){
+  const el=document.getElementById('ingestBanner'); if(!el) return;
+  if(sessionStorage.getItem('cs_ingest_dismissed')==='1'){ el.style.display='none'; return; }
+  let d; try{ d=await (await api('/api/integrations')).json(); }catch(_){ return; }
+  const CORE=new Set(['HubSpot','Stripe','Zendesk','Churn Model']);
+  const degraded=(d.connectors||[]).filter(c=>CORE.has(c.system) && c.state!=='live');
+  if(!degraded.length){ el.style.display='none'; return; }
+  const names=degraded.map(c=>escapeHtml(c.system)).join(', ');
+  el.className='ingest-banner';
+  el.innerHTML='<span class="ib-ico">⚠</span><div><b>Data ingestion degraded.</b> '+
+    names+' '+(degraded.length===1?'is':'are')+' not live - portfolio KPIs (GRR, NDR, health, churn) '+
+    'may be incomplete or stale. See Management · Integrations for details.</div>'+
+    '<button class="ib-x" title="Dismiss" onclick="dismissIngest()">✕</button>';
+  el.style.display='';
+}
+function dismissIngest(){ sessionStorage.setItem('cs_ingest_dismissed','1'); const el=document.getElementById('ingestBanner'); if(el)el.style.display='none'; }
 
 // ===== My Command Center top band (mirrors Planhat's Command Center) =====
 // Three headline metrics + Upcoming Meetings, Company Distribution by Health,
@@ -3070,12 +3098,22 @@ async function renderCommandCenter(){
   }
   const expPipelineArr=expCandidates.reduce((s,c)=>s+(c.arr_usd||0),0);
   const expCount=_active?expCandidates.length:(exp.count||0);
-  // Three headline stat cards (Open Risks / Upcoming QBRs / Open Expansion)
-  const bigStat=(l,v,cls)=>'<div class="cc-big"><div class="cc-big-l">'+l+'</div><div class="cc-big-v '+(cls||'')+'">'+v+'</div></div>';
-  const headline='<div class="cc-headline">'+
-    bigStat('Open Risks',openRisks,openRisks>0?'warn':'')+
-    bigStat('Upcoming QBRs',qbrs,'')+
-    bigStat('Open Expansion',expCount?fmt(expPipelineArr):'$0','good')+
+  // Exec KPI strip per UC3 spec: Total ARR, GRR%, NDR%, At-Risk ARR ($), Expansion
+  // pipeline ($), plus Open Risks. GRR/NDR come from /api/executive (honest-None when
+  // no prior-year data); At-Risk ARR + Total ARR from the client aggregate so they
+  // track the active segment/owner filter.
+  const agg=_filteredAgg();
+  const grr=exec.grr_pct, ndr=exec.ndr_pct;
+  const grrTarget=(exec.grr_target_pct!=null?exec.grr_target_pct:92);
+  const ndrTarget=(exec.ndr_target_pct!=null?exec.ndr_target_pct:100);
+  const bigStat=(l,v,cls,sub)=>'<div class="cc-big"><div class="cc-big-l">'+l+'</div><div class="cc-big-v '+(cls||'')+'">'+v+'</div>'+(sub?'<div class="cc-big-s">'+sub+'</div>':'')+'</div>';
+  const headline='<div class="cc-headline" style="grid-template-columns:repeat(6,1fr)">'+
+    bigStat('Total ARR',fmt(agg.total_arr_usd||0),'')+
+    bigStat('Portfolio GRR',grr!=null?grr+'%':'<span class="muted">no data</span>',grr==null?'':(grr>=grrTarget?'good':'warn'),'target '+grrTarget+'%')+
+    bigStat('Portfolio NDR',ndr!=null?ndr+'%':'<span class="muted">no data</span>',ndr==null?'':(ndr>=ndrTarget?'good':'warn'),'target '+ndrTarget+'%')+
+    bigStat('ARR at Risk',fmt(agg.at_risk_arr_usd||0),(agg.at_risk_arr_usd>0?'warn':'good'),openRisks+' open risk'+(openRisks===1?'':'s'))+
+    bigStat('Expansion Pipeline',expCount?fmt(expPipelineArr):'$0','good',expCount+' candidate'+(expCount===1?'':'s'))+
+    bigStat('Upcoming QBRs',qbrs,'','next 90 days')+
   '</div>';
   // Upcoming Meetings - Preparation: grouped by meeting type (Onboarding Call / QBR),
   // derived from the prioritised queue and each account's lifecycle.
