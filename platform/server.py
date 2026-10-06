@@ -687,6 +687,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
+            if path == "/api/leaderboard":
+                # V5 team performance leaderboard: per-CSM completion/outreach ranking +
+                # weekly target-compliance KPI. Owner-scoped (admin all named; CSM self +
+                # anonymised peers) inside the engine.
+                self._json(200, engine.leaderboard()); return
             if path == "/api/task-events":
                 self._json(200, {"events": list(engine._load_task_events().values())}); return
             if path == "/api/lifecycle":
