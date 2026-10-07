@@ -3,8 +3,16 @@
 Status: **applied + live (2026-10).** This runbook records the cross-account access that
 makes NDR (#16) and live ML churn (#5) work, so it is reproducible and does not silently
 drift. It has two parts: (1) the IAM role (codified in
-`cs-platform-churn-reader.tf.example`), and (2) the Redshift object grants (below —
+`cs-platform-churn-reader.tf.example`), and (2) the Redshift object grants (below -
 Redshift grants are not IAM/Terraform-managed; they live in the database).
+
+> NOTE (2026-10-07): the `rpt.rpt_account_ndr_monthly` SELECT grant below was found to be
+> MISSING in the live warehouse (the churn-reader role could read `marts` but not `rpt`,
+> so the whole-book metrics batch returned 0 rows and portfolio NDR + licence utilisation
+> showed "no data"). It was applied this session via the Data API and verified
+> (`HAS_TABLE_PRIVILEGE` = true; the batch warm then loaded 10,396 accounts). If the
+> warehouse is ever rebuilt, re-run ALL grants below - a missing `rpt` grant fails
+> silently (0 rows), not loudly.
 
 Account: Data Platform **503561421603** · region ap-southeast-2
 Workgroup: `data-platform-redshift-warehouse-wg-prod`
