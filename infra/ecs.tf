@@ -52,6 +52,10 @@ locals {
     CS_F2F_LOG_FILE     = "/data/.cs-f2f-log.jsonl"
     CS_ROI_AI_FILE      = "/data/.cs-roi-ai.jsonl"
     CS_TASK_EVENTS_FILE = "/data/.cs-task-events.jsonl"
+    # Success plans + monthly-digest review state must also persist (the review workflow
+    # spans the 28th-1st and the 1st dispatch runs in a separate scheduler process).
+    CS_SUCCESS_PLANS_FILE  = "/data/.cs-success-plans.jsonl"
+    CS_DIGEST_REVIEWS_FILE = "/data/.cs-digest-reviews.jsonl"
   })
 
   container_environment = [for k, v in local.computed_env : { name = k, value = tostring(v) }]

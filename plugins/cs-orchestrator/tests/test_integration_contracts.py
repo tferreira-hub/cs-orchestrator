@@ -689,7 +689,7 @@ def test_run_monthly_digests_batch_summary_is_honest(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
-def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
+def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch, tmp_path):
     """The strategic review window: named accounts get drafts; comment -> commented;
     approve -> approved; dispatch sends approved + auto-baselines unreviewed, holds commented."""
     import engine, dataaccess
@@ -707,7 +707,7 @@ def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
     monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
     engine.set_principal(None)
     engine.orchestrate.set_account_provider(lambda: book)
-    engine._DIGEST_REVIEWS.clear()
+    monkeypatch.setenv("CS_DIGEST_REVIEWS_FILE", str(tmp_path / "reviews.jsonl"))
     try:
         q = engine.monthly_review_queue(period="October 2026")
         # Only the NAMED account is in the strategic review queue.
@@ -728,11 +728,10 @@ def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
         actions = {r["account_id"]: r["action"] for r in d2["accounts"]}
         assert actions["au1-named"] == "approved-dispatch"
     finally:
-        engine._DIGEST_REVIEWS.clear()
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
-def test_dispatch_auto_baselines_unreviewed(monkeypatch):
+def test_dispatch_auto_baselines_unreviewed(monkeypatch, tmp_path):
     """Unreviewed (draft) named accounts auto-baseline on dispatch (spec edge case)."""
     import engine, dataaccess
     named = {"hubspot": {"name": "NamedCo", "segment_label": "Enterprise", "arr_usd": 90000,
@@ -745,12 +744,11 @@ def test_dispatch_auto_baselines_unreviewed(monkeypatch):
     monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
     engine.set_principal(None)
     engine.orchestrate.set_account_provider(lambda: book)
-    engine._DIGEST_REVIEWS.clear()
+    monkeypatch.setenv("CS_DIGEST_REVIEWS_FILE", str(tmp_path / "reviews.jsonl"))
     try:
         d = engine.dispatch_reviewed_digests(period="October 2026", apply=True)
         assert d["accounts"][0]["action"] == "auto-baseline"
     finally:
-        engine._DIGEST_REVIEWS.clear()
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
@@ -2125,3 +2123,44 @@ def test_task_metrics_honours_cs_today(monkeypatch):
     m = engine._task_metrics(tasks)
     assert m["overdue_tasks"] == 1, "task due 2026-11-10 is overdue vs CS_TODAY 2026-12-01"
     assert m["average_task_age_days"] == 30.0, "age must be measured from CS_TODAY"
+
+
+def test_admin_coverage_matrix_rolls_up_roles(monkeypatch):
+    """admin_coverage_matrix reports per-role coverage % and ARR-at-risk across active
+    accounts, excluding churned. One account has Exec Sponsor only; the other is churned."""
+    import engine, dataaccess
+    a1 = {"hubspot": {"name": "ActiveCo", "arr_usd": 100000, "lifecycle_stage": "Customer",
+                      "contacts": [{"role": "Executive Sponsor", "email": "e@co.com"}]},
+          "sources": {"hubspot": "live"}}
+    a2 = {"hubspot": {"name": "DeadCo", "arr_usd": 50000, "lifecycle_stage": "Churned Customer",
+                      "contacts": []},
+          "sources": {"hubspot": "live"}}
+    monkeypatch.setattr(engine, "_scoped_accounts", lambda: {"au1-a": a1, "au1-d": a2})
+    m = engine.admin_coverage_matrix()
+    assert m["summary"]["active_accounts"] == 1  # churned excluded
+    roles = {r["role"]: r for r in m["roles"]}
+    assert roles["Executive Sponsor"]["covered"] == 1
+    assert roles["Executive Sponsor"]["coverage_pct"] == 100
+    # Finance + Primary Admin missing on the one active account -> 100k ARR at risk each.
+    assert roles["Finance Contact"]["missing"] == 1
+    assert roles["Finance Contact"]["arr_at_risk_usd"] == 100000
+
+
+def test_inbound_queue_ages_sla_on_read(monkeypatch):
+    """An open inbound ticket received >24h ago must flip to sla_breached on READ, even
+    though it was recorded as on-track at intake (ageing-on-read, UC1 SLA)."""
+    import engine, time
+    old = int(time.time()) - 30 * 3600  # 30h ago
+    engine._INBOUND_QUEUE.clear()
+    engine._INBOUND_QUEUE["t1"] = {
+        "id": "t1", "status": "open", "destination": "cs_pooled_queue", "intent": "billing",
+        "assigned_to": "Abs Vir", "received_at": old, "sla_due": old + 24 * 3600,
+        "sla_breached": False, "needs_reassign": False, "recorded_at": "2026-10-01",
+    }
+    try:
+        q = engine.inbound_queue()
+        t = q["tickets"][0]
+        assert t["sla_breached"] is True, "a 30h-old open ticket must be breached on read"
+        assert q["sla_breached"] == 1
+    finally:
+        engine._INBOUND_QUEUE.clear()

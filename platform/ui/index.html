@@ -4527,8 +4527,10 @@ async function loadGaps(){
   try{ g=await (await fetch('/api/datagaps')).json(); }
   catch(e){ document.getElementById('gaps-body').innerHTML='<div class="empty">Could not load data gaps.</div>'; return; }
   _gapsData=g;
+  try{ _gapsCoverage=await (await fetch('/api/admin-coverage')).json(); }catch(_){ _gapsCoverage=null; }
   _renderGaps();
 }
+let _gapsCoverage=null;
 // Data Gaps view state: which accounts to show and how to sort. Lets a CSM/RevOps user
 // drive straight to the cleanup that matters instead of scrolling a flat 1.3k-row table.
 let _gapsData=null, _gapsFilter='withgaps', _gapsSort='gaps';
@@ -4596,7 +4598,25 @@ function _renderGaps(){
     '</tbody></table>';
   const countNote=shown.length+' account'+(shown.length===1?'':'s')+(capped?(' · showing the worst '+CAP):'');
 
+  // Admin Coverage Matrix (UC3): book-level role coverage roll-up with ARR at risk.
+  let matrixHtml='';
+  if(_gapsCoverage&&_gapsCoverage.roles){
+    const ms=_gapsCoverage.summary||{};
+    const roleRows=_gapsCoverage.roles.map(r=>{
+      const pct=r.coverage_pct;const tone=pct>=90?'g':pct>=60?'a':'r';
+      return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(r.role)+'</span>'+
+        '<span class="seg-val">'+pct+'% covered <span class="muted" style="font-size:.85em">· '+r.missing+' missing · '+fmt(r.arr_at_risk_usd)+' ARR at risk</span></span></div>'+
+        '<div class="hbar" style="width:100%"><span class="hfill" style="width:'+Math.max(pct>0?6:0,pct)+'%;background:'+(tone==='g'?'var(--green)':tone==='r'?'var(--red)':'var(--amber)')+'"></span></div></div>';
+    }).join('');
+    matrixHtml='<div class="pad" style="padding:14px 22px 0">'+
+      '<b>Admin Coverage Matrix</b> <span class="muted" style="font-size:.85em">· '+(ms.active_accounts||0)+' active accounts · '+(ms.fully_covered_pct||0)+'% fully covered (all three roles)</span>'+
+      '<div style="margin-top:10px;max-width:620px">'+roleRows+'</div>'+
+      '<div class="sub" style="margin-top:8px">Required contact roles per WoW §5. ARR at risk is the revenue on active accounts missing that role, so renewal/onboarding tasks cannot close.</div>'+
+    '</div>';
+  }
+
   document.getElementById('gaps-body').innerHTML=
+    matrixHtml+
     '<div class="pad" style="padding:14px 22px">'+
       '<b>Required HubSpot fields missing (across the book):</b>'+
       '<div style="margin-top:10px;max-width:560px">'+fieldBars+'</div>'+

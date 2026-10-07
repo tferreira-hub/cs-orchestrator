@@ -2220,13 +2220,51 @@ def run_monthly_digests(apply: bool = False) -> dict:
 # monthly report per strategic (named) account; 28th-31st the CSM reviews, adds executive
 # comments, and approves; on the 1st approved reports dispatch, and any still-unreviewed
 # auto-send the baseline (edge case: "unreviewed drafts auto-send baseline on the 1st").
-# Review state is keyed by (account_id, period) in an in-process store (survives the month;
-# a durable store can replace it later without changing the workflow).
-_DIGEST_REVIEWS: dict[str, dict] = {}
+# Review state is keyed by (account_id, period) and PERSISTED to an append-only JSONL
+# store (latest-wins), so CSM comments/approvals survive restarts AND are visible to the
+# separate scheduler ECS process that runs the 1st-of-month dispatch. Mirrors the F2F /
+# success-plan / ROI-AI stores. Env CS_DIGEST_REVIEWS_FILE relocates it (EFS in prod).
+_DIGEST_REVIEWS_FILE = os.environ.get(
+    "CS_DIGEST_REVIEWS_FILE",
+    str(Path(__file__).resolve().parents[1] / ".cs-digest-reviews.jsonl"))
 
 
 def _review_key(account_id: str, period: str) -> str:
     return f"{account_id}::{period}"
+
+
+def _review_get(account_id: str, period: str) -> dict | None:
+    """Latest review entry for (account_id, period) from the JSONL store, or None."""
+    path = Path(os.environ.get("CS_DIGEST_REVIEWS_FILE", _DIGEST_REVIEWS_FILE))
+    if not path.exists():
+        return None
+    key = _review_key(account_id, period)
+    found = None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:  # noqa: BLE001
+                continue
+            if _review_key(row.get("account_id", ""), row.get("period", "")) == key:
+                found = row  # later lines win
+    except Exception:  # noqa: BLE001
+        return None
+    return found
+
+
+def _review_put(account_id: str, period: str, entry: dict) -> None:
+    """Append a review entry (latest-wins on read)."""
+    path = Path(os.environ.get("CS_DIGEST_REVIEWS_FILE", _DIGEST_REVIEWS_FILE))
+    row = {"account_id": account_id, "period": period, **entry}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _is_named_account(a: dict) -> bool:
@@ -2255,7 +2293,7 @@ def monthly_review_queue(period: str | None = None) -> dict:
             digest = monthly_digest(aid)
         except Exception:  # noqa: BLE001
             continue
-        rv = _DIGEST_REVIEWS.get(_review_key(aid, period))
+        rv = _review_get(aid, period)
         status = (rv or {}).get("status", "draft")
         counts[status] = counts.get(status, 0) + 1
         rows.append({
@@ -2283,12 +2321,12 @@ def add_review_comment(account_id: str, comment: str, period: str | None = None)
     if not comment:
         raise ValueError("comment text is required")
     p = get_principal() or {}
-    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry = _review_get(account_id, period) or {}
     entry.update({"status": "commented" if entry.get("status") != "approved" else "approved",
                   "comment": comment,
                   "reviewer": p.get("name") or p.get("email"),
                   "updated_at": datetime.now(timezone.utc).isoformat()})
-    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    _review_put(account_id, period, entry)
     return {"account_id": account_id, "period": period, **entry}
 
 
@@ -2296,12 +2334,12 @@ def approve_digest(account_id: str, period: str | None = None) -> dict:
     """Approve a strategic account's monthly report for dispatch on the 1st."""
     period = period or datetime.now(timezone.utc).strftime("%B %Y")
     p = get_principal() or {}
-    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry = _review_get(account_id, period) or {}
     entry.update({"status": "approved",
                   "reviewer": p.get("name") or p.get("email"),
                   "approved_at": datetime.now(timezone.utc).isoformat(),
                   "updated_at": datetime.now(timezone.utc).isoformat()})
-    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    _review_put(account_id, period, entry)
     return {"account_id": account_id, "period": period, **entry}
 
 
@@ -2633,14 +2671,36 @@ def record_inbound(tickets: list[dict]) -> int:
 
 def inbound_queue(status: str | None = None) -> dict:
     """The persisted inbound queue (newest first), optionally filtered by status, with a
-    summary by destination/intent/SLA so the pooled team can work it like an inbox."""
+    summary by destination/intent/SLA so the pooled team can work it like an inbox.
+
+    AGEING ON READ: an open ticket's sla_breached and needs_reassign flags are
+    recomputed each read against the CURRENT time and live CSM presence, not frozen at
+    intake. This satisfies UC1's '20h -> auto-reassign' and the 24h SLA: a ticket that
+    crosses the thresholds while sitting in the queue, or whose owner later goes OOO,
+    now surfaces correctly without needing a fresh intake batch."""
+    import time as _t
+    now = int(_t.time())
+    SLA_H, REASSIGN_H = 24, 20  # mirror inbound.SLA_HOURS / REASSIGN_AFTER_HOURS
+    for r in _INBOUND_QUEUE.values():
+        if r.get("status") != "open":
+            continue
+        received = r.get("received_at")
+        if not isinstance(received, (int, float)):
+            continue
+        age_h = max(0, (now - received) / 3600.0)
+        sla_due = r.get("sla_due") or (received + SLA_H * 3600)
+        r["sla_breached"] = now > sla_due
+        owner = r.get("assigned_to")
+        owner_ooo = bool(owner) and not _presence_for(owner)
+        r["needs_reassign"] = (owner is not None) and (not r["sla_breached"]) and \
+            (age_h >= REASSIGN_H or owner_ooo)
     rows = sorted(_INBOUND_QUEUE.values(),
                   key=lambda r: r.get("recorded_at") or "", reverse=True)
     if status:
         rows = [r for r in rows if r.get("status") == status]
     by_dest: dict[str, int] = {}
     by_intent: dict[str, int] = {}
-    breached = open_count = 0
+    breached = open_count = reassign = 0
     for r in rows:
         by_dest[r.get("destination")] = by_dest.get(r.get("destination"), 0) + 1
         by_intent[r.get("intent")] = by_intent.get(r.get("intent"), 0) + 1
@@ -2648,7 +2708,10 @@ def inbound_queue(status: str | None = None) -> dict:
             open_count += 1
         if r.get("sla_breached"):
             breached += 1
+        if r.get("needs_reassign"):
+            reassign += 1
     return {"count": len(rows), "open": open_count, "sla_breached": breached,
+            "needs_reassign": reassign,
             "by_destination": by_dest, "by_intent": by_intent, "tickets": rows}
 
 
@@ -3504,6 +3567,59 @@ def datagaps() -> dict:
             "not_in_pendo": len(rows) - totals["usage"],
             "hubspot_field_gaps": field_missing,
             "accounts_missing_roles": roles_missing_accounts,
+        },
+    }
+
+
+def admin_coverage_matrix() -> dict:
+    """Admin Coverage Matrix (UC3 governance): the book-level roll-up of required contact
+    role coverage. For each of the three WoW roles (Executive Sponsor, Primary Champion /
+    Admin, Finance Contact) report how many active accounts have it tagged, the coverage %,
+    and the ARR sitting at risk because the role is missing. Owner-scoped. Live HubSpot only.
+    Complements datagaps() (which is per-account) with the leadership-level matrix the spec
+    names."""
+    accounts = _scoped_accounts()
+    roles = list(REQUIRED_CONTACT_ROLES)
+    per_role = {r: {"role": r, "covered": 0, "missing": 0, "arr_at_risk_usd": 0.0} for r in roles}
+    total = 0
+    fully_covered = 0
+    arr_total = 0.0
+    for aid, a in accounts.items():
+        if not _is_live(a.get("sources", {}), "hubspot"):
+            continue
+        hs = a.get("hubspot", {}) or {}
+        # Active book only: a churned account's missing roles are not actionable coverage.
+        lc = str(hs.get("lifecycle_stage") or "").lower()
+        if lc in ("churned", "churned customer"):
+            continue
+        total += 1
+        arr = hs.get("arr_usd") or 0
+        arr_total += arr
+        have = {c.get("role") for c in hs.get("contacts", []) if c.get("role")}
+        missing_here = 0
+        for r in roles:
+            if r in have:
+                per_role[r]["covered"] += 1
+            else:
+                per_role[r]["missing"] += 1
+                per_role[r]["arr_at_risk_usd"] += arr
+                missing_here += 1
+        if missing_here == 0:
+            fully_covered += 1
+    n = total or 1
+    matrix = []
+    for r in roles:
+        pr = per_role[r]
+        pr["coverage_pct"] = round(100 * pr["covered"] / n)
+        pr["arr_at_risk_usd"] = round(pr["arr_at_risk_usd"])
+        matrix.append(pr)
+    return {
+        "roles": matrix,
+        "summary": {
+            "active_accounts": total,
+            "fully_covered": fully_covered,
+            "fully_covered_pct": round(100 * fully_covered / n),
+            "total_arr_usd": round(arr_total),
         },
     }
 

@@ -42,7 +42,12 @@ def main() -> int:
     # gate (CS_ALLOW_WRITE) and the email-provider gate still apply per account.
     engine.set_principal(None)
     try:
-        result = engine.run_monthly_digests(apply=apply)
+        # Use the strategic review/approve WORKFLOW dispatch (UC2 1st-of-month cadence):
+        # APPROVED reports send, still-DRAFT (unreviewed) accounts auto-send the baseline
+        # (spec edge case), COMMENTED-but-not-approved are held. Review state is read from
+        # the persistent JSONL store, so the comments/approvals CSMs made in the web app
+        # (a different process) are honoured here. Honesty gates in send_digest preserved.
+        result = engine.dispatch_reviewed_digests(apply=apply)
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"ok": False, "error": str(exc)}), flush=True)
         return 1
@@ -50,11 +55,10 @@ def main() -> int:
     print(json.dumps({"ok": True, **result}, default=str), flush=True)
     # Human-readable one-liner for quick log scanning.
     print(
-        f"digest run {result.get('period')}: in_scope={s.get('accounts_in_scope')} "
-        f"compiled={s.get('compiled')} sent={s.get('sent')} dry_run={s.get('dry_run')} "
-        f"missing_admin={s.get('missing_primary_admin')} "
-        f"no_provider={s.get('no_email_provider')} errors={s.get('errors')} "
-        f"apply={result.get('apply_requested')} provider={result.get('email_provider')}",
+        f"digest dispatch {result.get('period')}: "
+        f"named={s.get('named_accounts')} approved_dispatched={s.get('approved_dispatched')} "
+        f"auto_baseline={s.get('auto_baseline')} held={s.get('held_commented')} "
+        f"errors={s.get('errors')} apply={result.get('apply_requested')}",
         flush=True,
     )
     return 0
