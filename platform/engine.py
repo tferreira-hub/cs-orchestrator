@@ -144,18 +144,11 @@ def _batch_metrics_for(account_ids: list) -> dict:
         ids = list(account_ids)
         def _bg():
             global _BATCH_METRICS_REFRESHING
-            import sys as _sys
             try:
                 data = _src.ACCOUNT_METRICS.batch_metrics(ids)
-                n = len(data) if isinstance(data, dict) else 0
-                print(f"[batch-metrics] warm complete: {n} accounts loaded from the warehouse",
-                      file=_sys.stderr, flush=True)
                 if isinstance(data, dict) and data:
                     _BATCH_METRICS["data"] = data
                     _BATCH_METRICS["at"] = time.time()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[batch-metrics] warm FAILED: {type(exc).__name__}: {exc}",
-                      file=_sys.stderr, flush=True)
             finally:
                 _BATCH_METRICS_REFRESHING = False
         threading.Thread(target=_bg, daemon=True).start()

@@ -1048,9 +1048,8 @@ class AccountMetrics:
                 if not token:
                     break
         except Exception as exc:  # noqa: BLE001 - batch is best-effort; absence is a data gap
-            import sys as _sys
-            print(f"[batch-metrics] query failed: {type(exc).__name__}: {exc}",
-                  file=_sys.stderr, flush=True)
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[account-metrics-batch] {type(exc).__name__}: {exc}", file=_s.stderr)
             return {}
         return out
 
