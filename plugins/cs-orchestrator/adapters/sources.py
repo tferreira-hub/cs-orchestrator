@@ -1047,7 +1047,10 @@ class AccountMetrics:
                 token = res.get("NextToken")
                 if not token:
                     break
-        except Exception:  # noqa: BLE001 - batch is best-effort; absence is a data gap
+        except Exception as exc:  # noqa: BLE001 - batch is best-effort; absence is a data gap
+            import sys as _sys
+            print(f"[batch-metrics] query failed: {type(exc).__name__}: {exc}",
+                  file=_sys.stderr, flush=True)
             return {}
         return out
 
