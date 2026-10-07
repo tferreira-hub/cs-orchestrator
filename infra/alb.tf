@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Dedicated internet-facing ALB for csplatform.jobadder.tools.
 # Cloudflare proxies the public hostname to this ALB (DNS record added in
-# Cloudflare, not Terraform — see RUNBOOK). TLS terminates here using the
+# Cloudflare, not Terraform - see RUNBOOK). TLS terminates here using the
 # existing *.jobadder.tools ACM cert.
 # ---------------------------------------------------------------------------
 
@@ -34,18 +34,25 @@ resource "aws_security_group" "service" {
   description = "CS Platform Fargate tasks (ingress only from the ALB)"
   vpc_id      = var.vpc_id
 
-  # Egress is HTTPS-only. The task must reach arbitrary vendor API hosts (HubSpot,
-  # Zendesk, Stripe, Pendo, Jiminny) plus AWS endpoints (ECR, SSM, STS, Bedrock)
-  # over the NAT gateway — these are not a fixed IP set — but all over TCP 443.
-  egress {
-    description = "HTTPS to vendor APIs and AWS endpoints"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # NOTE: egress is defined as STANDALONE aws_security_group_rule resources (below and in
+  # efs.tf), NOT inline. An inline `egress {}` block makes Terraform take EXCLUSIVE
+  # ownership of this SG's egress and delete any rule it doesn't manage on every apply -
+  # which repeatedly wiped the standalone NFS-to-EFS egress rule, breaking EFS mounts on
+  # new tasks. Keeping ALL egress as standalone rules lets them coexist.
 
   tags = merge(local.tags, { Name = "${local.name}-service" })
+}
+
+# HTTPS egress to vendor APIs + AWS endpoints (ECR, SSM, STS, Bedrock) over the NAT
+# gateway. Standalone (not inline) so it coexists with the NFS-to-EFS egress rule.
+resource "aws_security_group_rule" "service_egress_https" {
+  type              = "egress"
+  description       = "HTTPS to vendor APIs and AWS endpoints"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.service.id
 }
 
 # Cross-referencing rules are standalone to avoid a circular SG dependency
