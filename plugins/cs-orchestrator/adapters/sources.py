@@ -967,6 +967,90 @@ class AccountMetrics:
             "_source": "redshift-live",
         }
 
+    def batch_metrics(self, account_refs: list) -> dict[str, dict]:
+        """Latest-month warehouse metrics for the whole book in a SINGLE query, keyed by
+        the uppercase-hyphen ref (AU1-2014). This is the whole-book path: one query instead
+        of a per-account fan-out, so portfolio NDR and licence utilisation populate across
+        the book without N round-trips. Uses a ROW_NUMBER window to pick each account's
+        latest reporting month (verified ~10k accounts in ~4s; a per-row correlated
+        subquery timed out at 50s+). account_refs is accepted for interface symmetry but
+        the whole latest-month snapshot is pulled and the caller selects the refs it needs.
+        Returns {} on any failure or when not live (never fabricates)."""
+        if not self.live():
+            return {}
+        import time
+        ch = self._c()
+        try:
+            table = ch._identifier(config.env("REDSHIFT_METRICS_TABLE") or "rpt.rpt_account_ndr_monthly", qualified=True)
+            id_col = ch._identifier(config.env("REDSHIFT_METRICS_ID_COLUMN") or "ja_account")
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        cell = ch._cell
+        out: dict[str, dict] = {}
+        sql = (
+            f"SELECT {id_col}, revenue, revenue_for_the_previous_year, "
+            "max_daily_users_over_month, deal_committed_users, tenure_months, user_change FROM ("
+            f"  SELECT {id_col}, revenue, revenue_for_the_previous_year, "
+            "  max_daily_users_over_month, deal_committed_users, tenure_months, user_change, "
+            f"  ROW_NUMBER() OVER (PARTITION BY {id_col} ORDER BY date_reporting_month DESC) AS rn "
+            f"  FROM {table}"
+            ") WHERE rn = 1"
+        )
+        try:
+            resp = client.execute_statement(Sql=sql, **ch._target_kwargs())
+            sid = resp["Id"]
+            deadline = time.monotonic() + self.POLL_TIMEOUT_S
+            status = "SUBMITTED"
+            while status not in ("FINISHED", "FAILED", "ABORTED"):
+                if time.monotonic() > deadline:
+                    return {}
+                time.sleep(self.POLL_INTERVAL_S)
+                status = client.describe_statement(Id=sid)["Status"]
+            if status != "FINISHED":
+                return {}
+            token = None
+            while True:
+                kw = {"Id": sid}
+                if token:
+                    kw["NextToken"] = token
+                res = client.get_statement_result(**kw)
+                for row in res.get("Records", []):
+                    ref = cell(row[0])
+                    if not ref:
+                        continue
+                    rev = cell(row[1]); rev_py = cell(row[2])
+                    active_users = cell(row[3]); committed = cell(row[4])
+                    ndr_pct = None
+                    try:
+                        if rev_py:
+                            ndr_pct = round(100.0 * float(rev) / float(rev_py))
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        ndr_pct = None
+                    user_util = None
+                    try:
+                        if committed:
+                            user_util = round(100.0 * float(active_users or 0) / float(committed))
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        user_util = None
+                    out[str(ref).upper()] = {
+                        "mrr_usd": rev,
+                        "revenue_prev_year_usd": rev_py,
+                        "ndr_pct": ndr_pct,
+                        "active_users": active_users,
+                        "committed_users": committed,
+                        "user_utilization_pct": user_util,
+                        "tenure_months": cell(row[5]),
+                        "user_change": cell(row[6]),
+                        "_source": "redshift-live",
+                    }
+                token = res.get("NextToken")
+                if not token:
+                    break
+        except Exception:  # noqa: BLE001 - batch is best-effort; absence is a data gap
+            return {}
+        return out
+
 
 # ------------------------------------------------------------------ Jiminny ---
 class Jiminny:

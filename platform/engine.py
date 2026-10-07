@@ -114,6 +114,47 @@ def _report_cache_ttl() -> float:
         return 600.0
 
 
+# Whole-book warehouse metrics (committed/active seats, revenue, NDR inputs) from
+# rpt_account_ndr_monthly, loaded in ONE batched Redshift query rather than a per-account
+# fan-out. Cached module-wide with the roster TTL and refreshed in the background, so the
+# hot portfolio path NEVER blocks on Redshift. {} until the first warm completes (then
+# every account that has a warehouse row gets licence utilisation + NDR inputs).
+_BATCH_METRICS: dict = {"at": 0.0, "data": {}}
+_BATCH_METRICS_REFRESHING: bool = False
+
+
+def _batch_metrics_for(account_ids: list) -> dict:
+    """Return cached whole-book metrics keyed by uppercase-hyphen ref, refreshing in the
+    background when stale. Non-blocking: returns whatever is cached now (possibly {}) and
+    never waits on Redshift from a request path. Disabled when the metrics source is not
+    live, so fixtures/tests are unaffected."""
+    import time
+    import threading
+    global _BATCH_METRICS_REFRESHING
+    try:
+        if not _src.ACCOUNT_METRICS.live():
+            return {}
+    except Exception:  # noqa: BLE001
+        return {}
+    ttl = _report_cache_ttl()
+    now = time.time()
+    fresh = _BATCH_METRICS["data"] and (now - _BATCH_METRICS["at"]) < ttl
+    if not fresh and not _BATCH_METRICS_REFRESHING:
+        _BATCH_METRICS_REFRESHING = True
+        ids = list(account_ids)
+        def _bg():
+            global _BATCH_METRICS_REFRESHING
+            try:
+                data = _src.ACCOUNT_METRICS.batch_metrics(ids)
+                if isinstance(data, dict) and data:
+                    _BATCH_METRICS["data"] = data
+                    _BATCH_METRICS["at"] = time.time()
+            finally:
+                _BATCH_METRICS_REFRESHING = False
+        threading.Thread(target=_bg, daemon=True).start()
+    return _BATCH_METRICS["data"]
+
+
 def _scope_key() -> str:
     """Cache key component for the current principal's visibility scope."""
     p = get_principal()
@@ -206,14 +247,41 @@ def _scoped_accounts() -> dict:
         owner_id = p.get("owner_id")
         accounts = {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
     plans_by_account = _success_plans_all()
-    if plans_by_account:
+    # Whole-book warehouse metrics (seats + NDR inputs), non-blocking cached batch load.
+    # This makes licence utilisation and portfolio NDR populate across the book, not just
+    # the per-account enriched slice. Keyed by uppercase-hyphen ref.
+    metrics_by_ref = _batch_metrics_for(list(accounts.keys()))
+    if plans_by_account or metrics_by_ref:
+        from adapters import identity as _id
         for aid, a in accounts.items():
-            plans = plans_by_account.get(aid)
+            plans = plans_by_account.get(aid) if plans_by_account else None
+            m = None
+            if metrics_by_ref:
+                m = metrics_by_ref.get(_id.normalise(aid).upper())
+            if not plans and not m:
+                continue
+            # Shallow copy so we never mutate the dataaccess cache in place.
+            a = dict(a)
             if plans:
-                # Shallow copy so we never mutate the dataaccess cache in place.
-                a = dict(a)
                 a["success_plans"] = plans
-                accounts[aid] = a
+            if m:
+                # Only fill gaps: a per-account live metrics block (enriched slice) wins.
+                existing = dict(a.get("metrics") or {})
+                for k, v in m.items():
+                    existing.setdefault(k, v)
+                a["metrics"] = existing
+                # Flow licence utilisation into usage so the account view + expansion rule
+                # see it (mirrors dataaccess.account()). Only when not already present.
+                util = m.get("user_utilization_pct")
+                if util is not None:
+                    usage = dict(a.get("usage") or {})
+                    usage.setdefault("license_utilization_pct", util)
+                    a["usage"] = usage
+                # Mark the metrics source live so _live_block keeps it (not stripped).
+                src = dict(a.get("sources") or {})
+                src.setdefault("metrics", "live")
+                a["sources"] = src
+            accounts[aid] = a
     return accounts
 
 

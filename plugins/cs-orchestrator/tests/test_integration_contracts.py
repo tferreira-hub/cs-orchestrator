@@ -2164,3 +2164,26 @@ def test_inbound_queue_ages_sla_on_read(monkeypatch):
         assert q["sla_breached"] == 1
     finally:
         engine._INBOUND_QUEUE.clear()
+
+
+def test_batch_metrics_attach_to_scoped_accounts(monkeypatch):
+    """Whole-book warehouse metrics attach to accounts: licence utilisation flows into
+    usage, the metrics block carries NDR inputs, and sources.metrics is marked live - so
+    NDR and licence utilisation populate across the book, not just the enriched slice."""
+    import engine, dataaccess, time
+    book = {"au1-5005": {"hubspot": {"name": "SeatCo", "arr_usd": 20000}, "sources": {"hubspot": "live"}}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine._BATCH_METRICS["data"] = {"AU1-5005": {"mrr_usd": 1200.0, "revenue_prev_year_usd": 1000.0,
+                                     "ndr_pct": 120, "active_users": 9, "committed_users": 10,
+                                     "user_utilization_pct": 90, "_source": "redshift-live"}}
+    engine._BATCH_METRICS["at"] = time.time()
+    monkeypatch.setattr(engine._src.ACCOUNT_METRICS, "live", lambda: True)
+    try:
+        scoped = engine._scoped_accounts()
+        a = scoped["au1-5005"]
+        assert a["usage"]["license_utilization_pct"] == 90
+        assert a["metrics"]["committed_users"] == 10 and a["metrics"]["active_users"] == 9
+        assert a["sources"]["metrics"] == "live"
+    finally:
+        engine._BATCH_METRICS["data"] = {}; engine._BATCH_METRICS["at"] = 0.0
