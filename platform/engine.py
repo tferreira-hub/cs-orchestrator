@@ -3413,12 +3413,19 @@ def integrations() -> dict:
     def _missing(*names):
         return [n for n in names if not (_os.environ.get(n) or "").strip()]
 
-    ACCESS_PENDING = {"Jiminny", "Rocket Lane"}
+    # Jiminny and Rocket Lane access IS granted and their keys are live (verified against
+    # both vendor APIs: Rocket Lane returns projects, Jiminny returns call activities on the
+    # EU host). They are reported via live_sources() like every other keyed source, so they
+    # resolve to "connected (live)" when live and "configured, awaiting data" otherwise -
+    # no vendor access is pending. ACCESS_PENDING is kept only for genuinely-pending vendors.
+    ACCESS_PENDING: set = set()
     CONFIG_REQS = {
         "Zendesk": ("ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_TOKEN"),
         "Churn Model": ("REDSHIFT_DATABASE", "REDSHIFT_CHURN_TABLE"),
         "Entitlements": ("ENTITLEMENTS_API_URL", "ENTITLEMENTS_KEY"),
         "ROI AI": ("ROI_AI_WEBHOOK_SECRET",),
+        "Jiminny": ("JIMINNY_KEY",),
+        "Rocket Lane": ("ROCKET_LANE_KEY",),
     }
     def status_for(name):
         if name in liveset:
