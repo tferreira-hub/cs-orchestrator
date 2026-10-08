@@ -1487,7 +1487,18 @@ def portfolio() -> dict:
     book_total = managed_count = pooled_count = 0
     try:
         if _src.HUBSPOT.live():
-            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+            _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+            # Resolve the distinct HubSpot owner IDs on the whole-book roster to CSM NAMES
+            # once (there are only ~15-20 CSMs; _owner_name is cached, so this is a handful
+            # of calls). Without this, roster rows carry only the numeric owner_id and the
+            # Owner filter shows IDs ("715230") instead of names for most of the book.
+            _owner_names: dict = {}
+            try:
+                for _oid in {str(c.get("owner_id")) for c in _roster if c.get("owner_id")}:
+                    _owner_names[_oid] = _src.HUBSPOT._owner_name(_oid)
+            except Exception:  # noqa: BLE001
+                _owner_names = {}
+            for c in _roster:
                 lc = str(c.get("lifecycle_stage") or "").lower()
                 is_churned = "churn" in lc
                 book_total += 1
@@ -1512,7 +1523,7 @@ def portfolio() -> dict:
                     "arr_usd": c.get("arr_usd"),
                     "renewal_date": None,
                     "subscription_type": None,
-                    "csm_owner": None,
+                    "csm_owner": _owner_names.get(str(c.get("owner_id"))) if c.get("owner_id") else None,
                     "csm_owner_id": c.get("owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
                     "churned": is_churned,

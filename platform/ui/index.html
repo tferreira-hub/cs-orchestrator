@@ -1228,12 +1228,19 @@ let DATA=null;
 // it once reflects across the whole platform (dashboard, risk, renewals, etc.).
 const FILTER={cohort:'all',segment:'all',owner:'all',health:'all',lifecycle:'active',search:''};
 let _currentView='dash';
+// Resolve an account's owner to a display label. Prefer the resolved CSM name; never show
+// a bare HubSpot owner ID (a number) as if it were a name - fall back to "Unassigned".
+function _ownerLabel(a){
+  const n=a.csm_owner;
+  if(n && !/^\d+$/.test(String(n).trim())) return n;
+  return 'Unassigned';
+}
 function filteredAccounts(){
   const all=(DATA&&DATA.accounts)||[];
   return all.filter(a=>{
     if(FILTER.cohort!=='all' && (a.cohort||(a.pooled?'pooled':'managed'))!==FILTER.cohort) return false;
     if(FILTER.segment!=='all' && (a.segment||'Unknown')!==FILTER.segment) return false;
-    if(FILTER.owner!=='all' && (a.csm_owner||a.csm_owner_id||'Unassigned')!==FILTER.owner) return false;
+    if(FILTER.owner!=='all' && _ownerLabel(a)!==FILTER.owner) return false;
     if(FILTER.health!=='all'){const b=a.health&&a.health.band; if(b!==FILTER.health) return false;}
     if(FILTER.lifecycle==='active' && a.churned) return false;
     if(FILTER.lifecycle==='churned' && !a.churned) return false;
@@ -1288,7 +1295,7 @@ function _facetValues(key){
   const s=new Set();(DATA&&DATA.accounts||[]).forEach(a=>{
     let v;
     if(key==='segment') v=a.segment||'Unknown';
-    else if(key==='owner') v=a.csm_owner||a.csm_owner_id||'Unassigned';
+    else if(key==='owner') v=_ownerLabel(a);
     if(v) s.add(v);
   });
   return [...s].sort();

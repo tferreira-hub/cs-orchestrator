@@ -90,6 +90,10 @@ def _patch_portfolio(monkeypatch, roster, *, live=True):
         def list_all_companies(self, limit=None, cached_only=False):
             return list(roster)
 
+        def _owner_name(self, oid):
+            # Mirror the live adapter: resolve a HubSpot owner id to a CSM name.
+            return {"owner-1": "Owner One", "owner-2": "Owner Two"}.get(str(oid))
+
     monkeypatch.setattr(engine._src, "HUBSPOT", _FakeHS())
     engine.set_principal(None)  # open mode -> no owner scoping narrows the enriched slice
     return engine
@@ -117,6 +121,11 @@ def test_merge_adds_roster_rows_and_dedupes_enriched(monkeypatch):
     assert by_id["au1-enriched"]["enriched"] is True
     assert by_id["au1-managed"]["enriched"] is False
     assert by_id["au1-pooled"]["enriched"] is False
+    # Roster rows resolve the HubSpot owner id to a CSM NAME (not the numeric id), so the
+    # Owner filter shows names. owner-2 -> "Owner Two"; a null owner stays None.
+    assert by_id["au1-managed"]["csm_owner"] == "Owner Two"
+    assert by_id["au1-managed"]["csm_owner_id"] == "owner-2"
+    assert by_id["au1-pooled"]["csm_owner"] is None
     # Roster rows carry a cohort for the global filter.
     assert by_id["au1-managed"]["cohort"] == "managed"
     assert by_id["au1-pooled"]["cohort"] == "pooled"
