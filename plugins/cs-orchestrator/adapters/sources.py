@@ -2067,6 +2067,7 @@ class HubSpot:
 
         props = ["subject", "content", "hs_pipeline_stage", "source_type", "createdate"]
         search_url = "https://api.hubapi.com/crm/v3/objects/tickets/search"
+        assoc_url = "https://api.hubapi.com/crm/v4/associations/tickets/companies/batch/read"
         items: list[dict] = []
         after = None
         scanned = 0
@@ -2088,17 +2089,19 @@ class HubSpot:
             results = res.get("results", []) if isinstance(res, dict) else []
             if not results:
                 break
+            # Collect the candidates that pass the open/exclude filters, then resolve ALL
+            # of their company associations in ONE v4 batch call (not one GET per ticket -
+            # that was ~100 sequential calls per page and timed out the request).
+            page_candidates = []
             for t in results:
                 scanned += 1
                 p = t.get("properties", {}) or {}
-                # Open-only gate.
                 if str(p.get("hs_pipeline_stage") or "") in closed_stages:
                     continue
                 subject = (p.get("subject") or "").strip()
                 sl = subject.lower()
                 if any(term in sl for term in exclude_terms):
                     continue
-                # Recency timestamp (filter already bounds this; parse for received_at).
                 received_ts = None
                 created_raw = p.get("createdate")
                 if created_raw:
@@ -2109,25 +2112,35 @@ class HubSpot:
                         received_ts = int(dt.timestamp())
                     except ValueError:
                         pass
-                # Resolve the associated company by id (search omits associations).
-                company_id = None
-                try:
-                    det = config.http_get(
-                        "https://api.hubapi.com/crm/v3/objects/tickets/"
-                        f"{t.get('id')}?associations=companies", self._headers())
-                    assoc = (((det.get("associations") or {}).get("companies") or {}).get("results") or [])
-                    if assoc and assoc[0].get("id"):
-                        company_id = str(assoc[0]["id"])
-                except Exception:  # noqa: BLE001 - skip association on error, keep ticket unmapped
-                    company_id = None
-                items.append({
-                    "id": "hs-" + str(t.get("id")),
-                    "channel": "mailbox",
-                    "from": "",  # ticket objects do not carry a sender email; left blank honestly
+                page_candidates.append({
+                    "ticket_id": str(t.get("id")),
                     "subject": subject,
                     "body": (p.get("content") or "").strip(),
-                    "company_id": company_id,
                     "received_at": received_ts,
+                })
+            # One batch association read for this page: ticket_id -> first company id.
+            company_by_ticket: dict[str, str] = {}
+            if page_candidates:
+                try:
+                    ares = config.http_post_readonly(
+                        assoc_url, self._headers(),
+                        {"inputs": [{"id": c["ticket_id"]} for c in page_candidates]})
+                    for r in (ares.get("results", []) if isinstance(ares, dict) else []):
+                        frm = str(((r.get("from") or {}).get("id")) or "")
+                        tos = r.get("to") or []
+                        if frm and tos and tos[0].get("toObjectId"):
+                            company_by_ticket[frm] = str(tos[0]["toObjectId"])
+                except Exception:  # noqa: BLE001 - leave unmapped on error
+                    company_by_ticket = {}
+            for c in page_candidates:
+                items.append({
+                    "id": "hs-" + c["ticket_id"],
+                    "channel": "mailbox",
+                    "from": "",  # ticket objects do not carry a sender email; left blank honestly
+                    "subject": c["subject"],
+                    "body": c["body"],
+                    "company_id": company_by_ticket.get(c["ticket_id"]),
+                    "received_at": c["received_at"],
                 })
             after = (((res.get("paging") or {}).get("next") or {}).get("after"))
             if not after:

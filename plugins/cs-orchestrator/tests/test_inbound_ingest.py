@@ -62,21 +62,24 @@ def test_inbound_tickets_normalises_and_filters(monkeypatch):
     company_by_ticket = {t["id"]: t["_company_id"] for t in search_results}
 
     def _search(url, headers, body, *a, **k):
-        assert url.endswith("/tickets/search")
-        # Newest-first, createdate lower bound present.
-        assert body["sorts"][0]["direction"] == "DESCENDING"
-        assert body["filterGroups"][0]["filters"][0]["propertyName"] == "createdate"
-        return {"results": [{"id": t["id"], "properties": t["properties"]} for t in search_results]}
-
-    def _get(url, headers, *a, **k):
-        tid = url.split("/tickets/")[1].split("?")[0]
-        cid = company_by_ticket.get(tid)
-        results = [{"id": cid}] if cid else []
-        return {"associations": {"companies": {"results": results}}}
+        if url.endswith("/tickets/search"):
+            # Newest-first, createdate lower bound present.
+            assert body["sorts"][0]["direction"] == "DESCENDING"
+            assert body["filterGroups"][0]["filters"][0]["propertyName"] == "createdate"
+            return {"results": [{"id": t["id"], "properties": t["properties"]} for t in search_results]}
+        if url.endswith("/associations/tickets/companies/batch/read"):
+            # One batch call resolves all candidate tickets' companies.
+            out = []
+            for inp in body.get("inputs", []):
+                tid = inp["id"]
+                cid = company_by_ticket.get(tid)
+                out.append({"from": {"id": tid},
+                            "to": ([{"toObjectId": cid}] if cid else [])})
+            return {"results": out}
+        raise AssertionError(f"unexpected POST url {url}")
 
     monkeypatch.setattr(sources.HubSpot, "live", lambda self: True)
     monkeypatch.setattr(sources.config, "http_post_readonly", _search)
-    monkeypatch.setattr(sources.config, "http_get", _get)
 
     items = hs.inbound_tickets(window_days=7)
     ids = {i["id"] for i in items}
