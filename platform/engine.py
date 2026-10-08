@@ -3099,25 +3099,43 @@ def ingest_hubspot_inbound(window_days: int | None = None) -> dict:
                 "note": "HubSpot not live; inbound ingest is a no-op."}
     import inbound as _inbound
     raw = _src.HUBSPOT.inbound_tickets(window_days=window_days)
-    # company_id -> account_id, from the full account roster (admin scope: ingest is a
-    # system task, not a per-CSM view, so it must see every account to resolve ownership).
-    accounts = orchestrate.load_accounts()
+    # Map a ticket's HubSpot company_id -> a CS account_id. Use the WHOLE-BOOK roster
+    # (list_all_companies), not just the deeply-enriched ~50 slice, so tickets for any
+    # pooled/managed customer resolve, not only the handful we fully enrich. The roster is
+    # a cheap cached scan of every customer company.
     company_to_account: dict[str, str] = {}
-    for aid, acct in accounts.items():
-        cid = (acct.get("hubspot", {}) or {}).get("company_id")
-        if cid:
-            company_to_account[str(cid)] = aid
-    items = []
-    skipped = 0
-    for t in raw:
-        aid = company_to_account.get(str(t.get("company_id"))) if t.get("company_id") else None
-        if not aid:
-            # No matching account in the platform roster: skip rather than queue an
-            # orphan ticket a CSM cannot action.
-            skipped += 1
+    company_name_by_id: dict[str, str] = {}
+    try:
+        roster_rows = _src.HUBSPOT.list_all_companies()  # synchronous full scan (cached)
+    except Exception:  # noqa: BLE001
+        roster_rows = []
+    for r in roster_rows:
+        cid = r.get("company_id")
+        if not cid:
             continue
-        it = {k: v for k, v in t.items() if k != "company_id"}
-        it["account_ref"] = aid
+        company_name_by_id[str(cid)] = r.get("name") or ""
+        if r.get("account_id"):
+            company_to_account[str(cid)] = r["account_id"]
+    items = []
+    managed = pooled_unmatched = no_company = 0
+    for t in raw:
+        cid = str(t.get("company_id")) if t.get("company_id") else None
+        it = {k: v for k, v in t.items() if k not in ("company_id", "company_name")}
+        if cid and cid in company_to_account:
+            # A CS-tracked (managed) account: route to its account_id.
+            it["account_ref"] = company_to_account[cid]
+            managed += 1
+        elif cid:
+            # A real HubSpot company with no CS account tag (a pooled/long-tail customer).
+            # Still queue it so the pooled team sees the ticket - keyed by the company so a
+            # CSM can action it - rather than silently dropping real customer inbound.
+            it["account_ref"] = "hs-company-" + cid
+            it["account_name"] = t.get("company_name") or company_name_by_id.get(cid) or ("Company " + cid)
+            pooled_unmatched += 1
+        else:
+            # No associated company at all: cannot attribute it to a customer; skip.
+            no_company += 1
+            continue
         items.append(it)
     roster = pooled_roster().get("roster", [])
     result = _inbound.triage_inbound(items, roster=roster, current_load=_live_pooled_load())
@@ -3126,7 +3144,9 @@ def ingest_hubspot_inbound(window_days: int | None = None) -> dict:
         "live": True,
         "fetched": len(raw),
         "ingested": ingested,
-        "skipped_no_account": skipped,
+        "matched_managed": managed,
+        "matched_pooled": pooled_unmatched,
+        "skipped_no_company": no_company,
         "by_intent": result.get("summary", {}).get("by_intent", {}),
     }
 

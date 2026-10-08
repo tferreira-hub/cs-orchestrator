@@ -2065,7 +2065,8 @@ class HubSpot:
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
         since_ms = int(since.timestamp() * 1000)
 
-        props = ["subject", "content", "hs_pipeline_stage", "source_type", "createdate"]
+        props = ["subject", "content", "hs_pipeline_stage", "source_type", "createdate",
+                 "hs_primary_company"]
         search_url = "https://api.hubapi.com/crm/v3/objects/tickets/search"
         assoc_url = "https://api.hubapi.com/crm/v4/associations/tickets/companies/batch/read"
         items: list[dict] = []
@@ -2117,6 +2118,7 @@ class HubSpot:
                     "subject": subject,
                     "body": (p.get("content") or "").strip(),
                     "received_at": received_ts,
+                    "company_name": (p.get("hs_primary_company") or "").strip() or None,
                 })
             # One batch association read for this page: ticket_id -> first company id.
             company_by_ticket: dict[str, str] = {}
@@ -2140,6 +2142,7 @@ class HubSpot:
                     "subject": c["subject"],
                     "body": c["body"],
                     "company_id": company_by_ticket.get(c["ticket_id"]),
+                    "company_name": c["company_name"],
                     "received_at": c["received_at"],
                 })
             after = (((res.get("paging") or {}).get("next") or {}).get("after"))

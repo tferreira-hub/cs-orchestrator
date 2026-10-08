@@ -106,20 +106,23 @@ def test_ingest_maps_company_to_account_and_persists(monkeypatch):
     import engine
     from adapters import sources
 
-    # Two accounts; one HubSpot company maps, one ticket's company has no account.
-    accounts = {
-        "AU1-1": {"hubspot": {"company_id": "comp-1", "name": "Acme", "csm_owner": "Sam"}},
-        "AU1-2": {"hubspot": {"company_id": "comp-9", "name": "Globex", "csm_owner": "Dana"}},
-    }
-    monkeypatch.setattr(engine.orchestrate, "load_accounts", lambda *a, **k: accounts)
+    # Full-book roster: comp-1 is a CS-tracked (managed) account; comp-9 is a pooled
+    # customer with no CS account_id tag; comp-404 is not in the roster at all.
+    roster_rows = [
+        {"company_id": "comp-1", "account_id": "au1-1", "name": "Acme"},
+        {"company_id": "comp-9", "account_id": None, "name": "Globex Pooled"},
+    ]
     monkeypatch.setattr(sources.HubSpot, "live", lambda self: True)
+    monkeypatch.setattr(engine._src.HUBSPOT, "list_all_companies", lambda *a, **k: roster_rows)
     monkeypatch.setattr(engine._src.HUBSPOT, "inbound_tickets", lambda window_days=None: [
         {"id": "hs-1", "channel": "mailbox", "from": "", "subject": "add seats",
-         "body": "please add 10 licence seats", "company_id": "comp-1", "received_at": 1_000_000},
+         "body": "please add 10 licence seats", "company_id": "comp-1",
+         "company_name": "Acme", "received_at": 1_000_000},
         {"id": "hs-2", "channel": "mailbox", "from": "", "subject": "billing",
-         "body": "invoice is wrong", "company_id": "comp-9", "received_at": 1_000_000},
-        {"id": "hs-3", "channel": "mailbox", "from": "", "subject": "unknown co",
-         "body": "hello", "company_id": "comp-404", "received_at": 1_000_000},  # no account
+         "body": "invoice is wrong", "company_id": "comp-9",
+         "company_name": "Globex Pooled", "received_at": 1_000_000},
+        {"id": "hs-3", "channel": "mailbox", "from": "", "subject": "no company",
+         "body": "hello", "company_id": None, "company_name": None, "received_at": 1_000_000},
     ])
     monkeypatch.setattr(engine, "pooled_roster", lambda: {"roster": [
         {"name": "Sam", "available": True}, {"name": "Dana", "available": True}]})
@@ -128,15 +131,16 @@ def test_ingest_maps_company_to_account_and_persists(monkeypatch):
     summary = engine.ingest_hubspot_inbound()
     assert summary["live"] is True
     assert summary["fetched"] == 3
-    assert summary["ingested"] == 2            # two resolved, one skipped
-    assert summary["skipped_no_account"] == 1
+    assert summary["ingested"] == 2            # managed + pooled resolved; no-company skipped
+    assert summary["matched_managed"] == 1
+    assert summary["matched_pooled"] == 1
+    assert summary["skipped_no_company"] == 1
 
-    # Persisted into the live queue, each carrying its resolved account_ref + an owner.
     q = engine._INBOUND_QUEUE
-    assert set(q.keys()) == {"hs-1", "hs-2"}
-    assert q["hs-1"]["account_ref"] == "AU1-1"
-    assert q["hs-2"]["account_ref"] == "AU1-2"
-    assert all(q[k]["assigned_to"] for k in q)   # least-loaded allocation ran
+    assert q["hs-1"]["account_ref"] == "au1-1"             # managed -> CS account id
+    assert q["hs-2"]["account_ref"] == "hs-company-comp-9" # pooled -> company-keyed
+    assert q["hs-2"]["account_name"] == "Globex Pooled"
+    assert all(q[k]["assigned_to"] for k in q)             # least-loaded allocation ran
     engine._INBOUND_QUEUE.clear()
 
 

@@ -993,9 +993,9 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
     </div>
 
     <div class="navsection collapsed" data-sec="scaled">
-      <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>CS</span><span class="ns-caret">▾</span></button>
+      <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>Pooled CS</span><span class="ns-caret">▾</span></button>
       <div class="nav">
-        <button data-v="scaled" onclick="go('scaled')" title="CS Overview"><span class="ico">◐</span> <span class="label">Overview</span></button>
+        <button data-v="scaled" onclick="go('scaled')" title="Pooled CS Overview"><span class="ico">◐</span> <span class="label">Overview</span></button>
         <button data-v="pooled" data-pctab="inbox" onclick="go('pooled');pooledLeaf('inbox')" title="Inbox"><span class="ico">✉</span> <span class="label">Inbox</span></button>
         <button data-v="pooled" data-pctab="process" onclick="go('pooled');pooledLeaf('process')" title="Process"><span class="ico">⚙</span> <span class="label">Process</span></button>
         <button data-v="pooled" data-pctab="nrr" onclick="go('pooled');pooledLeaf('nrr')" title="NRR"><span class="ico">↻</span> <span class="label">NRR</span></button>
@@ -1081,11 +1081,9 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="cc-tabs" id="scaled-tabs">
           <button class="cc-tab active" data-sc="pool" onclick="scaledTab('pool')"><span class="cc-tico">▦</span>The Pool</button>
           <button class="cc-tab" data-sc="dashboard" onclick="scaledTab('dashboard')"><span class="cc-tico">▚</span>Pooled Dashboard</button>
-          <button class="cc-tab" data-sc="inbox" onclick="scaledTab('inbox')"><span class="cc-tico">✉</span>Inbound Queue</button>
         </div>
         <div class="cc-pane on" id="sc-pane-pool"></div>
         <div class="cc-pane" id="sc-pane-dashboard"></div>
-        <div class="cc-pane" id="sc-pane-inbox"></div>
       </section>
       <section class="view" id="v-mydash">
         <div class="cc-tabs" id="mydash-tabs">
@@ -2556,6 +2554,7 @@ function renderPooledInbox(){
           '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):
           (t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted">-</span>');
         return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.from||'')+' · '+escapeHtml(t.channel||'')+'</div></td>'+
+          '<td>'+escapeHtml(t.account_name||t.account_ref||'-')+'</td>'+
           '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent)+'</span></td>'+
           '<td class="muted">'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
           '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+(t.reassigned_from?('<div class="sub">reassigned from '+escapeHtml(t.reassigned_from)+(t.reassigned_reason?(' · '+escapeHtml(t.reassigned_reason)):'')+'</div>'):'')+'</td>'+
@@ -2563,7 +2562,7 @@ function renderPooledInbox(){
           '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
       }).join('');
       body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+tickets.length+' items</span></div>'+
-        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Company</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
     host.innerHTML=header+body;
     // Populate the round-robin roster chip from live presence (best-effort, non-blocking).
