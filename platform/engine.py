@@ -3971,10 +3971,19 @@ def revenue_motion() -> dict:
           "days_since_visit": (la.get("usage") or {}).get("days_since_last_visit")}
          for la in churned],
         key=lambda r: -r["arr_usd"])
+    # Health band mix. Counts only computable accounts (health_score returns a neutral
+    # green for a no-signal account, so counting those would paint the book false-green).
+    # Over the enriched slice: with only churn status + revenue for the long tail, almost
+    # all roster accounts have no health-meaningful signal beyond "not churned", so the
+    # honest scored set is the enriched slice. The whole-book churned cohort is still
+    # scored per-account (Risk views / account pages) via the batched churn merge.
     bands = {"green": 0, "amber": 0, "red": 0}
     at_risk_arr = 0
     for la in paying:
-        b = health_score(la).get("band")
+        h = health_score(la)
+        if not h.get("computable"):
+            continue
+        b = h.get("band")
         if b in bands:
             bands[b] += 1
         if b in ("red", "amber"):
