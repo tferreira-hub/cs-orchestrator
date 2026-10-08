@@ -2515,3 +2515,36 @@ def test_readiness_leaderboard_groups_by_csm_worst_first(monkeypatch):
     assert alice["top_gap_field"] == "Renewal date"
     assert r["summary"]["total_accounts"] == 3
     assert r["summary"]["fully_complete"] == 1
+
+
+def test_book_readiness_full_returns_all_gap_accounts(monkeypatch):
+    """The CSV export uses full=True to get EVERY gap account, not just the display
+    top-15, so the downloaded worklist is complete."""
+    import types
+    import engine
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "x@x"})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def company_url(self, cid):
+            return "https://hs/" + str(cid)
+
+        def list_all_companies(self, cached_only=False):
+            # 20 accounts, all missing the renewal date (all have a gap).
+            return [{"account_id": "AU1-%d" % i, "company_id": "c%d" % i, "name": "Acc%d" % i,
+                     "owner_id": "999", "lifecycle_stage": "customer", "arr_usd": 1000 * i,
+                     "renewal_date": None, "segment": "Agency", "subscription_type": "annual"}
+                    for i in range(20)]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    try:
+        capped = engine.book_readiness(full=False)
+        full = engine.book_readiness(full=True)
+        assert len(capped["fix_first"]) == 15        # display cap
+        assert len(full["fix_first"]) == 20          # complete worklist
+        assert full["accounts_with_gaps"] == 20
+    finally:
+        engine.set_principal(None)

@@ -3852,7 +3852,7 @@ def ingestion_status() -> dict:
     }
 
 
-def book_readiness() -> dict:
+def book_readiness(full: bool = False) -> dict:
     """Per-CSM 'your book readiness' summary: for the CURRENT principal's owned accounts,
     how complete is the data that drives the platform? Reports the count + ARR of accounts
     missing each required HubSpot field (renewal date, owner, segment, subscription), an
@@ -3929,7 +3929,7 @@ def book_readiness() -> dict:
              "arr_at_risk_usd": round(field_missing[label]["arr_usd"])}
             for _, label in fields
         ],
-        "fix_first": per_account[:15],
+        "fix_first": per_account if full else per_account[:15],
     }
 
 

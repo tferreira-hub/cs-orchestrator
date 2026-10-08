@@ -713,7 +713,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.ingestion_status()); return
             if path == "/api/book-readiness":
                 # Per-CSM 'your book readiness': owner-scoped data-completeness summary.
-                self._json(200, engine.book_readiness()); return
+                # ?full=1 returns every gap account (used by the CSV export).
+                _full = str((query.get("full") or ["0"])[0]).lower() in ("1", "true", "yes")
+                self._json(200, engine.book_readiness(full=_full)); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
             if path == "/api/my-book/progress":

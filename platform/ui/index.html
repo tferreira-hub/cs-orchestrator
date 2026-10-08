@@ -3136,6 +3136,35 @@ async function checkIngestion(){
 }
 function dismissIngest(){ sessionStorage.setItem('cs_ingest_dismissed','1'); const el=document.getElementById('ingestBanner'); if(el)el.style.display='none'; }
 
+// ===== CSV export helpers (reusable) =====
+// Build an RFC-4180-ish CSV from an array of row-arrays and trigger a client-side
+// download. No server round-trip; nothing leaves the browser except the file the user
+// saves. Values are quoted and embedded quotes doubled so commas/newlines are safe.
+function _csvCell(v){
+  const s=(v==null)?'':String(v);
+  return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s;
+}
+function downloadCsv(filename, header, rows){
+  const lines=[header.map(_csvCell).join(',')].concat(rows.map(r=>r.map(_csvCell).join(',')));
+  const blob=new Blob([lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+// Export the FULL readiness worklist (every gap account, not just the shown top 15) as a
+// CSV the team can work directly. Fetches ?full=1 so the file is complete.
+async function exportBookReadinessCsv(){
+  let r; try{ r=await (await api('/api/book-readiness?full=1')).json(); }catch(_){ alert('Could not load the worklist to export.'); return; }
+  const list=(r&&r.fix_first)||[];
+  if(!list.length){ alert('No gaps to export - the book is fully complete.'); return; }
+  const header=['Company','ARR (USD)','Account ID','Missing Fields','HubSpot Link'];
+  const rows=list.map(a=>[a.name||'', (a.arr_usd!=null?a.arr_usd:''), a.account_id||'',
+                          (a.missing||[]).join('; '), a.hubspot_url||'']);
+  const stamp=new Date().toISOString().slice(0,10);
+  downloadCsv('book-readiness-worklist-'+stamp+'.csv', header, rows);
+}
+
 // ===== Book Readiness card (per-CSM data completeness) =====
 // Shows how complete the data is on the CSM's own book - an honest readiness % plus the
 // top accounts to fix first, each linking straight to its HubSpot record. Admins see the
@@ -3162,7 +3191,9 @@ async function renderBookReadiness(){
   ).join('');
   const complete=(r.accounts_with_gaps===0);
   el.innerHTML='<div class="panel" style="margin-top:16px"><div class="head"><h2>Book readiness</h2>'+
-    '<span class="note">How complete is the data on '+scopeLbl+' that drives the platform</span></div>'+
+    '<span class="note">How complete is the data on '+scopeLbl+' that drives the platform</span>'+
+    (complete?'':'<button class="ask-account-btn" style="margin-left:auto" onclick="exportBookReadinessCsv()" title="Download the full cleanup worklist as CSV">⬇ Export worklist CSV</button>')+
+    '</div>'+
     '<div class="body pad">'+
       '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px">'+
         '<div class="mdw-big '+(tone==='g'?'good':'warn')+'" style="font-size:2em">'+pct+'%</div>'+
@@ -4761,6 +4792,7 @@ function _renderGaps(){
     const overall=(sm.overall_readiness_pct!=null)?sm.overall_readiness_pct:0;
     leaderboardHtml='<div class="pad" style="padding:14px 22px 0">'+
       '<b>CSM Data Readiness</b> <span class="muted" style="font-size:.85em">· '+(sm.csm_count||0)+' CSMs · '+overall+'% of accounts fully complete book-wide · lowest readiness first</span>'+
+      ' <a class="origin-mini" href="#" onclick="event.preventDefault();exportBookReadinessCsv()" title="Download the full book-wide cleanup worklist as CSV">⬇ Export worklist CSV</a>'+
       '<table class="acct-list" style="margin-top:10px"><thead><tr><th>CSM</th><th>Accounts</th><th>Readiness</th><th>With gaps</th><th>Biggest gap</th><th>ARR at risk</th></tr></thead><tbody>'+lbRows+'</tbody></table>'+
       '<div class="sub" style="margin-top:8px">Readiness is the share of required HubSpot fields (renewal date, owner, segment, subscription) populated across each CSM\'s active book. ARR at risk is the revenue on accounts still missing at least one field.</div>'+
     '</div>';
