@@ -3933,6 +3933,96 @@ def book_readiness() -> dict:
     }
 
 
+def readiness_leaderboard() -> dict:
+    """Team-wide data-readiness roll-up for leadership: for EVERY CSM, how complete is the
+    required HubSpot data on their book. Admin-only in effect (a CSM would only see their
+    own owner id resolve); groups the whole active book by owner, resolves owner ids to CSM
+    names, and reports per-CSM readiness % + the biggest gap and ARR at risk. Lets
+    leadership target the data-hygiene effort where it moves the needle most. HubSpot-
+    grounded (cheap roster scan); honest - reflects exactly what is set, nothing inferred.
+    """
+    fields = [
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("segment", "Segment (ICP)"),
+        ("subscription_type", "Subscription type"),
+    ]
+    try:
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True) if _src.HUBSPOT.live() else []
+    except Exception:  # noqa: BLE001
+        roster = []
+
+    # Resolve the distinct owner ids to CSM names once (cached, ~15-20 CSMs).
+    owner_names: dict = {}
+    try:
+        for oid in {str(c.get("owner_id")) for c in roster if c.get("owner_id")}:
+            owner_names[oid] = _src.HUBSPOT._owner_name(oid)
+    except Exception:  # noqa: BLE001
+        owner_names = {}
+
+    by_owner: dict = {}
+    for c in roster:
+        if "churn" in str(c.get("lifecycle_stage") or "").lower():
+            continue
+        oid = str(c.get("owner_id") or "")
+        name = owner_names.get(oid) or ("Unassigned" if not oid else oid)
+        rec = by_owner.setdefault(name, {
+            "csm": name, "accounts": 0, "fully_complete": 0, "cells_filled": 0,
+            "cells_total": 0, "field_missing": {label: 0 for _, label in fields},
+            "arr_at_risk_usd": 0.0,
+        })
+        rec["accounts"] += 1
+        arr = c.get("arr_usd") or 0
+        arr = arr if isinstance(arr, (int, float)) else 0
+        missing_here = 0
+        for key, label in fields:
+            rec["cells_total"] += 1
+            if c.get(key) in (None, ""):
+                rec["field_missing"][label] += 1
+                missing_here += 1
+            else:
+                rec["cells_filled"] += 1
+        if missing_here == 0:
+            rec["fully_complete"] += 1
+        else:
+            rec["arr_at_risk_usd"] += arr
+
+    out = []
+    for rec in by_owner.values():
+        pct = round(100 * rec["cells_filled"] / rec["cells_total"]) if rec["cells_total"] else None
+        # Biggest single gap (field with the most missing) to name the top action.
+        top_field, top_missing = None, 0
+        for label, cnt in rec["field_missing"].items():
+            if cnt > top_missing:
+                top_field, top_missing = label, cnt
+        out.append({
+            "csm": rec["csm"],
+            "accounts": rec["accounts"],
+            "fully_complete": rec["fully_complete"],
+            "readiness_pct": pct,
+            "accounts_with_gaps": rec["accounts"] - rec["fully_complete"],
+            "top_gap_field": top_field,
+            "top_gap_missing": top_missing,
+            "arr_at_risk_usd": round(rec["arr_at_risk_usd"]),
+        })
+    # Worst readiness first (most to gain), then by account volume.
+    out.sort(key=lambda r: (r["readiness_pct"] if r["readiness_pct"] is not None else 101,
+                            -r["accounts"]))
+
+    total_accts = sum(r["accounts"] for r in out)
+    total_complete = sum(r["fully_complete"] for r in out)
+    return {
+        "csms": out,
+        "summary": {
+            "csm_count": len([r for r in out if r["csm"] not in ("Unassigned",)]),
+            "total_accounts": total_accts,
+            "fully_complete": total_complete,
+            "overall_readiness_pct": (round(100 * total_complete / total_accts)
+                                      if total_accts else None),
+        },
+    }
+
+
 def datagaps() -> dict:
     """Data Gap Analysis (Requirements §4). For each account, report which source
     systems have it (coverage) and which required CS fields are empty in HubSpot,

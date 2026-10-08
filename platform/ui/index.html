@@ -4649,9 +4649,12 @@ async function loadGaps(){
   catch(e){ document.getElementById('gaps-body').innerHTML='<div class="empty">Could not load data gaps.</div>'; return; }
   _gapsData=g;
   try{ _gapsCoverage=await (await fetch('/api/admin-coverage')).json(); }catch(_){ _gapsCoverage=null; }
+  // Team-wide readiness leaderboard (admin only; 403 for CSMs -> simply omitted).
+  try{ const lr=await fetch('/api/readiness-leaderboard'); _gapsLeaderboard=lr.ok?await lr.json():null; }catch(_){ _gapsLeaderboard=null; }
   _renderGaps();
 }
 let _gapsCoverage=null;
+let _gapsLeaderboard=null;
 // Data Gaps view state: which accounts to show and how to sort. Lets a CSM/RevOps user
 // drive straight to the cleanup that matters instead of scrolling a flat 1.3k-row table.
 let _gapsData=null, _gapsFilter='withgaps', _gapsSort='gaps';
@@ -4740,8 +4743,32 @@ function _renderGaps(){
     '</div>';
   }
 
+  // Team-wide CSM data-readiness leaderboard (admin only; omitted when not available).
+  let leaderboardHtml='';
+  if(_gapsLeaderboard&&_gapsLeaderboard.csms&&_gapsLeaderboard.csms.length){
+    const sm=_gapsLeaderboard.summary||{};
+    const lbRows=_gapsLeaderboard.csms.map(c=>{
+      const pct=(c.readiness_pct!=null)?c.readiness_pct:0;
+      const tone=pct>=90?'g':pct>=60?'a':'r';
+      const topGap=(c.top_gap_field&&c.top_gap_missing)?(escapeHtml(c.top_gap_field)+' ('+c.top_gap_missing+')'):'<span class="muted">-</span>';
+      return '<tr><td><strong>'+escapeHtml(c.csm)+'</strong></td>'+
+        '<td class="mono">'+c.accounts+'</td>'+
+        '<td><span class="pill '+tone+'">'+pct+'%</span></td>'+
+        '<td class="mono">'+c.accounts_with_gaps+'</td>'+
+        '<td>'+topGap+'</td>'+
+        '<td class="mono">'+fmt(c.arr_at_risk_usd)+'</td></tr>';
+    }).join('');
+    const overall=(sm.overall_readiness_pct!=null)?sm.overall_readiness_pct:0;
+    leaderboardHtml='<div class="pad" style="padding:14px 22px 0">'+
+      '<b>CSM Data Readiness</b> <span class="muted" style="font-size:.85em">· '+(sm.csm_count||0)+' CSMs · '+overall+'% of accounts fully complete book-wide · lowest readiness first</span>'+
+      '<table class="acct-list" style="margin-top:10px"><thead><tr><th>CSM</th><th>Accounts</th><th>Readiness</th><th>With gaps</th><th>Biggest gap</th><th>ARR at risk</th></tr></thead><tbody>'+lbRows+'</tbody></table>'+
+      '<div class="sub" style="margin-top:8px">Readiness is the share of required HubSpot fields (renewal date, owner, segment, subscription) populated across each CSM\'s active book. ARR at risk is the revenue on accounts still missing at least one field.</div>'+
+    '</div>';
+  }
+
   document.getElementById('gaps-body').innerHTML=
     matrixHtml+
+    leaderboardHtml+
     '<div class="pad" style="padding:14px 22px">'+
       '<b>Required HubSpot fields missing (across the book):</b>'+
       '<div style="margin-top:10px;max-width:560px">'+fieldBars+'</div>'+

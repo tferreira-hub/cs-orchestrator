@@ -2468,3 +2468,50 @@ def test_book_readiness_is_owner_scoped_and_counts_gaps(monkeypatch):
         assert r["readiness_pct"] == 75
     finally:
         engine.set_principal(None)
+
+
+def test_readiness_leaderboard_groups_by_csm_worst_first(monkeypatch):
+    """Leadership roll-up: groups the whole active book by CSM, resolves owner names,
+    reports per-CSM readiness % + biggest gap + ARR at risk, worst readiness first."""
+    import types
+    import engine
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def _owner_name(self, oid):
+            return {"111": "Alice", "222": "Bob"}.get(str(oid))
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                # Alice: 2 accounts, 1 fully complete, 1 missing renewal (ARR 40k).
+                {"owner_id": "111", "lifecycle_stage": "customer", "arr_usd": 10000,
+                 "renewal_date": "2027-01-01", "segment": "Agency", "subscription_type": "annual"},
+                {"owner_id": "111", "lifecycle_stage": "customer", "arr_usd": 40000,
+                 "renewal_date": None, "segment": "Agency", "subscription_type": "annual"},
+                # Bob: 1 account missing 3 fields (ARR 5k) -> lower readiness.
+                {"owner_id": "222", "lifecycle_stage": "customer", "arr_usd": 5000,
+                 "renewal_date": None, "segment": None, "subscription_type": None},
+                # Churned excluded.
+                {"owner_id": "111", "lifecycle_stage": "churned"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    r = engine.readiness_leaderboard()
+    names = [c["csm"] for c in r["csms"]]
+    assert set(names) == {"Alice", "Bob"}
+    # Bob has the lowest readiness -> listed first.
+    assert r["csms"][0]["csm"] == "Bob"
+    bob = r["csms"][0]
+    # Bob: 1 account x 4 fields = 4 cells; owner set, 3 missing -> 1/4 = 25%.
+    assert bob["readiness_pct"] == 25
+    assert bob["arr_at_risk_usd"] == 5000
+    alice = next(c for c in r["csms"] if c["csm"] == "Alice")
+    # Alice: 2 accounts x 4 = 8 cells; 1 renewal missing -> 7/8 = 88%.
+    assert alice["readiness_pct"] == 88
+    assert alice["fully_complete"] == 1
+    assert alice["arr_at_risk_usd"] == 40000
+    assert alice["top_gap_field"] == "Renewal date"
+    assert r["summary"]["total_accounts"] == 3
+    assert r["summary"]["fully_complete"] == 1

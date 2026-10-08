@@ -721,6 +721,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.get_book_enrichment()); return
             if path == "/api/admin-coverage":
                 self._json(200, engine.admin_coverage_matrix()); return
+            if path == "/api/readiness-leaderboard":
+                # Leadership tool: team-wide per-CSM data readiness. Admin only (it exposes
+                # every CSM's book); a CSM uses /api/book-readiness for their own.
+                if principal and principal.get("role") not in (None, "admin"):
+                    self._json(403, {"error": "admin only"}); return
+                self._json(200, engine.readiness_leaderboard()); return
             if path == "/api/payment-risk":
                 # Live Payment Risk Report (Stripe dunning + HubSpot billing/CSM + derived
                 # JobAdder admin link), owner-scoped. Honest empty when Stripe not connected.
