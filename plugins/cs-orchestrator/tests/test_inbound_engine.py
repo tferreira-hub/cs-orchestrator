@@ -213,3 +213,20 @@ def test_assignment_balances_within_batch_from_zero():
     for t in r["tickets"]:
         load[t["assigned_to"]] = load.get(t["assigned_to"], 0) + 1
     assert load == {"Alice": 2, "Bob": 2}, load
+
+
+# --------------------------------------------------------------------------- #
+# Intent collision: strong fault beats a co-occurring expansion keyword
+# --------------------------------------------------------------------------- #
+def test_strong_fault_overrides_expansion_keyword():
+    """'my licence portal is down' / 'can't log in to add seats' is a broken-product
+    support issue, not an upsell - technical must win over the expansion keyword."""
+    assert inbound.classify_intent("our licence portal is down, cannot access anything") == "technical"
+    assert inbound.classify_intent("can't log in to add seats, the integration is failing") == "technical"
+
+
+def test_expansion_still_wins_without_strong_fault():
+    """A plain expansion ask (even with a soft 'error') stays expansion - the guard is
+    narrow so genuine upsells are not misrouted to support."""
+    assert inbound.classify_intent("we'd like to upgrade and add 10 licence seats") == "expansion"
+    assert inbound.classify_intent("please add seats, I had a small error typing the form") == "expansion"

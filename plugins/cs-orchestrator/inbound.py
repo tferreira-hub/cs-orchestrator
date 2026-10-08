@@ -55,6 +55,15 @@ INTENT_KEYWORDS = {
     ],
 }
 
+# Strong-fault subset: these say the product is actually broken / unavailable (not a
+# minor glitch). When one of these co-occurs with an expansion keyword, support wins over
+# upsell (see classify_intent). Kept narrow on purpose so a casual "error" in an expansion
+# email does not misroute a genuine upsell.
+STRONG_FAULT_KEYWORDS = [
+    "outage", "down", "crash", "broken", "not working", "cannot log in", "can't log in",
+    "500", "integration failing", "unavailable", "offline",
+]
+
 # Where each intent routes, per the spec.
 INTENT_ROUTE = {
     "expansion": {"destination": "expansion_queue", "priority": 2, "csql": True,
@@ -70,7 +79,11 @@ INTENT_ROUTE = {
 
 def classify_intent(text: str) -> str:
     """Classify inbound text into expansion | technical | billing | general.
-    Expansion wins ties (highest commercial value), then technical, then billing."""
+
+    Expansion wins ties (highest commercial value) EXCEPT when a strong technical fault is
+    also present: a message like 'my licence portal is down' is a broken-product support
+    issue, not an upsell, so an outage/failure signal overrides the expansion keyword.
+    After that collision rule the order is expansion > technical > billing > general."""
     t = (text or "").lower()
 
     def _hit(words: list[str]) -> bool:
@@ -83,9 +96,16 @@ def classify_intent(text: str) -> str:
                 return True
         return False
 
-    if _hit(INTENT_KEYWORDS["expansion"]):
+    exp = _hit(INTENT_KEYWORDS["expansion"])
+    tech = _hit(INTENT_KEYWORDS["technical"])
+    # Collision guard: a STRONG fault signal (the product is broken/unavailable) means
+    # 'support now' beats 'upsell', even if an expansion word (licence/upgrade) co-occurs.
+    strong_fault = _hit(STRONG_FAULT_KEYWORDS)
+    if exp and tech and strong_fault:
+        return "technical"
+    if exp:
         return "expansion"
-    if _hit(INTENT_KEYWORDS["technical"]):
+    if tech:
         return "technical"
     if _hit(INTENT_KEYWORDS["billing"]):
         return "billing"

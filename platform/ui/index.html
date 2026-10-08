@@ -1461,6 +1461,27 @@ function scaledTab(tab){
   else if(tab==='inbox') renderInboundQueue();
   window.scrollTo({top:0,behavior:'instant'});
 }
+// Today's Focus banner: a capacity-shaped daily slice over the full queue. Shows how many
+// actions are in focus today (all Protect + top Expand/Use within capacity) and how many
+// are deferred below the fold, so a CSM gets a finite daily list instead of a long tail.
+// Honest: nothing is dropped - deferred items remain in the full table beneath.
+async function renderDailyFocusBanner(){
+  const el=document.getElementById('daily-focus-banner'); if(!el) return;
+  let f; try{ f=await (await api('/api/daily-focus')).json(); }catch(_){ el.innerHTML=''; return; }
+  if(!f||!f.total_tasks){ el.innerHTML=''; return; }
+  const defer=f.deferred_count||0;
+  const dm=f.deferred_by_mandate||{};
+  const deferBits=Object.keys(dm).map(m=>dm[m]+' '+m.replace('MUST_','').toLowerCase()).join(', ');
+  const overload=f.over_capacity
+    ? '<span class="pill r" style="margin-left:8px" title="Protect work alone exceeds daily capacity">⚠ Protect load over capacity</span>'
+    : '';
+  el.innerHTML='<div class="callout" style="margin:0 0 12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+    '<b>Today\'s focus: '+f.focus_count+'</b>'+
+    '<span class="muted" style="font-size:.88em">'+f.protect_count+' must-protect (always in focus) + top value work within your capacity of '+f.capacity+'.</span>'+
+    (defer>0?('<span class="pill pln">+'+defer+' deferred this week'+(deferBits?(' · '+escapeHtml(deferBits)):'')+'</span>'):'<span class="pill g">whole queue fits today</span>')+
+    overload+
+  '</div>';
+}
 // Inbound Queue, Option A channels -> triaged tickets the pooled team works like an inbox.
 function renderInboundQueue(){
   const host=document.getElementById('sc-pane-inbox'); if(!host)return;
@@ -3807,7 +3828,7 @@ function render(v){
     renderScopeBar(s);
     renderCommandCenter();
   }
-  if(v==='queue'){const ft=filteredTasks();document.getElementById('queue-body').innerHTML=taskSummaryStrip(ft,'All open actions across every mandate')+taskTable(ft,true);}
+  if(v==='queue'){const ft=filteredTasks();document.getElementById('queue-body').innerHTML='<div id="daily-focus-banner"></div>'+taskSummaryStrip(ft,'All open actions across every mandate')+taskTable(ft,true); renderDailyFocusBanner();}
   if(v==='protect'){const t=filteredTasks().filter(t=>t.mandate==='MUST_PROTECT');document.getElementById('protect-body').innerHTML=taskSummaryStrip(t,'Defensive risk, payment exceptions and recovery')+taskTable(t,true);}
   if(v==='expand'){
     const tasks=filteredTasks().filter(t=>t.mandate==='MUST_EXPAND');

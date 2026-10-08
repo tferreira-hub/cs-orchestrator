@@ -667,6 +667,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.portfolio()["accounts"]); return
             if path == "/api/tasks":
                 self._json(200, engine.portfolio()["tasks"]); return
+            if path == "/api/daily-focus":
+                # Capacity-shaped 'today' slice: all Protect work + top-N Expand/Use,
+                # with the rest deferred (not dropped). Owner-scoped.
+                self._json(200, engine.daily_focus()); return
             if path == "/api/suppressed":
                 self._json(200, engine.portfolio()["suppressed"]); return
             if path == "/api/revenue-motion":

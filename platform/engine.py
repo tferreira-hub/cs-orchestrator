@@ -1764,6 +1764,48 @@ def _confidence(account: dict, evidence: dict) -> str:
     return "low"
 
 
+def daily_focus() -> dict:
+    """Capacity-shaped 'today' slice of the prioritised queue for the current principal.
+
+    Every firing rule becomes a task, so a CSM with a rough book can face a very long
+    P3-P5 tail. This shapes a focused daily list without ever hiding risk:
+      - ALL MUST_PROTECT work (P1/P2) is always in focus - capping churn/revenue
+        protection would be unsafe, so it is never deferred.
+      - The remaining daily capacity (CS_TASK_CAPACITY_PER_CSM, default 20) is filled with
+        the next tasks in queue order (priority, then ARR), i.e. the highest-value
+        Expand/Use work.
+      - Anything beyond capacity is DEFERRED, not dropped - it stays in the full queue and
+        is reported as a count so the CSM knows the tail exists ('+N more this week').
+
+    Owner-scoped via the same account provider, so a CSM sees only their own focus."""
+    result = orchestrate.orchestrate()
+    tasks = result.get("tasks", [])  # already sorted (priority, -ARR, account)
+    capacity = _capacity_per_csm()
+    protect, rest = [], []
+    for t in tasks:
+        (protect if t.get("mandate") == "MUST_PROTECT" else rest).append(t)
+    # Fill remaining capacity after Protect with the top of the Expand/Use tail.
+    remaining = max(0, capacity - len(protect))
+    focus = protect + rest[:remaining]
+    deferred = rest[remaining:]
+    # Deferred breakdown by mandate so the UI can say what is waiting.
+    deferred_by_mandate: dict = {}
+    for t in deferred:
+        m = t.get("mandate", "OTHER")
+        deferred_by_mandate[m] = deferred_by_mandate.get(m, 0) + 1
+    return {
+        "focus": focus,
+        "focus_count": len(focus),
+        "protect_count": len(protect),
+        "deferred_count": len(deferred),
+        "deferred_by_mandate": deferred_by_mandate,
+        "capacity": capacity,
+        "total_tasks": len(tasks),
+        "over_capacity": len(protect) > capacity,  # Protect alone exceeds capacity: a real overload signal
+        "judge": result.get("judge", {}),
+    }
+
+
 def daily_brief() -> dict:
     """Human-ready daily brief derived only from the deterministic queue."""
     accounts = orchestrate.load_accounts()

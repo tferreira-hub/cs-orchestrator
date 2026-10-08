@@ -761,3 +761,42 @@ def test_daily_queue_orders_by_arr_within_priority_band():
         assert p2[:3] == ["High ARR Co", "Mid ARR Co", "Low ARR Co"], p2
     finally:
         orch.set_account_provider(prev)
+
+
+def test_daily_focus_keeps_all_protect_and_caps_the_tail(monkeypatch):
+    """daily_focus must keep EVERY must-protect task in focus (never cap risk) and fill
+    the rest of a small capacity with the top Expand/Use tail, deferring (not dropping)
+    the remainder."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+    import engine
+    import orchestrate as orch
+
+    def _acct(name, arr, churned=False):
+        return {
+            "hubspot": {"name": name, "segment": "Strategic", "arr_usd": arr,
+                        "renewal_date": "2026-01-01",  # overdue -> P2 protect
+                        "lifecycle_stage": "Churned Customer" if churned else "Customer",
+                        "contacts": []},
+            "zendesk": {}, "usage": {}, "churn": {"churn_status": "churned"} if churned else {},
+            "stripe": {}, "jiminny": {}, "onboarding": {}, "metrics": {},
+            "sources": {"hubspot": "live"},
+        }
+    # 3 protect-generating accounts (overdue renewals) + several contact-hygiene P5 tails.
+    accounts = {f"AU1-{i}": _acct(f"Co{i}", 10000 + i) for i in range(6)}
+    monkeypatch.setenv("CS_TASK_CAPACITY_PER_CSM", "4")
+    prev = orch._ACCOUNT_PROVIDER
+    orch.set_account_provider(lambda: accounts)
+    try:
+        f = engine.daily_focus()
+        # Every protect task is in focus.
+        protect_in_focus = [t for t in f["focus"] if t["mandate"] == "MUST_PROTECT"]
+        assert len(protect_in_focus) == f["protect_count"]
+        # Focus never silently exceeds capacity unless protect alone does.
+        if not f["over_capacity"]:
+            assert f["focus_count"] <= f["capacity"]
+        # Nothing is lost: focus + deferred == total.
+        assert f["focus_count"] + f["deferred_count"] == f["total_tasks"]
+    finally:
+        orch.set_account_provider(prev)
