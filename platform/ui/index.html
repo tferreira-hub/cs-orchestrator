@@ -993,9 +993,12 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
     </div>
 
     <div class="navsection collapsed" data-sec="scaled">
-      <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>Scaled Customer Success</span><span class="ns-caret">▾</span></button>
+      <button class="ns-head" onclick="toggleSection('scaled')"><span class="ns-ico ns-scaled">◐</span><span>CS</span><span class="ns-caret">▾</span></button>
       <div class="nav">
-        <button data-v="scaled" onclick="go('scaled')" title="Scaled Customer Success"><span class="ico">◐</span> <span class="label">Overview</span></button>
+        <button data-v="scaled" onclick="go('scaled')" title="CS Overview"><span class="ico">◐</span> <span class="label">Overview</span></button>
+        <button data-v="pooled" data-pctab="inbox" onclick="go('pooled');pooledLeaf('inbox')" title="Inbox"><span class="ico">✉</span> <span class="label">Inbox</span></button>
+        <button data-v="pooled" data-pctab="process" onclick="go('pooled');pooledLeaf('process')" title="Process"><span class="ico">⚙</span> <span class="label">Process</span></button>
+        <button data-v="pooled" data-pctab="nrr" onclick="go('pooled');pooledLeaf('nrr')" title="NRR"><span class="ico">↻</span> <span class="label">NRR</span></button>
       </div>
     </div>
 
@@ -1017,15 +1020,6 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <button class="ns-head" onclick="toggleSection('objadopt')"><span class="ns-ico ns-obj">◎</span><span>Objectives &amp; Adoption</span><span class="ns-caret">▾</span></button>
       <div class="nav">
         <button data-v="objadopt" onclick="go('objadopt')" title="Objectives &amp; Adoption"><span class="ico">◎</span> <span class="label">Objectives &amp; Adoption</span></button>
-      </div>
-    </div>
-
-    <div class="navsection collapsed" data-sec="pooled">
-      <button class="ns-head" onclick="toggleSection('pooled')"><span class="ns-ico ns-pooled">◐</span><span>Pooled CS</span><span class="ns-caret">▾</span></button>
-      <div class="nav">
-        <button data-v="pooled" data-pctab="inbox" onclick="go('pooled');pooledLeaf('inbox')" title="Inbox"><span class="ico">✉</span> <span class="label">Inbox</span></button>
-        <button data-v="pooled" data-pctab="process" onclick="go('pooled');pooledLeaf('process')" title="Process"><span class="ico">⚙</span> <span class="label">Process</span></button>
-        <button data-v="pooled" data-pctab="nrr" onclick="go('pooled');pooledLeaf('nrr')" title="NRR"><span class="ico">↻</span> <span class="label">NRR</span></button>
       </div>
     </div>
 
@@ -2523,28 +2517,33 @@ function renderPooledInbox(){
   host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading inbox…</span></div></div>';
   (async()=>{
     let r;
-    try{ r=await (await api('/api/inbound/triage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:[]})})).json(); }
+    // Read the PERSISTED pooled queue (HubSpot Service Hub tickets pulled + triaged +
+    // round-robined), not a stateless triage of an empty batch. This is the live inbox.
+    try{ r=await (await api('/api/inbound/queue')).json(); }
     catch(e){ host.innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails'); return; }
-    const s=r.summary||{}, tickets=r.tickets||[];
-    const roster=(s.available_csms||[]);
-    // Honest connect-state: no channels are wired yet, so there are no live items. Show the
-    // engine's readiness (round-robin roster, SLA, routing) rather than fabricating a feed.
-    const header='<div class="panel"><div class="head"><h2>Inbox · Scaled Tech-Touch</h2><span class="note">5-channel triage · round-robin · 24h SLA</span></div>'+
+    const tickets=r.tickets||[];
+    // Derive the counters the header shows from the persisted queue shape.
+    const csqls=tickets.filter(t=>t.csql).length;
+    const zendesk=tickets.filter(t=>t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute').length;
+    const breached=r.sla_breached||0;
+    const roster=(window.POOLED_ROSTER||[]);
+    const header='<div class="panel"><div class="head"><h2>Inbox · Scaled Tech-Touch</h2><span class="note">5-channel triage · round-robin · 24h SLA</span>'+
+      '<button class="btn btn-ghost" style="margin-left:auto;padding:5px 11px" onclick="ingestHubspotInbound(this)">Pull from HubSpot</button></div>'+
       '<div class="body pad">'+
       '<div class="mdw-grid" style="margin-bottom:12px">'+
-        _widgetBig('Open items',tickets.length)+
-        _widgetBig('Expansion (CSQL)',s.csqls||0,(s.csqls||0)>0?'good':'')+
-        _widgetBig('Zendesk handoffs',s.zendesk_handoffs||0)+
-        _widgetBig('SLA breached',s.breached||0,(s.breached||0)>0?'warn':'good')+
+        _widgetBig('Open items',r.open||0)+
+        _widgetBig('Expansion (CSQL)',csqls,csqls>0?'good':'')+
+        _widgetBig('Zendesk handoffs',zendesk)+
+        _widgetBig('SLA breached',breached,breached>0?'warn':'good')+
       '</div>'+
       '<div class="muted" style="font-size:.84em">Round-robin pool: '+(roster.length?roster.map(escapeHtml).join(', '):'<em>no available pooled CSMs configured</em>')+'</div>'+
       '</div></div>';
     let body;
     if(!tickets.length){
       body='<div class="panel"><div class="body pad"><div class="empty"><b>No inbound items yet</b>'+
-        '<div class="sub" style="margin-top:6px">The triage + round-robin engine is live. Once the five inbound channels (Zendesk misroutes, Slack call logs, '+
-        'accountmanagement@ mailbox, campaign replies, high-intent forms) are connected, items will arrive here, be classified by intent '+
-        '(technical → Zendesk, billing → CS queue, expansion → CSQL), and round-robin to the available pooled CSMs under a 24-hour SLA. No sample data is shown.</div></div></div></div>';
+        '<div class="sub" style="margin-top:6px">The triage + round-robin engine is live. Press <strong>Pull from HubSpot</strong> to ingest recent Service Hub tickets, or connect the five inbound channels (Zendesk misroutes, Slack call logs, '+
+        'accountmanagement@ mailbox, campaign replies, high-intent forms). Items are classified by intent '+
+        '(technical → Zendesk, billing → CS queue, expansion → CSQL) and round-robined to available pooled CSMs under a 24-hour SLA. No sample data is shown.</div></div></div></div>';
     } else {
       const rows=tickets.map(t=>{
         const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':'a';
@@ -2554,11 +2553,12 @@ function renderPooledInbox(){
         // Zendesk write token is live).
         const tid=(t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute')?String(t.id||''):'';
         const actions=tid?('<button class="btn" style="padding:4px 9px" onclick="zdReply(\''+escapeHtml(tid)+'\',this)">Reply</button> '+
-          '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):'<span class="muted">-</span>';
+          '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):
+          (t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted">-</span>');
         return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.from||'')+' · '+escapeHtml(t.channel||'')+'</div></td>'+
           '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent)+'</span></td>'+
-          '<td class="muted">'+escapeHtml(t.destination.replace(/_/g,' '))+'</td>'+
-          '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
+          '<td class="muted">'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
+          '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+(t.reassigned_from?('<div class="sub">reassigned from '+escapeHtml(t.reassigned_from)+(t.reassigned_reason?(' · '+escapeHtml(t.reassigned_reason)):'')+'</div>'):'')+'</td>'+
           '<td>'+dueTxt+'</td>'+
           '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
       }).join('');
@@ -2566,7 +2566,28 @@ function renderPooledInbox(){
         '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
     host.innerHTML=header+body;
+    // Populate the round-robin roster chip from live presence (best-effort, non-blocking).
+    try{ const pr=await (await api('/api/csm/availability')).json(); window.POOLED_ROSTER=(pr.roster||[]).filter(c=>c.available!==false).map(c=>c.name); }catch(e){}
   })();
+}
+// Trigger a background HubSpot inbound pull, then poll status and refresh the inbox.
+function ingestHubspotInbound(btn){
+  if(btn){btn.disabled=true;btn.textContent='Pulling…';}
+  api('/api/inbound/ingest-hubspot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({window_days:30})})
+    .then(()=>{
+      let tries=0;
+      const poll=setInterval(()=>{
+        tries++;
+        api('/api/inbound/ingest-status').then(r=>r.json()).then(s=>{
+          if(s.state==='done'||s.state==='error'||tries>20){
+            clearInterval(poll);
+            if(btn){btn.disabled=false;btn.textContent='Pull from HubSpot';}
+            renderPooledInbox();
+          }
+        }).catch(()=>{clearInterval(poll); if(btn){btn.disabled=false;btn.textContent='Pull from HubSpot';}});
+      },3000);
+    })
+    .catch(()=>{ if(btn){btn.disabled=false;btn.textContent='Pull from HubSpot';} });
 }
 async function zdReply(ticketId,btn){
   const reply=prompt('Public reply to send on Zendesk ticket '+ticketId+':');
