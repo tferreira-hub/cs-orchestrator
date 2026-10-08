@@ -122,6 +122,61 @@ def _report_cache_ttl() -> float:
 _BATCH_METRICS: dict = {"at": 0.0, "data": {}}
 _BATCH_METRICS_REFRESHING: bool = False
 
+# Whole-book churn signal (status/score) from marts.int_ds_account_churn_scoring, loaded in
+# ONE batched Redshift query like the metrics batch above. This makes portfolio HEALTH
+# computable across the whole book (any account with a churn status is scorable), not just
+# the ~50 deeply-enriched accounts. Same TTL + non-blocking background refresh.
+_BATCH_CHURN: dict = {"at": 0.0, "data": {}}
+_BATCH_CHURN_REFRESHING: bool = False
+
+
+def _batch_churn_for() -> dict:
+    """Cached whole-book churn signal keyed by uppercase-hyphen ref, refreshed in the
+    background when stale. Non-blocking: returns whatever is cached now (possibly {}) and
+    never waits on Redshift from a request path. {} when the churn source is not live."""
+    import time
+    import threading
+    global _BATCH_CHURN_REFRESHING
+    try:
+        if not _src.CHURN.live():
+            return {}
+    except Exception:  # noqa: BLE001
+        return {}
+    ttl = _report_cache_ttl()
+    now = time.time()
+    fresh = _BATCH_CHURN["data"] and (now - _BATCH_CHURN["at"]) < ttl
+    if not fresh and not _BATCH_CHURN_REFRESHING:
+        _BATCH_CHURN_REFRESHING = True
+        def _bg():
+            global _BATCH_CHURN_REFRESHING
+            try:
+                data = _src.CHURN.batch_scores()
+                if isinstance(data, dict) and data:
+                    _BATCH_CHURN["data"] = data
+                    _BATCH_CHURN["at"] = time.time()
+            finally:
+                _BATCH_CHURN_REFRESHING = False
+        threading.Thread(target=_bg, daemon=True).start()
+    return _BATCH_CHURN["data"]
+
+
+def warm_batch_churn() -> int:
+    """SYNCHRONOUSLY load the whole-book churn signal into the cache on the boot warm thread
+    so portfolio health scores across the book on the FIRST request after deploy. Returns
+    the number of accounts loaded (0 when not live / on error). Never raises."""
+    import time
+    try:
+        if not _src.CHURN.live():
+            return 0
+        data = _src.CHURN.batch_scores()
+        if isinstance(data, dict) and data:
+            _BATCH_CHURN["data"] = data
+            _BATCH_CHURN["at"] = time.time()
+            return len(data)
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
 
 def _batch_metrics_for(account_ids: list) -> dict:
     """Return cached whole-book metrics keyed by uppercase-hyphen ref, refreshing in the
@@ -251,6 +306,11 @@ def warm_reports():
         warm_batch_metrics()
     except Exception:  # noqa: BLE001
         pass
+    # Whole-book churn signal so portfolio health scores across the book on first load.
+    try:
+        warm_batch_churn()
+    except Exception:  # noqa: BLE001
+        pass
     for name, build in [("onboarding_governance", _onboarding_governance_build),
                         ("payment_risk_report", _payment_risk_report_build)]:
         try:
@@ -278,19 +338,32 @@ def _scoped_accounts() -> dict:
     # This makes licence utilisation and portfolio NDR populate across the book, not just
     # the per-account enriched slice. Keyed by uppercase-hyphen ref.
     metrics_by_ref = _batch_metrics_for(list(accounts.keys()))
-    if plans_by_account or metrics_by_ref:
+    churn_by_ref = _batch_churn_for()
+    if plans_by_account or metrics_by_ref or churn_by_ref:
         from adapters import identity as _id
         for aid, a in accounts.items():
             plans = plans_by_account.get(aid) if plans_by_account else None
             m = None
+            ch = None
             if metrics_by_ref:
                 m = metrics_by_ref.get(_id.normalise(aid).upper())
-            if not plans and not m:
+            if churn_by_ref:
+                ch = churn_by_ref.get(_id.normalise(aid).upper())
+            if not plans and not m and not ch:
                 continue
             # Shallow copy so we never mutate the dataaccess cache in place.
             a = dict(a)
             if plans:
                 a["success_plans"] = plans
+            if ch:
+                # Only fill gaps: a per-account live churn read (enriched slice) wins.
+                existing_ch = dict(a.get("churn") or {})
+                for k, v in ch.items():
+                    existing_ch.setdefault(k, v)
+                a["churn"] = existing_ch
+                src = dict(a.get("sources") or {})
+                src.setdefault("churn", "live")
+                a["sources"] = src
             if m:
                 # Only fill gaps: a per-account live metrics block (enriched slice) wins.
                 existing = dict(a.get("metrics") or {})
@@ -336,6 +409,7 @@ def _retention_accounts() -> dict:
         from adapters import identity as _id
         roster = _src.HUBSPOT.list_all_companies(cached_only=True)
         metrics_by_ref = _batch_metrics_for([c.get("account_id") for c in roster if c.get("account_id")])
+        churn_by_ref = _batch_churn_for()
         for c in roster:
             aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
             if aid in accounts:
@@ -343,9 +417,12 @@ def _retention_accounts() -> dict:
             if owner_id and str(c.get("owner_id") or "") != str(owner_id):
                 continue  # not this CSM's account
             lc = str(c.get("lifecycle_stage") or "").lower()
+            ch = churn_by_ref.get(_id.normalise(aid).upper()) if churn_by_ref else None
+            # Churn signal: a HubSpot 'churned' lifecycle, else the warehouse churn status.
+            churn_block = {"churn_status": "churned"} if "churn" in lc else (dict(ch) if ch else {})
             rec = {
                 "account_id": aid,
-                "sources": {"hubspot": "live"},
+                "sources": {"hubspot": "live", **({"churn": "live"} if churn_block else {})},
                 "hubspot": {
                     "name": c.get("name"),
                     "account_id": c.get("account_id"),
@@ -356,7 +433,7 @@ def _retention_accounts() -> dict:
                     "lifecycle_stage": c.get("lifecycle_stage"),
                     "csm_owner": c.get("csm_owner"),
                 },
-                "churn": {"churn_status": "churned"} if "churn" in lc else {},
+                "churn": churn_block,
                 "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
             }
             m = metrics_by_ref.get(_id.normalise(aid).upper()) if metrics_by_ref else None
@@ -627,9 +704,14 @@ def health_score(account: dict) -> dict:
     band = "green" if score >= 75 else "amber" if score >= 50 else "red"
     # Computable only if at least one real (live) health input contributed. When no
     # live signal is present, the score is not meaningful and the UI shows "no data".
+    # NOTE on churn_status: only a CHURNED status is a meaningful health input on its own
+    # (it caps the score). A bare "not churned" tells us the account is alive but NOT that
+    # it is healthy, so it must NOT, by itself, make the score computable - otherwise the
+    # whole book would show false green. A real ML churn score always counts.
+    _cs = str(churn.get("churn_status") or "").lower()
     computable = bool(
         churn.get("ml_churn_score") is not None
-        or churn.get("churn_status")
+        or _cs in ("churned", "churn risk", "at risk")
         or zd.get("csat_30d") is not None
         or (zd.get("sev1_open") is not None)
         or usage.get("days_since_last_visit") is not None

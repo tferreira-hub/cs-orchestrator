@@ -884,8 +884,79 @@ class Churn:
             "_source": "redshift-live",
         }
 
+    def batch_scores(self) -> dict[str, dict]:
+        """Whole-book churn signal in ONE query, keyed by uppercase-hyphen ref (AU1-5005).
 
-# ------------------------------------------------- Account metrics (Redshift) ---
+        Parallels AccountMetrics.batch_metrics: instead of a per-account fan-out, pull the
+        latest churn row for every account so portfolio HEALTH is computable across the
+        whole book (an account with a churn status/score is scorable), not just the
+        deeply-enriched slice. Returns {ref: {churn_status|ml_churn_score, ...}} or {} when
+        not live / on any error (never fabricates). Honours REDSHIFT_CHURN_MODE
+        (status|score), the same as score()."""
+        if not self.live():
+            return {}
+        import time
+        client = self._client()
+        try:
+            table = self._identifier(config.env("REDSHIFT_CHURN_TABLE") or "", qualified=True)
+            id_col = self._identifier(config.env("REDSHIFT_CHURN_ID_COLUMN") or "nk_ja_account")
+        except config.SourceError:
+            return {}
+        mode = (config.env("REDSHIFT_CHURN_MODE") or "score").lower()
+        if mode == "status":
+            status_col = self._identifier(config.env("REDSHIFT_CHURN_STATUS_COLUMN") or "calculated_churn_status")
+            sel = f"{id_col} AS k, {status_col} AS churn_status"
+            order_col = status_col
+        else:
+            score_col = self._identifier(config.env("REDSHIFT_CHURN_SCORE_COLUMN") or "churn_probability")
+            scored_at_col = self._identifier(config.env("REDSHIFT_CHURN_SCORED_AT_COLUMN") or "scored_at")
+            sel = f"{id_col} AS k, {score_col} AS ml_churn_score"
+            order_col = scored_at_col
+        # One row per account (latest), via a window - mirrors batch_metrics. A per-account
+        # correlated subquery timed out at scale; ROW_NUMBER over the whole table is fast.
+        sql = (f"SELECT k, {'churn_status' if mode=='status' else 'ml_churn_score'} FROM ("
+               f"  SELECT {sel}, ROW_NUMBER() OVER (PARTITION BY {id_col} ORDER BY {order_col} DESC) rn"
+               f"  FROM {table}) WHERE rn = 1")
+        out: dict[str, dict] = {}
+        try:
+            resp = client.execute_statement(Sql=sql, **self._target_kwargs())
+            sid = resp["Id"]
+            deadline = time.monotonic() + self.POLL_TIMEOUT_S
+            status = "SUBMITTED"
+            while status not in ("FINISHED", "FAILED", "ABORTED"):
+                if time.monotonic() > deadline:
+                    return {}
+                time.sleep(self.POLL_INTERVAL_S)
+                status = client.describe_statement(Id=sid)["Status"]
+            if status != "FINISHED":
+                return {}
+            token = None
+            while True:
+                kw = {"Id": sid}
+                if token:
+                    kw["NextToken"] = token
+                res = client.get_statement_result(**kw)
+                for row in res.get("Records", []):
+                    ref = self._cell(row[0])
+                    if not ref:
+                        continue
+                    val = self._cell(row[1])
+                    if mode == "status":
+                        out[str(ref).upper()] = {"churn_status": val, "computed": False,
+                                                 "_source": "redshift-live"}
+                    else:
+                        out[str(ref).upper()] = {"ml_churn_score": val, "computed": False,
+                                                 "_source": "redshift-live"}
+                token = res.get("NextToken")
+                if not token:
+                    break
+        except Exception as exc:  # noqa: BLE001 - best-effort; absence is a data gap, not a crash
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[churn-batch] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        return out
+
+
 class AccountMetrics:
     """Real per-account business metrics from the Data Platform warehouse
     (rpt.rpt_account_ndr_monthly): revenue/NDR, user adoption (active vs committed seats),
