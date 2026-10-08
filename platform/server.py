@@ -296,7 +296,10 @@ def _playbook_summary() -> dict:
             "review_decisions": ["request_changes", "approve_for_implementation", "reject", "archive"]}
 
 
-def _record_playbook_proposal(body: dict) -> dict:
+def _record_playbook_proposal(body: dict, principal: dict | None = None) -> dict:
+    # Proposer identity comes from the authenticated session, not free text, so the
+    # segregation-of-duties check at review time cannot be bypassed by typing a name.
+    requested_by_id = (principal or {}).get("email") or (principal or {}).get("name") or "unknown"
     proposal = {
         "proposal_id": hashlib.sha256((datetime.now(timezone.utc).isoformat() + str(body)).encode()).hexdigest()[:12],
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -315,6 +318,7 @@ def _record_playbook_proposal(body: dict) -> dict:
         "title": str(body.get("title") or "")[:160],
         "rationale": str(body.get("rationale") or "")[:1000],
         "requested_by": str(body.get("requested_by") or "CS team")[:100],
+        "requested_by_id": requested_by_id[:120],
         "current_behavior": str(body.get("current_behavior") or "")[:1000],
         "proposed_behavior": str(body.get("proposed_behavior") or "")[:1000],
         "consumer_context": str(body.get("consumer_context") or "")[:1000],
@@ -329,15 +333,21 @@ def _record_playbook_proposal(body: dict) -> dict:
     return proposal
 
 
-def _record_playbook_review(proposal_id: str, body: dict) -> dict:
+def _record_playbook_review(proposal_id: str, body: dict, principal: dict | None = None) -> dict:
     decision = str(body.get("decision") or "").strip().lower()
     allowed = {"request_changes", "approve_for_implementation", "reject", "archive"}
     if decision not in allowed:
         raise ValueError("decision must be request_changes, approve_for_implementation, reject, or archive")
-    reviewer = str(body.get("reviewed_by") or "").strip()
-    review_note = str(body.get("review_note") or "").strip()
+    # GOVERNANCE: the reviewer is the AUTHENTICATED principal, never free text. A Ways-of-
+    # Working change is a signed-config change, so only CS Leadership (admin role) may
+    # review/approve - a CSM cannot approve a playbook change.
+    role = (principal or {}).get("role")
+    if role not in (None, "admin"):
+        raise PermissionError("playbook review is restricted to CS Leadership (admin)")
+    reviewer = ((principal or {}).get("email") or (principal or {}).get("name") or "").strip()
     if not reviewer:
-        raise ValueError("reviewed_by is required")
+        raise PermissionError("an authenticated reviewer is required")
+    review_note = str(body.get("review_note") or "").strip()
     if not review_note:
         raise ValueError("review_note is required")
     checklist = body.get("review_checklist") or {}
@@ -348,6 +358,14 @@ def _record_playbook_review(proposal_id: str, body: dict) -> dict:
     proposal = next((item for item in summary["proposals"] if item.get("proposal_id") == proposal_id), None)
     if not proposal:
         raise ValueError(f"unknown proposal {proposal_id}")
+    # SEGREGATION OF DUTIES: the proposer cannot approve/reject their own change. Compared
+    # on the authenticated proposer id captured at proposal time (not the editable display
+    # name). Requesting changes on your own proposal is allowed (it is not a sign-off).
+    if decision in ("approve_for_implementation", "reject"):
+        proposer_id = str(proposal.get("requested_by_id") or "").strip().lower()
+        if proposer_id and proposer_id == reviewer.strip().lower():
+            raise PermissionError(
+                "segregation of duties: you cannot approve or reject your own playbook proposal")
     status = {
         "request_changes": "changes_requested",
         "approve_for_implementation": "approved_for_implementation",
@@ -967,7 +985,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/playbook/proposals":
                 try:
-                    self._json(201, _record_playbook_proposal(body))
+                    self._json(201, _record_playbook_proposal(body, principal))
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
@@ -1004,7 +1022,16 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/playbook/proposals/") and path.endswith("/review"):
                 proposal_id = path[len("/api/playbook/proposals/"):-len("/review")].strip("/")
                 try:
-                    self._json(200, _record_playbook_review(proposal_id, body))
+                    result = _record_playbook_review(proposal_id, body, principal)
+                    try:
+                        record_audit("playbook_review", principal,
+                                     {"proposal_id": proposal_id, "decision": result.get("decision"),
+                                      "status": result.get("status")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(200, result)
+                except PermissionError as exc:
+                    self._json(403, {"error": "forbidden", "detail": str(exc)})
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return

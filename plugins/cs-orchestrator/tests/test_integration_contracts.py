@@ -1713,8 +1713,8 @@ def test_playbook_approval_requires_quality_gates(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="quality gates"):
         server._record_playbook_review(proposal["proposal_id"], {
             "decision": "approve_for_implementation",
-            "reviewed_by": "CS Leadership", "review_note": "Reviewed",
-        })
+            "review_note": "Reviewed",
+        }, principal={"email": "lead@jobadder.com", "role": "admin"})
 
 
 def test_judge_rejects_suppressed_risk_and_wrong_priority():
@@ -1953,13 +1953,13 @@ def test_playbook_proposal_review_records_approval_audit(monkeypatch, tmp_path):
         "quality_risk": "Could delay low-confidence actions.", "test_cases": "Missing source blocks PASS.",
     })
     reviewed = server._record_playbook_review(proposal["proposal_id"], {
-        "decision": "approve_for_implementation", "reviewed_by": "CS Leadership",
+        "decision": "approve_for_implementation",
         "review_note": "Evidence and rollback reviewed.",
         "review_checklist": {
             "evidence_verified": True, "policy_conflict_checked": True,
             "tests_added": True, "rollback_defined": True,
         },
-    })
+    }, principal={"email": "lead@jobadder.com", "role": "admin", "name": "CS Leadership"})
     assert reviewed["status"] == "approved_for_implementation"
     summary = server._playbook_summary()
     current = summary["proposals"][0]
