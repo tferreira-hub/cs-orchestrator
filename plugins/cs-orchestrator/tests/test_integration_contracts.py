@@ -2366,3 +2366,50 @@ def test_hubspot_company_url_builds_origin_deep_link(monkeypatch):
     assert hs.company_url("12345") is None
 
     sources.HubSpot._portal_id_cache = None  # leave cache clean for other tests
+
+
+def test_ingestion_status_reports_warming_and_ready(monkeypatch):
+    """The freshness banner's data: 'warming' when warehouse metrics are not yet loaded,
+    'ready' once they are fresh, and enrichment coverage (enriched vs whole book)."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    monkeypatch.setattr(dataaccess, "live_sources",
+                        lambda: ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"])
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"AU1-1": {}, "AU1-2": {}})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [{"account_id": "AU%d-%d" % (i, i), "lifecycle_stage": "customer"}
+                    for i in range(10)]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    # Pin the cache TTL so 'fresh' is deterministic regardless of CS_REPORT_CACHE_TTL
+    # leakage from other tests in the suite.
+    monkeypatch.setattr(engine, "_report_cache_ttl", lambda: 600.0)
+
+    # Cold warehouse cache -> warming.
+    engine._BATCH_METRICS["data"] = {}
+    engine._BATCH_METRICS["at"] = 0.0
+    s = engine.ingestion_status()
+    assert s["state"] == "warming"
+    assert s["enrichment"]["enriched_accounts"] == 2
+    assert s["enrichment"]["book_total_accounts"] == 10
+    assert s["enrichment"]["pct"] == 20
+
+    # Fresh warehouse cache -> ready.
+    engine._BATCH_METRICS["data"] = {"AU1-1": {"mrr_usd": 1}}
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        s = engine.ingestion_status()
+        assert s["state"] == "ready"
+        assert s["warehouse_metrics"]["accounts"] == 1
+        assert s["warehouse_metrics"]["fresh"] is True
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0

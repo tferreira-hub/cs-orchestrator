@@ -709,6 +709,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.lifecycle()); return
             if path == "/api/integrations":
                 self._json(200, engine.integrations()); return
+            if path == "/api/ingestion-status":
+                self._json(200, engine.ingestion_status()); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
             if path == "/api/my-book/progress":

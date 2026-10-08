@@ -178,6 +178,15 @@ tr.row-roster:hover td{opacity:1}
 .ingest-banner .ib-ico{font-size:1.1em}
 .ingest-banner b{color:#78350f}
 .ingest-banner .ib-x{margin-left:auto;cursor:pointer;border:0;background:transparent;color:#92400e;font-size:1.1em;line-height:1}
+.ingest-banner.ingest-ok{background:#edfced;border-color:#9bd79b;color:#166534}
+.ingest-banner.ingest-ok b{color:#14532d}
+.ingest-banner.ingest-ok .ib-x{color:#166534}
+.ingest-banner.ingest-info{background:#eef4ff;border-color:#a9c3f0;color:#1e40af}
+.ingest-banner.ingest-info b{color:#1e3a8a}
+.ingest-banner.ingest-info .ib-x{color:#1e40af}
+.origin-mini{font-size:.78em;color:var(--brand);text-decoration:none;margin-left:8px;white-space:nowrap;opacity:.85}
+.origin-mini:hover{opacity:1;text-decoration:underline}
+.origin-link{text-decoration:none}
 .content{padding:26px 32px 70px}
 .view{display:none;animation:fade .25s ease}.view.on{display:block}
 .tbl{width:100%;border-collapse:collapse;font-size:.86em}
@@ -3089,14 +3098,37 @@ function setCount(id,n,red){const e=document.getElementById(id);if(!e)return;e.t
 async function checkIngestion(){
   const el=document.getElementById('ingestBanner'); if(!el) return;
   if(sessionStorage.getItem('cs_ingest_dismissed')==='1'){ el.style.display='none'; return; }
-  let d; try{ d=await (await api('/api/integrations')).json(); }catch(_){ return; }
-  const CORE=new Set(['HubSpot','Stripe','Zendesk','Churn Model']);
-  const degraded=(d.connectors||[]).filter(c=>CORE.has(c.system) && c.state!=='live');
-  if(!degraded.length){ el.style.display='none'; return; }
-  const names=degraded.map(c=>escapeHtml(c.system)).join(', ');
+  let s; try{ s=await (await api('/api/ingestion-status')).json(); }catch(_){ return; }
+  const enr=s.enrichment||{}, wh=s.warehouse_metrics||{};
+  const cov=(enr.pct!=null)?(enr.enriched_accounts+' of '+enr.book_total_accounts+' accounts deeply enriched ('+enr.pct+'%)'):null;
+  if(s.state==='ready'){
+    // Everything core is live and the warehouse metrics are fresh: a quiet, positive note
+    // that auto-dismisses, so the team knows data is ready to use.
+    el.className='ingest-banner ingest-ok';
+    el.innerHTML='<span class="ib-ico">✓</span><div><b>Live data connected.</b> '+
+      (wh.accounts?('Warehouse metrics loaded for '+wh.accounts.toLocaleString()+' accounts (NDR, licence utilisation). '):'')+
+      (cov?('Deep enrichment fills in as you browse - '+cov+' so far.'):'')+'</div>'+
+      '<button class="ib-x" title="Dismiss" onclick="dismissIngest()">✕</button>';
+    el.style.display='';
+    setTimeout(()=>{ if(el&&el.classList.contains('ingest-ok')) el.style.display='none'; }, 8000);
+    return;
+  }
+  if(s.state==='warming'){
+    // Core sources are live but warehouse metrics are still loading: informational, not an
+    // error. Explains why NDR / licence utilisation may briefly show "loading".
+    el.className='ingest-banner ingest-info';
+    el.innerHTML='<span class="warming-spin" style="width:16px;height:16px;border-width:2px"></span>'+
+      '<div><b>Loading warehouse metrics…</b> NDR and licence utilisation are warming from the data platform '+
+      'and will appear shortly. Everything else is live.'+(cov?(' '+cov+'.'):'')+'</div>'+
+      '<button class="ib-x" title="Dismiss" onclick="dismissIngest()">✕</button>';
+    el.style.display='';
+    return;
+  }
+  // Degraded: a core source is not live.
+  const names=(s.degraded||[]).map(escapeHtml).join(', ')||'A core source';
   el.className='ingest-banner';
   el.innerHTML='<span class="ib-ico">⚠</span><div><b>Data ingestion degraded.</b> '+
-    names+' '+(degraded.length===1?'is':'are')+' not live - portfolio KPIs (GRR, NDR, health, churn) '+
+    names+' '+((s.degraded||[]).length===1?'is':'are')+' not live - portfolio KPIs (GRR, NDR, health, churn) '+
     'may be incomplete or stale. See Management · Integrations for details.</div>'+
     '<button class="ib-x" title="Dismiss" onclick="dismissIngest()">✕</button>';
   el.style.display='';
@@ -4639,7 +4671,7 @@ function _renderGaps(){
 
   const gapBadge=n=>n===0?'<span class="pill g">0</span>':'<span class="pill '+(n>=4?'r':'a')+'">'+n+'</span>';
   const table='<table><thead><tr><th>Account</th><th>Gaps</th><th>Coverage</th><th>Missing systems</th><th>Missing HubSpot fields</th><th>Missing roles</th></tr></thead><tbody>'+
-    (rows.length?rows.map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name)+'</strong></td>'+
+    (rows.length?rows.map(a=>'<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td><strong>'+escapeHtml(a.name)+'</strong>'+(a.hubspot_url?(' <a class="origin-mini" href="'+escapeHtml(a.hubspot_url)+'" target="_blank" rel="noopener" title="Open in HubSpot to fix" onclick="event.stopPropagation()">⬡ fix in HubSpot ↗</a>'):'')+'</td>'+
       '<td>'+gapBadge(a.gap_count)+'</td>'+
       '<td>'+covDots(a.coverage_status||a.coverage)+'</td>'+
       '<td>'+(a.missing_systems.length?a.missing_systems.map(escapeHtml).join(', '):'<span class="pill g">all present</span>')+'</td>'+

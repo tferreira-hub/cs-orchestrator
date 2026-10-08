@@ -3790,6 +3790,68 @@ def integrations() -> dict:
     }
 
 
+def ingestion_status() -> dict:
+    """Data-ingestion health for the whole platform: which sources are live, how fresh the
+    warehouse metrics are, and how much of the book has been deeply enriched vs is still
+    the lightweight roster. Powers the dashboard freshness banner so the team can see at a
+    glance what's ready to use now vs still filling in (answers 'when is it fully
+    ingested'). Live/warehouse-grounded only; never fabricated."""
+    import time
+    try:
+        live = set(dataaccess.live_sources())
+    except Exception:  # noqa: BLE001
+        live = set()
+    core = ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"]
+    sources = [{"system": s, "live": s in live} for s in core]
+
+    # Warehouse metrics freshness + coverage (NDR / licence utilisation).
+    bm = _BATCH_METRICS.get("data") or {}
+    bm_at = _BATCH_METRICS.get("at") or 0
+    metrics_age_s = (time.time() - bm_at) if bm_at else None
+    metrics_fresh = bool(bm) and metrics_age_s is not None and metrics_age_s < _report_cache_ttl()
+
+    # Enrichment coverage: deeply-enriched slice vs the whole active book.
+    try:
+        enriched = len(dataaccess.all_accounts())
+    except Exception:  # noqa: BLE001
+        enriched = 0
+    book_total = 0
+    try:
+        if _src.HUBSPOT.live():
+            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+                if "churn" not in str(c.get("lifecycle_stage") or "").lower():
+                    book_total += 1
+    except Exception:  # noqa: BLE001
+        book_total = 0
+
+    core_live = all(s["live"] for s in sources if s["system"] in ("HubSpot",))
+    degraded = [s["system"] for s in sources if not s["live"]]
+    # Overall state: ready (core live + metrics fresh), warming (metrics loading), or
+    # degraded (a core source is down).
+    if not core_live:
+        state = "degraded"
+    elif not metrics_fresh:
+        state = "warming"
+    else:
+        state = "ready"
+
+    return {
+        "state": state,
+        "sources": sources,
+        "degraded": degraded,
+        "warehouse_metrics": {
+            "accounts": len(bm),
+            "fresh": metrics_fresh,
+            "age_seconds": int(metrics_age_s) if metrics_age_s is not None else None,
+        },
+        "enrichment": {
+            "enriched_accounts": enriched,
+            "book_total_accounts": book_total,
+            "pct": (round(100 * enriched / book_total) if book_total else None),
+        },
+    }
+
+
 def datagaps() -> dict:
     """Data Gap Analysis (Requirements §4). For each account, report which source
     systems have it (coverage) and which required CS fields are empty in HubSpot,
@@ -3851,6 +3913,7 @@ def datagaps() -> dict:
         rows.append({
             "account_id": aid,
             "name": hs.get("name") or aid,
+            "hubspot_url": hs.get("hubspot_url"),
             "coverage": coverage,
             "coverage_status": coverage_status,
             "missing_systems": missing_systems,
@@ -3874,6 +3937,11 @@ def datagaps() -> dict:
         ("subscription_type", "Subscription type"),
     ]
     book_total = 0
+    def _hs_company_url(cid):
+        try:
+            return _src.HUBSPOT.company_url(cid) if cid else None
+        except Exception:  # noqa: BLE001
+            return None
     try:
         if _src.HUBSPOT.live():
             _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
@@ -3893,6 +3961,7 @@ def datagaps() -> dict:
                 rows.append({
                     "account_id": aid,
                     "name": c.get("name") or aid,
+                    "hubspot_url": _hs_company_url(c.get("company_id")),
                     "coverage": {"hubspot": True, "zendesk": False, "stripe": False, "usage": False},
                     # not_checked: connector live but no per-account lookup done for this row.
                     "coverage_status": {"hubspot": "live", "zendesk": "not_checked",
