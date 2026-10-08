@@ -4513,7 +4513,7 @@ async function askAgent(){
 }
 function covDots(cov){
   const sys=[['hubspot','HubSpot'],['zendesk','Zendesk'],['stripe','Stripe'],['usage','Pendo']];
-  return '<span class="cov">'+sys.map(s=>{const state=typeof cov[s[0]]==='string'?cov[s[0]]:(cov[s[0]]?'live':'not_connected');const cls=state==='live'?'on':state==='no_record'?'partial':'off';const label=state==='live'?'Live':state==='no_record'?'No record':'Not connected';return '<span class="covdot '+cls+'" title="'+s[1]+': '+label+'">'+s[1]+' · '+label+'</span>';}).join('')+'</span>';
+  return '<span class="cov">'+sys.map(s=>{const state=typeof cov[s[0]]==='string'?cov[s[0]]:(cov[s[0]]?'live':'not_connected');const cls=state==='live'?'on':state==='no_record'?'partial':state==='not_checked'?'off':'off';const label=state==='live'?'Live':state==='no_record'?'No record':state==='not_checked'?'Not checked':'Not connected';return '<span class="covdot '+cls+'" title="'+s[1]+': '+label+'">'+s[1]+' · '+label+'</span>';}).join('')+'</span>';
 }
 function renderAgentRail(summary){
   const rail=document.querySelector('.agent-rail');
@@ -4547,14 +4547,18 @@ function _renderGaps(){
   const s=g.summary, cp=s.coverage_pct;
   const all=g.accounts||[];
   const withGaps=all.filter(a=>a.gap_count>0);
-  // Headline stats: coverage per source + the cleanup backlog (accounts carrying any gap).
+  const enrichedN=s.enriched_accounts||all.filter(a=>a.enriched!==false).length;
+  // Headline stats: whole-book cleanup backlog + per-source coverage. The vendor coverage
+  // (Zendesk/Stripe/Pendo) is only measured on the deeply-enriched slice - we have not
+  // pulled per-account records for the rest - so it is labelled as such and never implies
+  // the whole book was checked.
   document.getElementById('gaps-stats').innerHTML=[
-    ['Accounts with gaps',withGaps.length,'of '+all.length+' need cleanup',withGaps.length>0?'warn':'good'],
-    ['HubSpot coverage',cp.hubspot+'%','of accounts',''],
-    ['Zendesk coverage',cp.zendesk+'%',s.not_in_zendesk+' not in Zendesk',s.not_in_zendesk>0?'warn':''],
-    ['Stripe coverage',cp.stripe+'%',s.not_in_stripe+' not in Stripe',s.not_in_stripe>0?'warn':''],
-    ['Pendo coverage',cp.usage+'%',s.not_in_pendo+' not in Pendo',s.not_in_pendo>0?'warn':''],
-    ['Missing contact roles',s.accounts_missing_roles,'accounts need tagging',s.accounts_missing_roles>0?'warn':'']
+    ['Accounts with gaps',withGaps.length,'of '+all.length+' active customers need cleanup',withGaps.length>0?'warn':'good'],
+    ['HubSpot coverage',cp.hubspot+'%','enriched slice ('+enrichedN+')',''],
+    ['Zendesk coverage',cp.zendesk+'%',s.not_in_zendesk+' not in Zendesk · enriched slice',s.not_in_zendesk>0?'warn':''],
+    ['Stripe coverage',cp.stripe+'%',s.not_in_stripe+' not in Stripe · enriched slice',s.not_in_stripe>0?'warn':''],
+    ['Pendo coverage',cp.usage+'%',s.not_in_pendo+' not in Pendo · enriched slice',s.not_in_pendo>0?'warn':''],
+    ['Missing contact roles',s.accounts_missing_roles,'accounts need tagging · enriched slice',s.accounts_missing_roles>0?'warn':'']
   ].map(a=>'<div class="stat"><div class="l">'+a[0]+'</div><div class="v '+a[3]+'">'+a[1]+'</div><div class="d">'+a[2]+'</div></div>').join('');
 
   // HubSpot field gaps as ranked bars (how many accounts miss each required field),

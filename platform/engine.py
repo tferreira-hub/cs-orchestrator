@@ -285,6 +285,63 @@ def _scoped_accounts() -> dict:
     return accounts
 
 
+def _retention_accounts() -> dict:
+    """The account set for portfolio RETENTION metrics (NDR/GRR), scoped to the current
+    principal, spanning the WHOLE book - not just the enriched slice.
+
+    Portfolio NDR is a book-level figure the warehouse (rpt_account_ndr_monthly) carries
+    for ~4,500 accounts, including most of each CSM's book. But _scoped_accounts() only
+    contains the ~50 deeply-enriched accounts, so a CSM whose book sits outside that slice
+    saw "no data" even though the warehouse has their numbers. This helper assembles the
+    cheap whole-book roster (one cached HubSpot scan), keeps it owner-scoped, and attaches
+    the batched warehouse metrics (current + prior-year revenue) so _retention_metrics can
+    compute real NDR/GRR over the CSM's actual book. HubSpot/warehouse-grounded only - no
+    per-account vendor fan-out, nothing fabricated. Used ONLY by the retention computation,
+    so the rules engine and task generation are untouched (no spurious roster-only tasks).
+    """
+    # Start from the enriched slice (already owner-scoped + batch-metric'd).
+    accounts = dict(_scoped_accounts())
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    try:
+        if not _src.HUBSPOT.live():
+            return accounts
+        from adapters import identity as _id
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+        metrics_by_ref = _batch_metrics_for([c.get("account_id") for c in roster if c.get("account_id")])
+        for c in roster:
+            aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
+            if aid in accounts:
+                continue  # enriched version already present (keeps its richer signals)
+            if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+                continue  # not this CSM's account
+            lc = str(c.get("lifecycle_stage") or "").lower()
+            rec = {
+                "account_id": aid,
+                "sources": {"hubspot": "live"},
+                "hubspot": {
+                    "name": c.get("name"),
+                    "account_id": c.get("account_id"),
+                    "arr_usd": c.get("arr_usd"),
+                    "segment": c.get("segment"),
+                    "segment_label": c.get("segment_label") or c.get("segment"),
+                    "renewal_date": c.get("renewal_date"),
+                    "lifecycle_stage": c.get("lifecycle_stage"),
+                    "csm_owner": c.get("csm_owner"),
+                },
+                "churn": {"churn_status": "churned"} if "churn" in lc else {},
+                "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
+            }
+            m = metrics_by_ref.get(_id.normalise(aid).upper()) if metrics_by_ref else None
+            if m:
+                rec["metrics"] = dict(m)
+                rec["sources"]["metrics"] = "live"
+            accounts[aid] = rec
+    except Exception:  # noqa: BLE001 - retention augmentation is best-effort
+        pass
+    return accounts
+
+
 _SUCCESS_PLANS_FILE = os.environ.get(
     "CS_SUCCESS_PLANS_FILE",
     str(Path(__file__).resolve().parents[1] / ".cs-success-plans.jsonl"))
@@ -3039,7 +3096,7 @@ def kpis() -> dict:
     return {
         "by_csm": sorted(by_csm.values(), key=lambda r: -r["open_tasks"]),
         "mandate_load": mandate_counts,
-        "retention": _retention_metrics(accounts, tasks_by_account),
+        "retention": _retention_metrics(_retention_accounts(), tasks_by_account),
         "task_metrics": {key: (sorted(value) if key == "overdue_task_ids" else value)
                  for key, value in task_metrics.items() if key != "status_by_id"},
         "totals": {
@@ -3269,6 +3326,11 @@ def revenue_motion() -> dict:
     tasks_by_account: dict = {}
     for t in orchestrate.orchestrate().get("tasks", []):
         tasks_by_account.setdefault(t.get("account_id"), []).append(t)
+    # Retention (NDR/GRR) is a whole-book figure: compute it over the owner-scoped whole
+    # book + warehouse metrics, not just the enriched slice, so a CSM sees real NDR for
+    # their actual book (the warehouse carries it) instead of "no data".
+    retention_accounts = _retention_accounts()
+    _retention = _retention_metrics(retention_accounts, tasks_by_account)
 
     def _is_churned(la):
         stage = str(la.get("hubspot", {}).get("lifecycle_stage") or "").lower()
@@ -3336,7 +3398,7 @@ def revenue_motion() -> dict:
         "churned_arr_usd": sum(_arr(la) for la in churned),
         "at_risk_arr_usd": at_risk_arr,
         "health_mix": bands,
-        "retention": _retention_metrics(accounts, tasks_by_account),
+        "retention": _retention,
         "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
         "by_state": sorted([s for s in by_state.values() if s["arr_usd"] > 0], key=lambda r: -r["arr_usd"]),
         "churned_detail": churned_detail,
@@ -3346,8 +3408,8 @@ def revenue_motion() -> dict:
         # upsell/downgrade requires ARR-change history (prior-period ARR or HubSpot deal /
         # Stripe subscription-change events), which is not connected. We never invent these.
         "revenue_change": {
-            "expansion_pipeline_accounts": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_accounts", 0),
-            "expansion_pipeline_arr_usd": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_arr_usd", 0),
+            "expansion_pipeline_accounts": (_retention or {}).get("expansion_pipeline_accounts", 0),
+            "expansion_pipeline_arr_usd": (_retention or {}).get("expansion_pipeline_arr_usd", 0),
             "upsell_computable": bool(booked.get("upsell")),
             "upsell_count": (booked.get("upsell") or {}).get("count"),
             "upsell_arr_usd": (booked.get("upsell") or {}).get("arr_usd"),
@@ -3601,7 +3663,13 @@ def datagaps() -> dict:
     totals = {"zendesk": 0, "stripe": 0, "usage": 0, "hubspot": 0}
     field_missing = {label: 0 for _, label in HS_FIELDS}
     roles_missing_accounts = 0
+
+    # --- Enriched slice: full per-account source coverage + role tagging. -------------
+    # These accounts have been through deep enrichment so we genuinely know whether each
+    # vendor returned a record and which contact roles are tagged.
+    enriched_ids = set()
     for aid, a in accounts.items():
+        enriched_ids.add(aid)
         src = a.get("sources", {})
         hs = a.get("hubspot", {}) if _is_live(src, "hubspot") else {}
         coverage = {
@@ -3643,19 +3711,73 @@ def datagaps() -> dict:
             "missing_fields": missing_fields,
             "missing_roles": missing_roles,
             "gap_count": len(missing_systems) + len(missing_fields) + (1 if missing_roles else 0),
+            "enriched": True,
         })
+
+    # --- Whole-book roster rows: HubSpot required-field gaps for EVERY active customer. -
+    # The five required HubSpot fields come straight from the cheap whole-book roster scan,
+    # so we report them honestly for all 4,300+ active customers (not just the enriched 50).
+    # Source-system coverage and contact roles are marked "not_checked" for these rows -
+    # the connectors are live but we have NOT pulled a per-account record, which is distinct
+    # from "no record". We never claim a vendor has/lacks an account we did not check.
+    book_roster_field_map = [
+        ("segment", "Segment (ICP)"),
+        ("arr_usd", "ARR"),
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("subscription_type", "Subscription type"),
+    ]
+    book_total = 0
+    try:
+        if _src.HUBSPOT.live():
+            _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+            for c in _roster:
+                lc = str(c.get("lifecycle_stage") or "").lower()
+                if "churn" in lc:
+                    continue  # active book only, consistent with the coverage matrix
+                aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
+                if aid in enriched_ids:
+                    continue  # already represented with full coverage above
+                book_total += 1
+                roster_missing = []
+                for key, label in book_roster_field_map:
+                    if c.get(key) in (None, ""):
+                        roster_missing.append(label)
+                        field_missing[label] += 1
+                rows.append({
+                    "account_id": aid,
+                    "name": c.get("name") or aid,
+                    "coverage": {"hubspot": True, "zendesk": False, "stripe": False, "usage": False},
+                    # not_checked: connector live but no per-account lookup done for this row.
+                    "coverage_status": {"hubspot": "live", "zendesk": "not_checked",
+                                        "stripe": "not_checked", "usage": "not_checked"},
+                    "missing_systems": [],      # unknown, not fabricated
+                    "missing_fields": roster_missing,
+                    "missing_roles": [],        # unknown until enriched
+                    "gap_count": len(roster_missing),
+                    "enriched": False,
+                })
+    except Exception:  # noqa: BLE001
+        book_total = book_total
+
     rows.sort(key=lambda r: -r["gap_count"])  # worst-coverage first
     n = len(rows) or 1
+    book_total_all = len(enriched_ids) + book_total
+
     return {
         "accounts": rows,
         "summary": {
             "total_accounts": len(rows),
-            "coverage_pct": {k: round(100 * v / n) for k, v in totals.items()},
-            "not_in_zendesk": len(rows) - totals["zendesk"],
-            "not_in_stripe": len(rows) - totals["stripe"],
-            "not_in_pendo": len(rows) - totals["usage"],
-            "hubspot_field_gaps": field_missing,
+            # coverage_pct is over the enriched slice only (the only accounts for which we
+            # genuinely checked each vendor); the UI labels it accordingly.
+            "coverage_pct": {k: round(100 * v / (len(enriched_ids) or 1)) for k, v in totals.items()},
+            "not_in_zendesk": len(enriched_ids) - totals["zendesk"],
+            "not_in_stripe": len(enriched_ids) - totals["stripe"],
+            "not_in_pendo": len(enriched_ids) - totals["usage"],
+            "hubspot_field_gaps": field_missing,     # now whole-book
             "accounts_missing_roles": roles_missing_accounts,
+            "enriched_accounts": len(enriched_ids),
+            "book_total_accounts": book_total_all,
         },
     }
 

@@ -484,6 +484,67 @@ def test_ndr_computed_from_warehouse_monthly_arr():
     # (120k + 60k) / (100k + 100k) = 90%
     assert r["ndr_pct"] == 90.0 and r["ndr_computable"] is True and r["ndr_accounts"] == 2
 
+def test_retention_accounts_span_whole_book_for_csm_scope(monkeypatch):
+    """Portfolio NDR must compute for a CSM whose book sits OUTSIDE the enriched slice.
+    _retention_accounts() pulls the owner-scoped whole-book roster and attaches the
+    batched warehouse metrics (prior-year revenue), so NDR is real - not 'no data' -
+    for every CSM's actual book. The rules-engine account set is untouched."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "faizaa@x"})
+    # Enriched slice holds only another owner's account; scoped to this CSM it is empty.
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {
+        "AU1-1": {"sources": {"hubspot": "live"},
+                  "hubspot": {"name": "Other", "arr_usd": 1000,
+                              "hubspot_owner_id": "111", "csm_owner": "Someone"},
+                  "churn": {}, "usage": {}, "zendesk": {}, "stripe": {},
+                  "jiminny": {}, "onboarding": {}},
+    })
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                {"account_id": "AU2-2", "company_id": "c2", "name": "Beta",
+                 "arr_usd": 50000, "owner_id": "999", "csm_owner": "Faizaa",
+                 "lifecycle_stage": "customer", "renewal_date": "2027-01-01"},
+                {"account_id": "AU3-3", "company_id": "c3", "name": "Gamma",
+                 "arr_usd": 30000, "owner_id": "999", "csm_owner": "Faizaa",
+                 "lifecycle_stage": "customer", "renewal_date": None},
+                {"account_id": "AU9-9", "company_id": "c9", "name": "NotHers",
+                 "arr_usd": 9999, "owner_id": "111", "lifecycle_stage": "customer"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(
+        HUBSPOT=_FakeHS(),
+        ACCOUNT_METRICS=types.SimpleNamespace(live=lambda: True),
+    ))
+    engine._BATCH_METRICS["data"] = {
+        "AU2-2": {"mrr_usd": 60000, "revenue_prev_year_usd": 50000, "_source": "redshift-live"},
+        "AU3-3": {"mrr_usd": 27000, "revenue_prev_year_usd": 30000, "_source": "redshift-live"},
+    }
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        ra = engine._retention_accounts()
+        # Owner-scoped: only this CSM's accounts, never another owner's.
+        assert set(ra.keys()) == {"AU2-2", "AU3-3"}
+        r = engine._retention_metrics(ra, {})
+        assert r["ndr_computable"] is True
+        assert r["ndr_accounts"] == 2
+        # (60000 + 27000) / (50000 + 30000) = 108.75 -> 108.8
+        assert r["ndr_pct"] == 108.8
+        assert r["base_arr_usd"] == 80000
+    finally:
+        engine.set_principal(None)
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
+
 
 def test_retention_not_computable_without_live_arr():
     """No live ARR -> retention is explicitly not computable (no fabricated 0%)."""
@@ -2187,3 +2248,66 @@ def test_batch_metrics_attach_to_scoped_accounts(monkeypatch):
         assert a["sources"]["metrics"] == "live"
     finally:
         engine._BATCH_METRICS["data"] = {}; engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_datagaps_spans_whole_book_with_honest_source_status(monkeypatch):
+    """Data Gaps reports HubSpot required-field gaps across the WHOLE active book (not
+    just the deeply-enriched slice), while source-system coverage for un-enriched roster
+    rows is marked 'not_checked' - never fabricated as a record presence/absence."""
+    import types
+    import engine
+    import orchestrate
+
+    monkeypatch.setattr(orchestrate, "load_accounts", lambda: {
+        "AU1": {"sources": {"hubspot": "live", "zendesk": "live",
+                            "stripe": "live_no_record", "usage": "live"},
+                "hubspot": {"name": "Alpha", "segment_label": "Agency", "arr_usd": 1000,
+                            "renewal_date": "2027-01-01", "csm_owner": "Faizaa",
+                            "subscription_type": "annual",
+                            "contacts": [{"role": "Finance Contact"}]}},
+    })
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                {"account_id": "AU1", "name": "Alpha", "lifecycle_stage": "customer"},
+                {"account_id": "AU2", "name": "Beta", "lifecycle_stage": "customer",
+                 "segment": "Corporate", "arr_usd": 500, "renewal_date": None,
+                 "owner_id": "123", "subscription_type": None},
+                {"account_id": "AU3", "name": "Gamma", "lifecycle_stage": "customer",
+                 "segment": None, "arr_usd": None, "renewal_date": None,
+                 "owner_id": None, "subscription_type": None},
+                {"account_id": "AU9", "name": "OldCo", "lifecycle_stage": "churned"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    g = engine.datagaps()
+    s = g["summary"]
+
+    # Whole book: enriched AU1 + roster AU2/AU3; churned OldCo excluded.
+    assert s["total_accounts"] == 3
+    assert s["book_total_accounts"] == 3
+    assert s["enriched_accounts"] == 1
+
+    # Field gaps tally the enriched account AND the roster rows together.
+    fg = s["hubspot_field_gaps"]
+    assert fg["Renewal date"] == 2        # AU2 + AU3
+    assert fg["Subscription type"] == 2   # AU2 + AU3
+    assert fg["Segment (ICP)"] == 1       # AU3
+    assert fg["ARR"] == 1                 # AU3
+    assert fg["CSM owner"] == 1           # AU3
+
+    # Vendor coverage stays scoped to the enriched slice (AU1 only).
+    assert s["coverage_pct"]["stripe"] == 0   # AU1 was live_no_record
+
+    # Roster-only rows never fabricate vendor presence: honest 'not_checked'.
+    beta = next(r for r in g["accounts"] if r["account_id"] == "AU2")
+    assert beta["enriched"] is False
+    assert beta["coverage_status"]["zendesk"] == "not_checked"
+    assert beta["coverage_status"]["stripe"] == "not_checked"
+    assert beta["coverage_status"]["usage"] == "not_checked"
+    assert beta["missing_systems"] == []  # unknown, not claimed
+    assert set(beta["missing_fields"]) == {"Renewal date", "Subscription type"}
