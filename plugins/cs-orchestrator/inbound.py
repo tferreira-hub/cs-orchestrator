@@ -192,7 +192,10 @@ def triage_inbound(items: list[dict], roster: list[dict] | None = None,
     for it in primaries:
         intent = classify_intent((it.get("subject", "") + " " + it.get("body", "")).strip())
         route = INTENT_ROUTE[intent]
-        received = int(it.get("received_at", now))
+        # received_at may be absent or explicitly None (a channel adapter that could not
+        # parse a timestamp): both mean "arrived now" so SLA ageing still works.
+        _rcv = it.get("received_at")
+        received = int(_rcv) if isinstance(_rcv, (int, float)) else now
         sla_due = received + SLA_HOURS * 3600
         age_h = max(0, (now - received) / 3600.0)
         # Assign an owner only for items that remain in the CS pooled/expansion queue,
@@ -249,3 +252,212 @@ def triage_inbound(items: list[dict], roster: list[dict] | None = None,
         "needs_reassign": sum(1 for t in tickets if t["needs_reassign"]),
     }
     return {"tickets": tickets, "merged": merged, "summary": summary}
+
+
+# ---------------------------------------------------------------------------
+# Channel adapters (Tech Touch V3, UC1 "5-channel ingestion").
+#
+# Each adapter normalises ONE external system's native payload into the inbound-item
+# shape that triage_inbound() consumes:
+#   {id, channel, from, subject, body, account_ref, account_name, received_at}
+#
+# They are pure and side-effect-free (no I/O, no account resolution) so they are fully
+# unit-testable; the server routes call them, resolve account_ref against the live book,
+# then run triage + persist. An adapter returns a LIST of items (usually one) and silently
+# drops a payload it cannot parse into text (honest: no fabricated subject/body).
+#
+# `received_at` is coerced to epoch seconds; a missing/garbage timestamp becomes None and
+# triage_inbound defaults it to "now", so SLA ageing still works.
+# ---------------------------------------------------------------------------
+
+def _epoch(value: Any) -> int | None:
+    """Coerce an ISO-8601 string, epoch seconds, or epoch millis into epoch SECONDS.
+    Returns None when it cannot be parsed (triage then treats the item as arriving now)."""
+    if value in (None, ""):
+        return None
+    # Numeric epoch (seconds or millis).
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return int(v / 1000) if v > 1e11 else int(v)  # > ~2001 in millis => it's millis
+    s = str(value).strip()
+    if s.isdigit():
+        v = float(s)
+        return int(v / 1000) if v > 1e11 else int(v)
+    # ISO-8601 (tolerate a trailing Z).
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def _clean(*vals: Any) -> str:
+    """First non-empty stripped string among vals, else ''."""
+    for v in vals:
+        if v not in (None, ""):
+            s = str(v).strip()
+            if s:
+                return s
+    return ""
+
+
+def from_zendesk_misroute(payload: dict) -> list[dict]:
+    """Channel 1: a Zendesk ticket a support agent macro-tagged as account management
+    (Ticket_Type = Account_Management). Zendesk webhook posts the ticket object (or a
+    {"ticket": {...}} envelope). We take its subject/description and requester email.
+    The ticket's custom tag is the trigger upstream; here we only normalise it."""
+    t = payload.get("ticket") if isinstance(payload.get("ticket"), dict) else payload
+    if not isinstance(t, dict):
+        return []
+    requester = t.get("requester") if isinstance(t.get("requester"), dict) else {}
+    frm = _clean(t.get("requester_email"), requester.get("email"), t.get("from"), t.get("email"))
+    subject = _clean(t.get("subject"), t.get("title"))
+    body = _clean(t.get("description"), t.get("body"), t.get("comment"), t.get("latest_comment"))
+    if not (subject or body):
+        return []
+    tid = _clean(t.get("id"), t.get("ticket_id"), t.get("external_id")) or ("zd-" + str(abs(hash(subject + frm)) % 10**10))
+    return [{
+        "id": "zd-" + tid,
+        "channel": "zendesk_misroute",
+        "from": frm,
+        "subject": subject,
+        "body": body,
+        "account_ref": t.get("account_ref") or t.get("organization_id") or None,
+        "account_name": _clean(t.get("organization_name"), t.get("account_name")) or None,
+        "received_at": _epoch(t.get("created_at") or t.get("updated_at") or payload.get("received_at")),
+    }]
+
+
+def from_slack_call(payload: dict) -> list[dict]:
+    """Channel 2: an inbound phone call logged by non-CSM staff via a Slack workflow form.
+    The form enforces caller email, request type, and a brief. Slack posts the form field
+    values (shapes vary); we accept common keys plus a generic {"fields": {...}} map."""
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else payload
+    if not isinstance(fields, dict):
+        return []
+    frm = _clean(fields.get("email"), fields.get("caller_email"), fields.get("customer_email"), fields.get("from"))
+    req_type = _clean(fields.get("request_type"), fields.get("type"), fields.get("category"))
+    brief = _clean(fields.get("brief"), fields.get("details"), fields.get("summary"),
+                   fields.get("message"), fields.get("body"))
+    company = _clean(fields.get("company"), fields.get("account_name"), fields.get("organisation"))
+    if not (brief or req_type):
+        return []
+    subject = _clean(fields.get("subject")) or ("Inbound call" + (": " + req_type if req_type else ""))
+    # Keep the request type in the scanned text so the intent classifier can use it.
+    body = (req_type + ". " + brief).strip(". ").strip() if req_type else brief
+    cid = _clean(fields.get("id"), payload.get("event_id")) or ("call-" + str(abs(hash(frm + brief)) % 10**10))
+    return [{
+        "id": "slack-" + cid,
+        "channel": "slack_call",
+        "from": frm,
+        "subject": subject,
+        "body": body,
+        "account_ref": fields.get("account_ref") or None,
+        "account_name": company or None,
+        "received_at": _epoch(fields.get("logged_at") or payload.get("received_at")),
+    }]
+
+
+def from_mailbox(payload: dict) -> list[dict]:
+    """Channel 3: a direct email to the generic account-management mailbox. An email
+    connector posts {from, subject, body/text/html, message_id, date}."""
+    m = payload.get("message") if isinstance(payload.get("message"), dict) else payload
+    if not isinstance(m, dict):
+        return []
+    frm = _clean(m.get("from"), m.get("sender"), m.get("from_email"))
+    subject = _clean(m.get("subject"))
+    body = _clean(m.get("text"), m.get("body"), m.get("plain"), m.get("snippet"), m.get("html"))
+    if not (subject or body):
+        return []
+    mid = _clean(m.get("message_id"), m.get("id")) or ("mail-" + str(abs(hash(subject + frm)) % 10**10))
+    return [{
+        "id": "mail-" + mid,
+        "channel": "mailbox",
+        "from": frm,
+        "subject": subject,
+        "body": body,
+        "account_ref": m.get("account_ref") or None,
+        "account_name": _clean(m.get("account_name")) or None,
+        "received_at": _epoch(m.get("date") or m.get("received_at")),
+    }]
+
+
+def from_campaign_reply(payload: dict) -> list[dict]:
+    """Channel 4: a reply to an automated renewal / monthly-report email. Same email shape
+    as the mailbox, but we tag the channel so these thread as campaign replies (and an
+    expansion-intent reply becomes a CSQL). A thread/account ref is usually carried."""
+    m = payload.get("message") if isinstance(payload.get("message"), dict) else payload
+    if not isinstance(m, dict):
+        return []
+    frm = _clean(m.get("from"), m.get("sender"), m.get("from_email"))
+    subject = _clean(m.get("subject"))
+    body = _clean(m.get("text"), m.get("body"), m.get("plain"), m.get("snippet"), m.get("html"))
+    if not (subject or body):
+        return []
+    mid = _clean(m.get("message_id"), m.get("id")) or ("camp-" + str(abs(hash(subject + frm)) % 10**10))
+    return [{
+        "id": "camp-" + mid,
+        "channel": "campaign_reply",
+        "from": frm,
+        "subject": subject,
+        "body": body,
+        # Campaign replies usually carry the account/thread they replied to.
+        "account_ref": m.get("account_ref") or m.get("account_id") or m.get("thread_account_ref") or None,
+        "account_name": _clean(m.get("account_name")) or None,
+        "received_at": _epoch(m.get("date") or m.get("received_at")),
+    }]
+
+
+def from_high_intent_form(payload: dict) -> list[dict]:
+    """Channel 5: a website high-intent form (add licences / upgrade). These bypass the
+    general queue and should classify as expansion; we prepend an explicit expansion
+    phrase to the scanned text so the classifier routes it as a CSQL even if the free-text
+    is terse. HubSpot/Marketo form posts {email, company, fields...}."""
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else payload
+    if not isinstance(fields, dict):
+        return []
+    frm = _clean(fields.get("email"), fields.get("work_email"), fields.get("from"))
+    company = _clean(fields.get("company"), fields.get("company_name"), fields.get("account_name"))
+    want = _clean(fields.get("request"), fields.get("message"), fields.get("comments"),
+                  fields.get("details"), fields.get("interest"))
+    form_name = _clean(fields.get("form_name"), fields.get("form")) or "Licence/upgrade request"
+    # Explicit expansion lexicon so classify_intent() routes this to the expansion/CSQL
+    # lane; the form itself IS the high-intent signal.
+    subject = form_name
+    body = ("licence upgrade add seats expansion request. " + want).strip()
+    fid = _clean(fields.get("id"), fields.get("submission_id")) or ("form-" + str(abs(hash(frm + want)) % 10**10))
+    return [{
+        "id": "form-" + fid,
+        "channel": "high_intent_form",
+        "from": frm,
+        "subject": subject,
+        "body": body,
+        "account_ref": fields.get("account_ref") or None,
+        "account_name": company or None,
+        "received_at": _epoch(fields.get("submitted_at") or payload.get("received_at")),
+    }]
+
+
+# Dispatch table so a single generic route can normalise any channel by name.
+CHANNEL_ADAPTERS = {
+    "zendesk_misroute": from_zendesk_misroute,
+    "slack_call": from_slack_call,
+    "mailbox": from_mailbox,
+    "campaign_reply": from_campaign_reply,
+    "high_intent_form": from_high_intent_form,
+}
+
+
+def normalise_channel(channel: str, payload: dict) -> list[dict]:
+    """Normalise a native payload for a named channel into inbound items. Returns [] for an
+    unknown channel or an unparseable payload (honest no-op, never fabricates)."""
+    fn = CHANNEL_ADAPTERS.get(str(channel or "").strip())
+    if not fn or not isinstance(payload, dict):
+        return []
+    try:
+        return fn(payload)
+    except Exception:  # noqa: BLE001 - a malformed payload must not raise into the request
+        return []

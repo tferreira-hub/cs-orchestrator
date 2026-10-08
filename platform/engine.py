@@ -3297,6 +3297,65 @@ def warm_inbound_ingest() -> int:
         return 0
 
 
+def _resolve_company_ref(items: list[dict]) -> None:
+    """In place: for inbound items whose account_ref is a HubSpot company id (or missing but
+    carrying a company id), map it to a CS account_id via the cached whole-book roster, with
+    the pooled-company fallback (hs-company-<id>) so untagged long-tail customers still queue.
+    Items that already carry a CS account_ref are left as-is. Best-effort; never raises."""
+    try:
+        if not _src.HUBSPOT.live():
+            return
+        roster_rows = _src.HUBSPOT.list_all_companies(cached_only=True)
+    except Exception:  # noqa: BLE001
+        return
+    company_to_account: dict[str, str] = {}
+    name_by_id: dict[str, str] = {}
+    for r in roster_rows or []:
+        cid = r.get("company_id")
+        if not cid:
+            continue
+        name_by_id[str(cid)] = r.get("name") or ""
+        if r.get("account_id"):
+            company_to_account[str(cid)] = r["account_id"]
+    for it in items:
+        ref = it.get("account_ref")
+        # A ref that already looks like a CS account id (AUx-/EUx-) is kept.
+        if ref and not str(ref).isdigit():
+            continue
+        cid = str(ref) if ref else None
+        if cid and cid in company_to_account:
+            it["account_ref"] = company_to_account[cid]
+        elif cid:
+            it["account_ref"] = "hs-company-" + cid
+            if not it.get("account_name"):
+                it["account_name"] = name_by_id.get(cid) or ("Company " + cid)
+
+
+def ingest_channel_items(channel: str, payloads: list[dict]) -> dict:
+    """Normalise native payloads for ONE inbound channel (zendesk_misroute, slack_call,
+    mailbox, campaign_reply, high_intent_form), resolve account refs against the live book,
+    run the SAME triage + least-loaded round-robin as the HubSpot path, and persist into the
+    pooled queue. Honest: an unknown channel or unparseable payload yields zero ingested
+    (never fabricated). Returns a summary {channel, received, normalised, ingested, by_intent}."""
+    import inbound as _inbound
+    valid = set(_inbound.CHANNEL_ADAPTERS)
+    if channel not in valid:
+        return {"channel": channel, "received": len(payloads or []), "normalised": 0,
+                "ingested": 0, "error": f"unknown channel; expected one of {sorted(valid)}"}
+    items: list[dict] = []
+    for p in (payloads or []):
+        items.extend(_inbound.normalise_channel(channel, p))
+    if not items:
+        return {"channel": channel, "received": len(payloads or []), "normalised": 0,
+                "ingested": 0, "note": "no parseable items in payload"}
+    _resolve_company_ref(items)
+    roster = pooled_roster().get("roster", [])
+    result = _inbound.triage_inbound(items, roster=roster, current_load=_live_pooled_load())
+    ingested = record_inbound(result.get("tickets", []))
+    return {"channel": channel, "received": len(payloads or []), "normalised": len(items),
+            "ingested": ingested, "by_intent": result.get("summary", {}).get("by_intent", {})}
+
+
 # Background inbound-ingest status so the manual trigger can be fire-and-forget: the pull
 # (full-book load + HubSpot ticket fetch + association resolution) can take longer than the
 # edge/ALB request timeout, so a synchronous request would 504. The route starts a daemon

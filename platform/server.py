@@ -915,6 +915,34 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 self._json(200, result)
                 return
+            if path.startswith("/api/inbound/channel/"):
+                # Per-channel ingress (Tech Touch V3 UC1, 5-channel ingestion). The external
+                # system (Zendesk webhook, Slack workflow, mailbox connector, campaign reply,
+                # website form) posts its NATIVE payload to /api/inbound/channel/<channel>;
+                # the engine normalises it to the inbound-item shape, resolves the account,
+                # triages + round-robins, and persists into the pooled queue. Accepts a single
+                # payload or a list in 'payloads'/'items'. Honest no-op on an unknown channel
+                # or unparseable body (zero ingested, never fabricated).
+                channel = path[len("/api/inbound/channel/"):].strip("/")
+                VALID = {"zendesk_misroute", "slack_call", "mailbox",
+                         "campaign_reply", "high_intent_form"}
+                if channel not in VALID:
+                    self._json(404, {"error": "unknown channel",
+                                     "detail": f"expected one of {sorted(VALID)}"})
+                    return
+                payloads = (body.get("payloads") if isinstance(body.get("payloads"), list)
+                            else body.get("items") if isinstance(body.get("items"), list)
+                            else [body])
+                try:
+                    record_audit("inbound_channel", principal,
+                                 {"channel": channel, "count": len(payloads)})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.ingest_channel_items(channel, payloads))
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": str(exc)})
+                return
             if path == "/api/inbound/ingest-hubspot":
                 # Option A PULL trigger: read recent HubSpot Service Hub tickets via the
                 # existing token, resolve to accounts, triage + round-robin, and persist
