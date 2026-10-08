@@ -2602,8 +2602,12 @@ function renderPooledInbox(){
       }).map(x=>x.t);
       // Keep a live reference for the segment-filter + show-all handlers.
       window._INBOX_TICKETS=ordered;
-      const counts={all:ordered.length,sla:0,technical:0,billing:0,expansion:0,general:0};
-      ordered.forEach(t=>{ if(t.sla_breached)counts.sla++; counts[segOf(t)]++; });
+      // Owner-scope the counts so the segment badges match the owner-filtered rows below.
+      const _ownerSel=(window.FILTER&&FILTER.owner)||'all';
+      const _ownerOf=(t)=>{ const o=(t.assigned_to||'').trim(); return o || 'Unassigned'; };
+      const _scoped=_ownerSel==='all'?ordered:ordered.filter(t=>_ownerOf(t)===_ownerSel);
+      const counts={all:_scoped.length,sla:0,technical:0,billing:0,expansion:0,general:0};
+      _scoped.forEach(t=>{ if(t.sla_breached)counts.sla++; counts[segOf(t)]++; });
       const segBtn=(key,label)=>'<button class="ibx-seg'+(key==='all'?' on':'')+'" data-seg="'+key+'" onclick="inboxFilter(\''+key+'\',this)">'+label+' <span class="ibx-segn">'+counts[key]+'</span></button>';
       const filterbar='<div class="ibx-segs">'+
         segBtn('all','All')+
@@ -2613,7 +2617,7 @@ function renderPooledInbox(){
         segBtn('expansion','Expansion')+
         segBtn('general','General')+
       '</div>';
-      body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+ordered.length+' items</span></div>'+
+      body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+counts.all+' items'+(_ownerSel!=='all'?' · owner: '+escapeHtml(_ownerSel):'')+'</span></div>'+
         '<div class="body"><div style="padding:12px 16px 0">'+filterbar+'</div>'+
         '<table class="acct-list ibx-table"><thead><tr><th>Company</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead>'+
         '<tbody id="ibx-rows"></tbody></table>'+
@@ -2638,7 +2642,14 @@ function inboxRenderRows(seg,showAll){
   const all=window._INBOX_TICKETS||[];
   const segOf=window._inboxSegOf||(()=> 'general');
   const CAP=50;
-  const list=all.filter(t=> seg==='all' ? true : (seg==='sla' ? !!t.sla_breached : segOf(t)===seg));
+  // Honor the global Owner filter: inbox tickets are round-robined to a pooled CSM
+  // (assigned_to), so an Owner selection narrows the queue to that CSM's routed items.
+  // "Unassigned" matches tickets with no assignee. This is the single row-building path,
+  // so the segment buttons and Show-all both inherit the owner scope.
+  const ownerSel=(window.FILTER&&FILTER.owner)||'all';
+  const ownerOf=(t)=>{ const o=(t.assigned_to||'').trim(); return o || 'Unassigned'; };
+  const ownerScoped=ownerSel==='all'?all:all.filter(t=>ownerOf(t)===ownerSel);
+  const list=ownerScoped.filter(t=> seg==='all' ? true : (seg==='sla' ? !!t.sla_breached : segOf(t)===seg));
   const shown=showAll?list:list.slice(0,CAP);
   const rows=shown.map(t=>{
     const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':t.intent==='billing'?'a':'nc2';
