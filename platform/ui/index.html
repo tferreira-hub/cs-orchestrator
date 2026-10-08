@@ -1249,6 +1249,19 @@ function _ownerLabel(a){
   if(n && !/^\d+$/.test(String(n).trim())) return n;
   return 'Unassigned';
 }
+// Owner cell for the pooled tables. Shows the real HubSpot owner when the account has one
+// (a numeric id is not a name - treat as none); otherwise the account is genuinely pooled
+// (no individual owner), so show the assigned pooled team by name when HubSpot carries one
+// (cs_pooled_team), else a plain "Pooled team" pill. Never shows a bare owner id, and
+// never implies an individual owner where there is none.
+function _ownerCell(a){
+  const n=a&&a.csm_owner;
+  if(n && !/^\d+$/.test(String(n).trim())) return '<span>'+escapeHtml(n)+'</span>';
+  const team=a&&a.pooled_team;
+  if(team && !/^\d+$/.test(String(team).trim()))
+    return '<span class="pill pln" title="Pooled team">'+escapeHtml(team)+'</span>';
+  return '<span class="pill pln">Pooled team</span>';
+}
 function filteredAccounts(){
   const all=(DATA&&DATA.accounts)||[];
   return all.filter(a=>{
@@ -1552,7 +1565,7 @@ function renderThePool(){
       '<td class="col-play"><span class="rowplay">▷</span></td>'+
       '<td>'+circle+'</td>'+
       '<td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td>'+
-      '<td class="muted">'+(hc&&a.csm_owner?escapeHtml(a.csm_owner):'<span class="pill pln">The Pool</span>')+'</td>'+
+      '<td class="muted">'+(hc?_ownerCell(a):'<span class="pill pln">Pooled team</span>')+'</td>'+
       '<td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'<span class="muted">no data</span>')+'</td>'+
       '<td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'<span class="muted">no data</span>')+'</td>'+
       '<td>'+csmDots(a)+'</td>'+
@@ -2838,7 +2851,7 @@ function renderPooledLowUsage(){
     _bigStat('Avg days idle', avgIdle, 'across the cohort'),
   ]);
   const body=rows.map(a=>{const r=_pooledRow(a);const d=a.usage_days_since_visit;const tone=d>=90?'r':d>=56?'a':'pln';
-    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'<span class="pill pln">The Pool</span>')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill '+tone+'">'+d+'d idle</span></td></tr>';}).join('');
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+_ownerCell(a)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td><span class="pill '+tone+'">'+d+'d idle</span></td></tr>';}).join('');
   _pooledHost().innerHTML=strip+'<div class="panel"><div class="head"><h2>Low Usage</h2><span class="note">Pooled accounts with no product visit in 28+ days (live Pendo) · most idle first</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Usage recency</th></tr></thead><tbody>'+(rows.length?body:'<tr><td colspan="5" class="empty" style="padding:24px">No pooled companies are low-usage right now.</td></tr>')+'</tbody></table></div></div>';
 }
 function renderPooledLowUsageSeq(){

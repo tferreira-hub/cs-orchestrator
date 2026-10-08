@@ -1650,6 +1650,7 @@ def portfolio() -> dict:
             "customer_tier": _tier,          # authoritative HubSpot tier when present (e.g. "Pooled")
             "pooled": _pooled,               # True when pooled (tier-authoritative, else segment fallback)
             "pooled_source": ("tier" if hsobj.get("pooled") is not None else "segment"),
+            "pooled_team": hsobj.get("pooled_team"),
             "arr_usd": hsobj.get("arr_usd"),
             "renewal_date": hsobj.get("renewal_date"),
             "subscription_type": hsobj.get("subscription_type"),
@@ -1713,6 +1714,7 @@ def portfolio() -> dict:
                     "customer_tier": c.get("customer_tier"),
                     "pooled": (c.get("cohort") == "pooled"),
                     "pooled_source": "roster",
+                    "pooled_team": c.get("pooled_team"),
                     "cohort": c.get("cohort"),
                     "arr_usd": c.get("arr_usd"),
                     "renewal_date": _rd,

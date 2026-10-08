@@ -1437,7 +1437,7 @@ class HubSpot:
 
         props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
-                 "cs_customer_tier", "industry", "country",
+                 "cs_customer_tier", "cs_pooled_team", "industry", "country",
                  # Renewal + subscription are cheap company properties (same search call,
                  # no extra per-account fan-out) and let the whole-book roster rows show a
                  # renewal date + drive the Renewals-by-Month / Upcoming Renewals views for
@@ -1477,6 +1477,7 @@ class HubSpot:
                                  or p.get("contract_renewal_date") or None),
                 "subscription_type": p.get("subscription_type") or None,
                 "customer_tier": tier or None,
+                "pooled_team": (p.get("cs_pooled_team") or None),
                 "managed": managed,
                 "pooled": pooled,
                 "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
