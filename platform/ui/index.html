@@ -1079,7 +1079,6 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="cc-pane on" id="cc-pane-command">
         <div class="scopebar" id="scopebar" style="display:none"></div>
         <div id="cc-command-top"></div>
-        <div id="cc-book-readiness"></div>
         </div><!-- /cc-pane-command -->
         <div class="cc-pane" id="cc-pane-companies"><div class="panel"><div class="head"><h2>My Companies</h2><span class="note">Click any company for the full profile</span></div><div class="body" id="accounts-body-cc"></div></div></div>
         <div class="cc-pane" id="cc-pane-renewals"></div>
@@ -3399,7 +3398,6 @@ async function renderBookReadiness(){
 // and Upcoming Renewals, all from live signals; honest "not connected" otherwise.
 async function renderCommandCenter(){
   const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
-  renderBookReadiness();
   const tasks=filteredTasks(), accts=filteredAccounts();
   const openRisks=tasks.filter(t=>t.mandate==='MUST_PROTECT').length;
   const _active=_filterActive();
