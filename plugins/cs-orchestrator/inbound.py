@@ -99,6 +99,18 @@ def _available(roster: list[dict]) -> list[dict]:
     return sorted(avail, key=lambda c: str(c.get("name", "")))
 
 
+def _pick_owner(available: list[dict], load: dict[str, int]) -> str | None:
+    """Choose the next pooled owner by LEAST current load, ties broken by name for
+    determinism. `load` is the running open-ticket count per CSM (seeded with the live
+    queue load by the caller, then incremented as this batch assigns). This replaces the
+    naive per-call round-robin cursor, which always started at the alphabetically-first
+    CSM and systematically overloaded them across repeated triage batches. Returns None
+    when no CSM is available."""
+    if not available:
+        return None
+    return min(available, key=lambda c: (load.get(c["name"], 0), str(c.get("name", ""))))["name"]
+
+
 def _dedupe(items: list[dict]) -> tuple[list[dict], list[dict]]:
     """Merge items from the same sender within DEDUPE_WINDOW_S. Returns
     (primary_items, merged_away). The earliest message in a cluster is primary and
@@ -133,15 +145,16 @@ def _dedupe(items: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 def triage_inbound(items: list[dict], roster: list[dict] | None = None,
-                   now: int | None = None) -> dict[str, Any]:
-    """Triage + round-robin a batch of normalised inbound items.
+                   now: int | None = None, current_load: dict[str, int] | None = None) -> dict[str, Any]:
+    """Triage + load-balanced allocation of a batch of normalised inbound items.
 
     - Dedupe within the 2h window (per sender).
     - Classify intent and route (technical -> Zendesk handoff, billing/general -> pooled
       queue, expansion -> CSQL / owner).
-    - Round-robin assign the items that stay in the CS pooled queue (billing/general/
-      expansion) across AVAILABLE pooled CSMs; technical handoffs are not assigned (they
-      leave the CS queue).
+    - Assign the items that stay in the CS pooled queue (billing/general/expansion) to the
+      LEAST-LOADED available pooled CSM. `current_load` seeds each CSM's existing open-
+      ticket count (from the live queue) so allocation balances the real workload, not
+      just this batch, and never systematically overloads the first CSM.
     - Attach a 24h SLA due time; flag items already within REASSIGN_AFTER_HOURS of breach.
 
     Pure and deterministic: given the same inputs it returns the same output, and it
@@ -151,20 +164,24 @@ def triage_inbound(items: list[dict], roster: list[dict] | None = None,
     roster = roster or []
     primaries, merged = _dedupe(items or [])
     available = _available(roster)
+    # Running load per CSM, seeded with their existing open-ticket count so the batch
+    # balances against the real queue rather than resetting to zero each call.
+    load_running: dict[str, int] = dict(current_load or {})
 
     tickets: list[dict] = []
-    rr_index = 0  # round-robin cursor across available CSMs
     for it in primaries:
         intent = classify_intent((it.get("subject", "") + " " + it.get("body", "")).strip())
         route = INTENT_ROUTE[intent]
         received = int(it.get("received_at", now))
         sla_due = received + SLA_HOURS * 3600
         age_h = max(0, (now - received) / 3600.0)
-        # Assign an owner only for items that remain in the CS pooled/expansion queue.
+        # Assign an owner only for items that remain in the CS pooled/expansion queue,
+        # to the least-loaded available CSM.
         owner = None
         if route["destination"] != "zendesk_handoff" and available:
-            owner = available[rr_index % len(available)]["name"]
-            rr_index += 1
+            owner = _pick_owner(available, load_running)
+            if owner:
+                load_running[owner] = load_running.get(owner, 0) + 1
         # SLA state: breached if past due; "reassign" if an assigned item is close to
         # breach (>= REASSIGN_AFTER_HOURS old) or its owner is now unavailable.
         breached = now > sla_due

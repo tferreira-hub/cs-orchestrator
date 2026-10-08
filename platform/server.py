@@ -841,7 +841,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not roster:
                     # Live pooled roster with real availability (presence feed).
                     roster = engine.pooled_roster().get("roster", [])
-                self._json(200, _inbound.triage_inbound(items, roster=roster))
+                self._json(200, _inbound.triage_inbound(items, roster=roster,
+                                                        current_load=engine._live_pooled_load()))
                 return
             if path == "/api/inbound/hubspot":
                 # Option A intake seam: a HubSpot Service Hub ticket (or batch) lands here,
@@ -879,7 +880,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:  # noqa: BLE001
                     pass
                 roster = engine.pooled_roster().get("roster", [])
-                result = _inbound.triage_inbound(items, roster=roster)
+                result = _inbound.triage_inbound(items, roster=roster,
+                                                 current_load=engine._live_pooled_load())
                 # Persist the routed tickets so the pooled team sees a live queue.
                 try:
                     engine.record_inbound(result.get("tickets", []))

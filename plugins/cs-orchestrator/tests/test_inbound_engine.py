@@ -183,3 +183,33 @@ def test_five_channels_normalise_and_route():
     assert dest["m1"] == "cs_pooled_queue"       # billing
     assert dest["f1"] == "expansion_queue"       # expansion (upgrade)
     assert dest["c1"] == "cs_pooled_queue"       # general
+
+
+# --------------------------------------------------------------------------- #
+# Load-balanced allocation (replaces naive per-call round-robin)
+# --------------------------------------------------------------------------- #
+def test_assignment_is_least_loaded_not_alphabetical_cursor():
+    """New tickets go to the CSM with the fewest OPEN tickets, seeded from the live
+    queue load - not always the alphabetically-first CSM. This fixes the systematic
+    skew where a per-call cursor reset to index 0 every batch."""
+    roster = [{"name": "Alice", "available": True}, {"name": "Bob", "available": True}]
+    # Alice already carries 3 open tickets; Bob has 0. The next two should go to Bob
+    # first (least loaded), then balance.
+    items = [_item("1", "x@co.com", "Billing query one", "invoice", received=NOW),
+             _item("2", "y@co.com", "Billing query two", "invoice", received=NOW)]
+    r = inbound.triage_inbound(items, roster=roster, now=NOW + 100,
+                               current_load={"Alice": 3, "Bob": 0})
+    owners = [t["assigned_to"] for t in r["tickets"]]
+    # Bob (0) gets the first; then Alice=3,Bob=1 -> Bob again (still least).
+    assert owners == ["Bob", "Bob"], owners
+
+
+def test_assignment_balances_within_batch_from_zero():
+    """With equal starting load, successive tickets alternate to keep load even."""
+    roster = [{"name": "Alice", "available": True}, {"name": "Bob", "available": True}]
+    items = [_item(str(i), f"{i}@co.com", "Billing", "invoice", received=NOW) for i in range(4)]
+    r = inbound.triage_inbound(items, roster=roster, now=NOW + 100)
+    load = {}
+    for t in r["tickets"]:
+        load[t["assigned_to"]] = load.get(t["assigned_to"], 0) + 1
+    assert load == {"Alice": 2, "Bob": 2}, load

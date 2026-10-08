@@ -56,6 +56,9 @@ locals {
     # spans the 28th-1st and the 1st dispatch runs in a separate scheduler process).
     CS_SUCCESS_PLANS_FILE  = "/data/.cs-success-plans.jsonl"
     CS_DIGEST_REVIEWS_FILE = "/data/.cs-digest-reviews.jsonl"
+    # Pooled-CSM presence (OOO/available) must persist so the inbound round-robin and
+    # auto-reassignment keep working across task restarts and >1 ECS task.
+    CS_PRESENCE_FILE = "/data/.cs-presence.jsonl"
   })
 
   container_environment = [for k, v in local.computed_env : { name = k, value = tostring(v) }]

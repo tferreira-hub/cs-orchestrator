@@ -1480,16 +1480,21 @@ function _renderInbox(d){
       '<td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="muted" style="font-size:.8em">'+escapeHtml(t.from||'')+'</div></td>'+
       '<td>'+escapeHtml(t.intent||'-')+'</td>'+
       '<td>'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
-      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
+      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+(t.reassigned_from?('<div class="muted" style="font-size:.78em">reassigned from '+escapeHtml(t.reassigned_from)+(t.reassigned_reason?(' · '+escapeHtml(t.reassigned_reason)):'')+'</div>'):'')+'</td>'+
       '<td>'+(t.sla_breached?'<span class="pill" style="background:#fdecec;border:1px solid #f3c2c2;color:#b42318;padding:2px 8px;border-radius:10px">SLA breached</span>':(t.needs_reassign?'<span class="mp-tag">reassign</span>':'<span class="pill pln" style="padding:2px 8px">'+(t.status||'open')+'</span>'))+'</td>'+
       '<td style="text-align:right">'+(t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted" style="font-size:.8em">'+escapeHtml(t.status)+'</span>')+'</td>'+
     '</tr>').join('');
+  // Live per-CSM open load so the pooled team sees balanced allocation at a glance.
+  const loadMap={};tickets.forEach(t=>{if(t.status==='open'&&t.assigned_to)loadMap[t.assigned_to]=(loadMap[t.assigned_to]||0)+1;});
+  const loadChips=Object.keys(loadMap).sort().map(n=>'<span class="mp-chip">'+escapeHtml(n)+': <strong>'+loadMap[n]+'</strong></span>').join('');
   b.innerHTML=
     '<div class="mp-chips" style="margin-bottom:12px">'+
       '<span class="mp-chip">Total: <strong>'+(d.count||0)+'</strong></span>'+
       '<span class="mp-chip">Open: <strong>'+(d.open||0)+'</strong></span>'+
       '<span class="mp-chip">SLA breached: <strong>'+(d.sla_breached||0)+'</strong></span>'+
+      '<span class="mp-chip">Needs reassign: <strong>'+(d.needs_reassign||0)+'</strong></span>'+
     '</div>'+
+    (loadChips?('<div class="mp-chips" style="margin-bottom:12px"><span class="muted" style="font-size:.8em;align-self:center;margin-right:4px">Open load per CSM (least-loaded gets the next ticket):</span>'+loadChips+'</div>'):'')+
     '<div class="mp-list"><div class="mp-scroll"><table><thead><tr><th>Channel</th><th>Subject</th><th>Intent</th><th>Destination</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 }
 function resolveInbound(id){

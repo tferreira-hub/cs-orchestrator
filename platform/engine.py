@@ -2895,6 +2895,50 @@ def operating_rhythm() -> dict:
 # so round-robin still distributes before anyone sets presence. A status can carry an
 # optional 'until' epoch (auto-expire back to available) and a short note (e.g. "OOO").
 _CSM_PRESENCE: dict[str, dict] = {}
+_CSM_PRESENCE_LOADED = False
+
+
+def _presence_path() -> Path:
+    """EFS-persisted CSM presence store (append-only JSONL, latest-per-name wins). Keeps
+    OOO status across task restarts and multiple ECS tasks, like the task-events and
+    history stores. Falls back to a repo-local file for tests/dev."""
+    return Path(os.environ.get("CS_PRESENCE_FILE",
+                               str(Path(__file__).resolve().parents[1] / ".cs-presence.jsonl")))
+
+
+def _load_presence() -> None:
+    """Hydrate _CSM_PRESENCE from the JSONL store once per process. Later lines overwrite
+    earlier (edits); never raises."""
+    global _CSM_PRESENCE_LOADED
+    if _CSM_PRESENCE_LOADED:
+        return
+    _CSM_PRESENCE_LOADED = True
+    path = _presence_path()
+    if not path.exists():
+        return
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("name"):
+                _CSM_PRESENCE[row["name"]] = row
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _append_presence(entry: dict) -> None:
+    """Append a presence change to the JSONL store (best-effort; never breaks the write)."""
+    try:
+        path = _presence_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def set_csm_availability(name: str, available: bool, until: int | None = None,
@@ -2910,12 +2954,14 @@ def set_csm_availability(name: str, available: bool, until: int | None = None,
              "note": (note or "").strip() or None,
              "updated_at": datetime.now(timezone.utc).isoformat()}
     _CSM_PRESENCE[name] = entry
+    _append_presence(entry)
     return entry
 
 
 def _presence_for(name: str) -> bool:
     """Resolve current availability for a CSM, honouring an expired 'until' (back to
     available) and defaulting to available when no status has ever been set."""
+    _load_presence()
     e = _CSM_PRESENCE.get(name)
     if not e:
         return True
@@ -2964,6 +3010,17 @@ def pooled_roster(with_availability: bool = True) -> dict:
 _INBOUND_QUEUE: dict[str, dict] = {}
 
 
+def _live_pooled_load() -> dict[str, int]:
+    """Current OPEN inbound-ticket count per pooled CSM, from the live queue. Seeds the
+    inbound engine's least-loaded assignment so each new batch balances against the real
+    standing workload, not a per-call reset. Only open tickets count toward load."""
+    load: dict[str, int] = {}
+    for r in _INBOUND_QUEUE.values():
+        if r.get("status") == "open" and r.get("assigned_to"):
+            load[r["assigned_to"]] = load.get(r["assigned_to"], 0) + 1
+    return load
+
+
 def record_inbound(tickets: list[dict]) -> int:
     """Persist triaged tickets into the inbound queue (upsert by id). Returns how many
     were stored/updated. Status defaults to 'open'; existing status is preserved."""
@@ -2993,6 +3050,15 @@ def inbound_queue(status: str | None = None) -> dict:
     import time as _t
     now = int(_t.time())
     SLA_H, REASSIGN_H = 24, 20  # mirror inbound.SLA_HOURS / REASSIGN_AFTER_HOURS
+    # Live availability + running load so a reassignment goes to the least-loaded
+    # currently-available pooled CSM (not just flagged as needing one).
+    try:
+        _roster = pooled_roster().get("roster", [])
+    except Exception:  # noqa: BLE001
+        _roster = []
+    _available = sorted([c for c in _roster if c.get("available", True)],
+                        key=lambda c: str(c.get("name", "")))
+    _live_load = _live_pooled_load()
     for r in _INBOUND_QUEUE.values():
         if r.get("status") != "open":
             continue
@@ -3004,8 +3070,24 @@ def inbound_queue(status: str | None = None) -> dict:
         r["sla_breached"] = now > sla_due
         owner = r.get("assigned_to")
         owner_ooo = bool(owner) and not _presence_for(owner)
-        r["needs_reassign"] = (owner is not None) and (not r["sla_breached"]) and \
+        stale = (owner is not None) and (not r["sla_breached"]) and \
             (age_h >= REASSIGN_H or owner_ooo)
+        # Close the loop: actually move a stale/OOO ticket to the least-loaded available
+        # CSM (different from the current owner), rather than only flagging it. The
+        # reassignment is recorded so the UI shows who it moved to and why.
+        if stale and _available:
+            best = min(_available, key=lambda c: (_live_load.get(c["name"], 0), str(c["name"])))
+            if best["name"] != owner:
+                r["reassigned_from"] = owner
+                r["assigned_to"] = best["name"]
+                r["reassigned_reason"] = "owner OOO" if owner_ooo else "stalled >= 20h"
+                r["reassigned_at"] = datetime.now(timezone.utc).isoformat()
+                _live_load[best["name"]] = _live_load.get(best["name"], 0) + 1
+                r["needs_reassign"] = False
+            else:
+                r["needs_reassign"] = True
+        else:
+            r["needs_reassign"] = stale
     rows = sorted(_INBOUND_QUEUE.values(),
                   key=lambda r: r.get("recorded_at") or "", reverse=True)
     if status:

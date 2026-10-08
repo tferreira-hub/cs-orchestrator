@@ -574,7 +574,16 @@ def orchestrate(account_ids: list[str] | None = None) -> dict:
         payment = payment_automation_status(aid, account)
         if payment:
             automations.append(payment)
-    all_tasks.sort(key=lambda t: t["priority"])
+    # Daily queue order: priority band first (P1 Protect ... P5 Use), then within a band
+    # the highest-ARR account first so a CSM working top-down hits the most valuable /
+    # most-at-risk revenue first. Account name is the final tie-break for stable, testable
+    # ordering (two equal-ARR tasks never reorder between runs).
+    def _arr_of(t):
+        try:
+            return float(accounts.get(t.get("account_id"), {}).get("hubspot", {}).get("arr_usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    all_tasks.sort(key=lambda t: (t["priority"], -_arr_of(t), str(t.get("account", ""))))
     result = {"reviewed": len(ids), "tasks": all_tasks, "suppressed": all_suppressed,
               "automations": automations}
     # Feedback sensor: judge the produced queue against the WoW rules.

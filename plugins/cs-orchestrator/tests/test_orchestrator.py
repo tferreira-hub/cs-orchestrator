@@ -731,3 +731,33 @@ if __name__ == "__main__":
             print(f"FAIL {fn.__name__}: {exc}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     raise SystemExit(1 if failed else 0)
+
+
+def test_daily_queue_orders_by_arr_within_priority_band():
+    """Within one priority band the daily queue must list the highest-ARR account first,
+    so a CSM working top-down hits the most valuable revenue first. Same priority + same
+    rule, different ARR -> higher ARR ranks first; account name is the final tie-break."""
+    import orchestrate as orch
+    # Two Strategic accounts that both fire the SAME P2 overdue-renewal rule, differing
+    # only in ARR, plus a low-ARR one to confirm ordering across the band.
+    def _acct(name, arr):
+        return {
+            "hubspot": {"name": name, "segment": "Strategic", "arr_usd": arr,
+                        "renewal_date": "2026-01-01", "lifecycle_stage": "Customer",
+                        "contacts": []},
+            "zendesk": {}, "usage": {}, "churn": {}, "stripe": {}, "jiminny": {},
+            "onboarding": {}, "metrics": {}, "sources": {"hubspot": "live"},
+        }
+    accounts = {"AU1-low": _acct("Low ARR Co", 5000),
+                "AU1-high": _acct("High ARR Co", 500000),
+                "AU1-mid": _acct("Mid ARR Co", 50000)}
+    prev = orch._ACCOUNT_PROVIDER
+    orch.set_account_provider(lambda: accounts)
+    try:
+        tasks = orch.orchestrate()["tasks"]
+        # Overdue-renewal P2 rows, in queue order.
+        p2 = [t["account"] for t in tasks
+              if t["rule_id"] == orch.RULE_OVERDUE_RENEWAL]
+        assert p2[:3] == ["High ARR Co", "Mid ARR Co", "Low ARR Co"], p2
+    finally:
+        orch.set_account_provider(prev)
