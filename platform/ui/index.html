@@ -2542,11 +2542,21 @@ function pooledLeaf(leaf){
 }
 function pooledSub(tab){
   _pooledSub=tab;
+  // Bump a monotonic render token on every leaf/sub switch. Async pooled renderers
+  // (inbox, escalations, response rates, NRR) capture this token before their await and
+  // must NOT write their result if the token has moved on - otherwise a slow in-flight
+  // fetch (e.g. the inbox queue) lands AFTER the user switched to Process and clobbers the
+  // new leaf's body with stale content. This was the "Process shows the Inbox" bug.
+  _pooledRenderToken++;
   document.querySelectorAll('#pooled-leaftabs .cc-tab').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').indexOf("'"+tab+"'")>=0));
   const R={inbox:renderPooledInbox,escalations:renderPooledEscalations,responserates:renderPooledResponseRates,onboarding:renderPooledOnboarding,stalled:renderPooledStalled,lowusage:renderPooledLowUsage,lowusageseq:renderPooledLowUsageSeq,renewals180:renderPooledRenewals180,nrrquarter:renderPooledNrrQuarter};
   (R[tab]||function(){document.getElementById('pooled-leafbody').innerHTML='';})();
   window.scrollTo({top:0,behavior:'instant'});
 }
+// Monotonic token for the active pooled leaf/sub render. Async renderers snapshot it and
+// bail (see _pooledStale) if the user has since switched, so stale fetches never clobber.
+let _pooledRenderToken=0;
+function _pooledStale(token){ return token!==_pooledRenderToken; }
 function _pooledAccts(){
   const accts=filteredAccounts();
   if(accts.some(a=>a.pooled!==undefined)) return accts.filter(a=>a.pooled);
@@ -2567,13 +2577,15 @@ function _emailConnectPanel(title,note){
 }
 function renderPooledInbox(){
   const host=_pooledHost();
+  const _tok=_pooledRenderToken;
   host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading inbox…</span></div></div>';
   (async()=>{
     let r;
     // Read the PERSISTED pooled queue (HubSpot Service Hub tickets pulled + triaged +
     // round-robined), not a stateless triage of an empty batch. This is the live inbox.
     try{ r=await (await api('/api/inbound/queue')).json(); }
-    catch(e){ host.innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails'); return; }
+    catch(e){ if(_pooledStale(_tok))return; host.innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails'); return; }
+    if(_pooledStale(_tok))return;  // user switched leaf while the fetch was in flight
     const tickets=r.tickets||[];
     // Derive the counters the header shows from the persisted queue shape.
     const csqls=tickets.filter(t=>t.csql).length;
@@ -2753,9 +2765,11 @@ async function zdClose(ticketId,btn){
 }
 function renderPooledEscalations(){
   const host=_pooledHost();
+  const _tok=_pooledRenderToken;
   host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading escalations...</span></div></div>';
   (async()=>{
-    let d; try{ d=await (await api('/api/inbound/queue')).json(); }catch(e){ host.innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email'); return; }
+    let d; try{ d=await (await api('/api/inbound/queue')).json(); }catch(e){ if(_pooledStale(_tok))return; host.innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email'); return; }
+    if(_pooledStale(_tok))return;
     const tickets=(d.tickets||[]);
     // Real escalations we already hold: inbound items routed to a Zendesk technical
     // handoff, plus anything past its 24h SLA. These are genuine escalations from the
@@ -2793,6 +2807,7 @@ function renderPooledEscalations(){
 }
 function renderPooledResponseRates(){
   const host=_pooledHost();
+  const _tok=_pooledRenderToken;
   const pool=_pooledAccts();const poolNames=new Set(pool.map(a=>a.name||a.account_id));
   const drafts=(DATA.tasks||[]).filter(t=>poolNames.has(t.account)&&t.draft_message).length;
   host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading...</span></div></div>';
@@ -2803,6 +2818,7 @@ function renderPooledResponseRates(){
       const t=(d.tickets||[]);
       open=t.filter(x=>(x.destination==='zendesk_handoff'||x.channel==='zendesk_misroute'||x.sla_breached)&&x.status==='open').length;
     }catch(e){ open='no data'; }
+    if(_pooledStale(_tok))return;
     host.innerHTML='<div class="panel"><div class="head"><h2>Response Rates</h2><span class="note">Drafts and escalations are live; send and reply counts need a connected email source</span></div><div class="body pad">'+
       '<div class="mdw-grid">'+
         _widgetBig('Drafts prepared',drafts,'good')+
