@@ -2715,18 +2715,66 @@ async function zdClose(ticketId,btn){
   }catch(e){ if(status)status.textContent='Could not close.'; }
   finally{ if(btn)btn.disabled=false; }
 }
-function renderPooledEscalations(){_pooledHost().innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email');}
+function renderPooledEscalations(){
+  const host=_pooledHost();
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading escalations...</span></div></div>';
+  (async()=>{
+    let d; try{ d=await (await api('/api/inbound/queue')).json(); }catch(e){ host.innerHTML=_emailConnectPanel('Escalations','Escalation conversations from synced email'); return; }
+    const tickets=(d.tickets||[]);
+    // Real escalations we already hold: inbound items routed to a Zendesk technical
+    // handoff, plus anything past its 24h SLA. These are genuine escalations from the
+    // live triage queue - not fabricated, not dependent on a separate email sync.
+    const esc=tickets.filter(t=>t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute'||t.sla_breached);
+    const breached=esc.filter(t=>t.sla_breached).length;
+    const zendesk=esc.filter(t=>t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute').length;
+    const header='<div class="panel"><div class="head"><h2>Escalations</h2><span class="note">Technical handoffs + SLA breaches from the live inbound queue</span></div>'+
+      '<div class="body pad"><div class="mdw-grid" style="margin-bottom:12px">'+
+        _widgetBig('Open escalations',esc.length,esc.length>0?'warn':'good')+
+        _widgetBig('Zendesk handoffs',zendesk)+
+        _widgetBig('SLA breached',breached,breached>0?'warn':'good')+
+      '</div></div></div>';
+    let body;
+    if(!esc.length){
+      body='<div class="panel"><div class="body pad"><div class="empty"><b>No open escalations</b>'+
+        '<div class="sub" style="margin-top:6px">Escalations are technical tickets routed to Zendesk and any inbound item past its 24h SLA. A separate email/calendar conversation sync is not connected; this view uses the live triage queue. No sample data is shown.</div></div></div></div>';
+    } else {
+      const rows=esc.map(t=>{
+        const tid=(t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute')?String(t.id||''):'';
+        const actions=tid?('<button class="btn" style="padding:4px 9px" onclick="zdReply(\''+escapeHtml(tid)+'\',this)">Reply</button> '+
+          '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):'<span class="muted">-</span>';
+        return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.channel||'')+'</div></td>'+
+          '<td>'+escapeHtml(t.account_name||t.account_ref||'-')+'</td>'+
+          '<td class="muted">'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
+          '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+'</td>'+
+          '<td>'+(t.sla_breached?'<span class="pill r">SLA breached</span>':'<span class="pill a">escalated</span>')+'</td>'+
+          '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
+      }).join('');
+      body='<div class="panel"><div class="head"><h2>Escalation queue</h2><span class="note">'+esc.length+' items</span></div>'+
+        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Company</th><th>Routed to</th><th>Owner</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    }
+    host.innerHTML=header+body;
+  })();
+}
 function renderPooledResponseRates(){
-  // Real proxy: outreach drafts prepared across the pooled queue (the tasks with drafts).
+  const host=_pooledHost();
   const pool=_pooledAccts();const poolNames=new Set(pool.map(a=>a.name||a.account_id));
   const drafts=(DATA.tasks||[]).filter(t=>poolNames.has(t.account)&&t.draft_message).length;
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Response Rates</h2><span class="note">Email statistics require a connected email source</span></div><div class="body pad">'+
-    '<div class="mdw-grid">'+
-      _widgetBig('Drafts prepared',drafts,'good')+
-      _widgetBig('Emails sent (this week)',0)+
-      _widgetBig('Replies (this week)',0)+
-      _widgetBig('Escalations still open',0)+
-    '</div><div class="callout" style="margin-top:14px;color:var(--muted)">Sent/opened/reply counts populate once an email source is connected. Drafts prepared is live from the orchestrator queue.</div></div></div>';
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading...</span></div></div>';
+  (async()=>{
+    let open='no data';
+    try{
+      const d=await (await api('/api/inbound/queue')).json();
+      const t=(d.tickets||[]);
+      open=t.filter(x=>(x.destination==='zendesk_handoff'||x.channel==='zendesk_misroute'||x.sla_breached)&&x.status==='open').length;
+    }catch(e){ open='no data'; }
+    host.innerHTML='<div class="panel"><div class="head"><h2>Response Rates</h2><span class="note">Drafts and escalations are live; send and reply counts need a connected email source</span></div><div class="body pad">'+
+      '<div class="mdw-grid">'+
+        _widgetBig('Drafts prepared',drafts,'good')+
+        _widgetBig('Emails sent (this week)','no data')+
+        _widgetBig('Replies (this week)','no data')+
+        _widgetBig('Escalations still open',open,(typeof open==='number'&&open>0)?'warn':'')+
+      '</div><div class="callout" style="margin-top:14px;color:var(--muted)">Sent and reply counts populate once an email source is connected. Drafts prepared and escalations are live from the orchestrator queue.</div></div></div>';
+  })();
 }
 // --- Process leaf ---
 function renderPooledOnboarding(){
