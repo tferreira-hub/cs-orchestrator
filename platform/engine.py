@@ -1512,6 +1512,7 @@ def portfolio() -> dict:
                 if is_churned and not include_churned:
                     continue  # active book by default; churned available via filter/env
                 band = _roster_band(c)
+                _rd = c.get("renewal_date") or None
                 rows.append({
                     "account_id": aid,
                     "name": c.get("name"),
@@ -1521,14 +1522,16 @@ def portfolio() -> dict:
                     "pooled_source": "roster",
                     "cohort": c.get("cohort"),
                     "arr_usd": c.get("arr_usd"),
-                    "renewal_date": None,
-                    "subscription_type": None,
+                    "renewal_date": _rd,
+                    "subscription_type": c.get("subscription_type"),
                     "csm_owner": _owner_names.get(str(c.get("owner_id"))) if c.get("owner_id") else None,
                     "csm_owner_id": c.get("owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
                     "churned": is_churned,
                     "health": band,
-                    "renewal_forecast": {"applicable": False, "label": None, "rationale": None, "evidence": []},
+                    "renewal_forecast": (renewal_forecast({"hubspot": {"renewal_date": _rd}, "arr_usd": c.get("arr_usd")}, band)
+                                         if _rd else
+                                         {"applicable": False, "label": None, "rationale": None, "evidence": []}),
                     "connected": {},
                     "usage_days_since_visit": None,
                     "open_task_count": 0,

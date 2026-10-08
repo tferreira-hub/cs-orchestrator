@@ -1323,7 +1323,13 @@ class HubSpot:
 
         props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
-                 "cs_customer_tier", "industry", "country"]
+                 "cs_customer_tier", "industry", "country",
+                 # Renewal + subscription are cheap company properties (same search call,
+                 # no extra per-account fan-out) and let the whole-book roster rows show a
+                 # renewal date + drive the Renewals-by-Month / Upcoming Renewals views for
+                 # every CSM's book, not just the ~50 deeply-enriched accounts.
+                 "hs_next_renewal_date", "renewal_date", "contract_renewal_date",
+                 "subscription_type"]
         rows: list[dict[str, Any]] = []
 
         def _n(p, *keys):
@@ -1353,6 +1359,9 @@ class HubSpot:
                 "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
                                     .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
                 "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                "renewal_date": (p.get("hs_next_renewal_date") or p.get("renewal_date")
+                                 or p.get("contract_renewal_date") or None),
+                "subscription_type": p.get("subscription_type") or None,
                 "customer_tier": tier or None,
                 "managed": managed,
                 "pooled": pooled,
