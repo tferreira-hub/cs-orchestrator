@@ -711,6 +711,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.integrations()); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
+            if path == "/api/my-book/progress":
+                # Poll endpoint: current progress of the CSM's whole-book enrichment.
+                self._json(200, engine.get_book_enrichment()); return
             if path == "/api/admin-coverage":
                 self._json(200, engine.admin_coverage_matrix()); return
             if path == "/api/payment-risk":
@@ -806,6 +809,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts/enrich":
                 ids = body.get("ids") if isinstance(body.get("ids"), list) else []
                 self._json(200, engine.enrich_rows([str(i) for i in ids if i]))
+                return
+            if path == "/api/my-book/enrich":
+                # Kick off (or report) background enrichment of the CSM's WHOLE book, so
+                # My Companies fills in health/usage/forecast across every owned account,
+                # not just the enriched-50 slice. Non-blocking; the UI polls progress.
+                self._json(200, engine.enrich_my_book())
                 return
             # Scaled Tech-Touch inbound triage + round-robin (Use Case 1). Accepts a batch
             # of already-normalised inbound items and an optional roster of pooled CSMs

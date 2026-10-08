@@ -2311,3 +2311,33 @@ def test_datagaps_spans_whole_book_with_honest_source_status(monkeypatch):
     assert beta["coverage_status"]["usage"] == "not_checked"
     assert beta["missing_systems"] == []  # unknown, not claimed
     assert set(beta["missing_fields"]) == {"Renewal date", "Subscription type"}
+
+
+def test_warm_batch_metrics_populates_cache_for_ndr(monkeypatch):
+    """Boot warm loads whole-book warehouse metrics synchronously so the FIRST dashboard
+    render shows a real Portfolio NDR instead of 'no data' while the lazy cache warms."""
+    import types
+    import engine
+
+    engine._BATCH_METRICS["data"] = {}
+    engine._BATCH_METRICS["at"] = 0.0
+
+    class _FakeMetrics:
+        def live(self):
+            return True
+
+        def batch_metrics(self, refs):
+            return {
+                "EU1-2774": {"mrr_usd": 8319.25, "revenue_prev_year_usd": 7627.48,
+                             "_source": "redshift-live"},
+            }
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(ACCOUNT_METRICS=_FakeMetrics()))
+    try:
+        n = engine.warm_batch_metrics()
+        assert n == 1
+        assert engine._BATCH_METRICS["data"]["EU1-2774"]["revenue_prev_year_usd"] == 7627.48
+        assert engine._BATCH_METRICS["at"] > 0
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0

@@ -1413,11 +1413,12 @@ try{const st=JSON.parse(localStorage.getItem('cs_side_sections')||'{}');Object.k
 let _ccTab='command';
 function ccTab(tab){
   _ccTab=tab;
+  if(tab!=='companies') _bookEnrichPolling=false;
   document.querySelectorAll('#cc-tabs .cc-tab').forEach(b=>b.classList.toggle('active',b.dataset.cc===tab));
   document.querySelectorAll('#v-dash .cc-pane').forEach(p=>p.classList.remove('on'));
   const pane=document.getElementById('cc-pane-'+tab); if(pane)pane.classList.add('on');
   try{sessionStorage.setItem('cs_cc_tab',tab);}catch(e){}
-  if(tab==='companies'){ const host=document.getElementById('accounts-body-cc'); if(host&&DATA&&DATA.accounts) host.innerHTML=acctTable(filteredAccounts()); }
+  if(tab==='companies'){ const host=document.getElementById('accounts-body-cc'); if(host&&DATA&&DATA.accounts){ host.innerHTML=acctTable(filteredAccounts()); enrichMyBook(); } }
   else if(tab==='renewals'){ renderCcRenewals(); }
   window.scrollTo({top:0,behavior:'instant'});
 }
@@ -4012,6 +4013,45 @@ function _enrichVisibleRoster(list){
 // the whole current view, which re-reads the now-enriched DATA.accounts.
 function _enrichAndRerender(list){
   _enrichCore(list,function(){ if(typeof render==='function') render(_currentView); });
+}
+// Whole-book enrichment for the current CSM: My Companies kicks this off so EVERY owned
+// account fills in health/usage/forecast (not just the enriched-50 slice). The server
+// enriches in the background; we poll progress and patch rows into DATA.accounts as they
+// land, re-rendering the grid in place. Bounded + idempotent (server caches per owner).
+let _bookEnrichPolling=false;
+function enrichMyBook(){
+  if(_bookEnrichPolling) return;         // already polling this view
+  _bookEnrichPolling=true;
+  const patch=(got)=>{
+    if(!got||!Object.keys(got).length) return false;
+    const byId={}; (DATA.accounts||[]).forEach(a=>{byId[a.account_id]=a;});
+    let changed=false;
+    Object.keys(got).forEach(id=>{const dst=byId[id]; if(dst){Object.assign(dst,got[id]); changed=true;}});
+    return changed;
+  };
+  const rerender=()=>{ const h=document.getElementById('accounts-body-cc'); if(h&&h.offsetParent!==null) h.innerHTML=acctTable(filteredAccounts()); };
+  const setNote=(done,total,running)=>{
+    const h=document.getElementById('accounts-body-cc'); if(!h) return;
+    const c=h.querySelector('#acct-count'); if(!c) return;
+    if(running&&total>0) c.innerHTML=' · <span class="muted">enriching '+done+' of '+total+' companies…</span>';
+    else if(total>0) c.innerHTML=' · <span class="muted">'+total+' companies enriched</span>';
+  };
+  (async()=>{
+    try{
+      // Kick off (idempotent server-side) and get initial progress.
+      let j={}; try{ j=await (await api('/api/my-book/enrich',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json(); }catch(_){ _bookEnrichPolling=false; return; }
+      if(patch((j&&j.accounts)||{})) rerender();
+      setNote(j.done||0,j.total||0,j.running);
+      // Poll until the server reports complete (or a safety cap of ~2 min).
+      let polls=0;
+      while(j && j.running && polls<60){
+        await new Promise(r=>setTimeout(r,2000)); polls++;
+        try{ j=await (await api('/api/my-book/progress')).json(); }catch(_){ break; }
+        if(patch((j&&j.accounts)||{})) rerender();
+        setNote(j.done||0,j.total||0,j.running);
+      }
+    } finally { _bookEnrichPolling=false; }
+  })();
 }
 // Planhat shows renewal as a relative "in days" value, not a raw date.
 function renewalDays(dateStr){

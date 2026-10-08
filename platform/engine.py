@@ -155,6 +155,26 @@ def _batch_metrics_for(account_ids: list) -> dict:
     return _BATCH_METRICS["data"]
 
 
+def warm_batch_metrics() -> int:
+    """SYNCHRONOUSLY load the whole-book warehouse metrics into the cache. Called from the
+    boot warm thread so portfolio NDR / licence utilisation are populated on the FIRST
+    request after deploy, instead of returning 'no data' until the lazy non-blocking warm
+    happens to complete. Returns the number of accounts loaded (0 when not live / on error).
+    """
+    import time
+    try:
+        if not _src.ACCOUNT_METRICS.live():
+            return 0
+        data = _src.ACCOUNT_METRICS.batch_metrics([])
+        if isinstance(data, dict) and data:
+            _BATCH_METRICS["data"] = data
+            _BATCH_METRICS["at"] = time.time()
+            return len(data)
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
+
 def _scope_key() -> str:
     """Cache key component for the current principal's visibility scope."""
     p = get_principal()
@@ -224,6 +244,13 @@ def warm_reports():
     (not from a request handler). MUST NOT use _cached_report (which now returns a
     warming placeholder on cold miss)."""
     import time as _t
+    # Load whole-book warehouse metrics (NDR inputs + licence utilisation) up front so the
+    # first dashboard load shows a real Portfolio NDR instead of "no data" while the lazy
+    # non-blocking cache warms. Best-effort; never crashes the boot thread.
+    try:
+        warm_batch_metrics()
+    except Exception:  # noqa: BLE001
+        pass
     for name, build in [("onboarding_governance", _onboarding_governance_build),
                         ("payment_risk_report", _payment_risk_report_build)]:
         try:
@@ -1894,6 +1921,125 @@ def account_detail(account_id: str) -> dict:
         "suppressed": suppressed,
         "hubspot_writeback": _writeback_payload(live, h, tasks) if _is_live(a.get("sources", {}), "hubspot") else None,
     }
+
+
+# Per-CSM whole-book enrichment cache. Keyed by owner_id (or "admin"), holds the enriched
+# row fields for that book plus progress, so a CSM's My Companies view can fill in health/
+# usage/forecast across their ENTIRE book (not just the enriched-50 slice) without a
+# synchronous fan-out that would hang the request. Populated by a bounded background
+# thread; the UI polls get_book_enrichment() and re-renders as rows land.
+_BOOK_ENRICHMENT: dict = {}          # owner_key -> {"rows": {aid: row}, "done": int, "total": int, "running": bool, "at": float}
+_BOOK_ENRICHMENT_LOCK = __import__("threading").Lock()
+
+
+def _book_owner_key() -> str:
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return "admin"
+    return "owner:" + str(p.get("owner_id") or "none")
+
+
+def enrich_my_book(max_accounts: int | None = None) -> dict:
+    """Kick off (or report on) background enrichment of the CURRENT principal's whole book.
+
+    The enriched slice only covers ~50 accounts globally, so a CSM's My Companies view
+    shows "roster / no data" for most of their book even though each account CAN be
+    enriched on demand. This enriches every account the CSM owns - resolved from the cheap
+    whole-book roster - in a bounded background thread (CS_FETCH_WORKERS concurrency),
+    caching the row-level fields per owner. Non-blocking: returns the current progress
+    immediately; the UI polls and re-renders as rows arrive. Honest: an account with no
+    live record is skipped (stays a roster row). Owner-scoped; never fabricates.
+    """
+    import os, time, threading
+    key = _book_owner_key()
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    try:
+        cap = max_accounts if max_accounts is not None else int(os.environ.get("CS_BOOK_ENRICH_MAX", "400"))
+    except (ValueError, TypeError):
+        cap = 400
+
+    with _BOOK_ENRICHMENT_LOCK:
+        state = _BOOK_ENRICHMENT.get(key)
+        # Fresh completed result (within TTL) or an in-flight run: just report progress.
+        ttl = _report_cache_ttl()
+        if state and (state.get("running") or (time.time() - state.get("at", 0)) < ttl):
+            return _book_progress(key)
+        _BOOK_ENRICHMENT[key] = {"rows": {}, "done": 0, "total": 0, "running": True, "at": time.time()}
+
+    # Resolve the owner's book from the cheap roster (real account_id refs only - a
+    # synthetic rl-<id> row has no vendor-resolvable ref, so it stays a roster row).
+    try:
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True) if _src.HUBSPOT.live() else []
+    except Exception:  # noqa: BLE001
+        roster = []
+    ids = []
+    for c in roster:
+        aid = c.get("account_id")
+        if not aid:
+            continue
+        if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+            continue
+        ids.append(_src.identity.normalise(aid))
+    ids = ids[:cap]
+
+    with _BOOK_ENRICHMENT_LOCK:
+        _BOOK_ENRICHMENT[key]["total"] = len(ids)
+
+    principal_snapshot = dict(p) if p else None
+
+    def _worker():
+        from concurrent.futures import ThreadPoolExecutor
+        try:
+            workers = int(os.environ.get("CS_FETCH_WORKERS", "6"))
+        except ValueError:
+            workers = 6
+        # The background threads do not inherit the request's principal context, so each
+        # enrich_one re-asserts it (ownership is re-checked from the enriched record).
+        def _enrich_one(aid):
+            try:
+                set_principal(principal_snapshot)
+                rows = enrich_rows([aid])
+                return rows.get("accounts", {}).get(aid)
+            except Exception:  # noqa: BLE001
+                return None
+        try:
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+                for aid, row in zip(ids, ex.map(_enrich_one, ids)):
+                    with _BOOK_ENRICHMENT_LOCK:
+                        st = _BOOK_ENRICHMENT.get(key)
+                        if st is None:
+                            return
+                        st["done"] += 1
+                        if row:
+                            st["rows"][aid] = row
+                        st["at"] = time.time()
+        finally:
+            with _BOOK_ENRICHMENT_LOCK:
+                st = _BOOK_ENRICHMENT.get(key)
+                if st is not None:
+                    st["running"] = False
+                    st["at"] = time.time()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return _book_progress(key)
+
+
+def _book_progress(key: str) -> dict:
+    with _BOOK_ENRICHMENT_LOCK:
+        st = _BOOK_ENRICHMENT.get(key) or {"rows": {}, "done": 0, "total": 0, "running": False, "at": 0.0}
+        return {
+            "accounts": dict(st["rows"]),
+            "done": st["done"],
+            "total": st["total"],
+            "running": st["running"],
+            "complete": (not st["running"]) and st["total"] > 0 and st["done"] >= st["total"],
+        }
+
+
+def get_book_enrichment() -> dict:
+    """Report current progress of the principal's book enrichment (poll endpoint)."""
+    return _book_progress(_book_owner_key())
 
 
 def enrich_rows(account_ids: list) -> dict:
