@@ -2583,15 +2583,35 @@ function renderPooledInbox(){
     let r;
     // Read the PERSISTED pooled queue (HubSpot Service Hub tickets pulled + triaged +
     // round-robined), not a stateless triage of an empty batch. This is the live inbox.
+    // Fetch the live CSM availability IN PARALLEL so the round-robin roster chip is correct
+    // on first paint instead of flashing "no available pooled CSMs configured" while a
+    // trailing fetch catches up. Availability is best-effort: if it fails we fall back to
+    // whatever POOLED_ROSTER a prior render cached, and show a loading state (never a false
+    // "none configured") when we genuinely have not loaded it yet.
+    const _availP=api('/api/csm/availability').then(x=>x.json()).catch(()=>null);
     try{ r=await (await api('/api/inbound/queue')).json(); }
     catch(e){ if(_pooledStale(_tok))return; host.innerHTML=_emailConnectPanel('Inbox','Filterable feed of synced emails'); return; }
     if(_pooledStale(_tok))return;  // user switched leaf while the fetch was in flight
+    let _rosterLoaded=false;
+    try{
+      const pr=await _availP;
+      if(pr){ window.POOLED_ROSTER=(pr.roster||[]).filter(c=>c.available!==false).map(c=>c.name); _rosterLoaded=true; }
+    }catch(e){}
+    if(_pooledStale(_tok))return;
     const tickets=r.tickets||[];
     // Derive the counters the header shows from the persisted queue shape.
     const csqls=tickets.filter(t=>t.csql).length;
     const zendesk=tickets.filter(t=>t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute').length;
     const breached=r.sla_breached||0;
     const roster=(window.POOLED_ROSTER||[]);
+    // Honest roster chip: names when we have them; "Loading pool..." while availability is
+    // still resolving (or failed to load); only "none configured" when it loaded and really
+    // is empty.
+    const _rosterChip=roster.length
+      ? roster.map(escapeHtml).join(', ')
+      : ((_rosterLoaded||window.POOLED_ROSTER)
+          ? '<em>no available pooled CSMs configured</em>'
+          : '<em>Loading pool...</em>');
     const header='<div class="panel"><div class="head"><h2>Inbox · Scaled Tech-Touch</h2><span class="note">5-channel triage · round-robin · 24h SLA</span>'+
       '<button class="btn btn-ghost" style="margin-left:auto;padding:5px 11px" onclick="ingestHubspotInbound(this)">Pull from HubSpot</button></div>'+
       '<div class="body pad">'+
@@ -2601,7 +2621,7 @@ function renderPooledInbox(){
         _widgetBig('Zendesk handoffs',zendesk)+
         _widgetBig('SLA breached',breached,breached>0?'warn':'good')+
       '</div>'+
-      '<div class="muted" style="font-size:.84em">Round-robin pool: '+(roster.length?roster.map(escapeHtml).join(', '):'<em>no available pooled CSMs configured</em>')+'</div>'+
+      '<div class="muted" style="font-size:.84em">Round-robin pool: <span id="ibx-roster-chip">'+_rosterChip+'</span></div>'+
       '</div></div>';
     let body;
     if(!tickets.length){
@@ -2653,8 +2673,19 @@ function renderPooledInbox(){
       window._inboxSegOf=segOf;
       inboxRenderRows('all',false);
     }
-    // Populate the round-robin roster chip from live presence (best-effort, non-blocking).
-    try{ const pr=await (await api('/api/csm/availability')).json(); window.POOLED_ROSTER=(pr.roster||[]).filter(c=>c.available!==false).map(c=>c.name); }catch(e){}
+    // Roster chip is populated up-front from the parallel availability fetch above; if that
+    // fetch had not resolved by first paint (chip shows "Loading pool..."), patch it in now
+    // without re-rendering the whole inbox.
+    if(!_rosterLoaded){
+      _availP.then(pr=>{
+        if(!pr || _pooledStale(_tok))return;
+        window.POOLED_ROSTER=(pr.roster||[]).filter(c=>c.available!==false).map(c=>c.name);
+        const chip=document.getElementById('ibx-roster-chip');
+        if(chip) chip.innerHTML=window.POOLED_ROSTER.length
+          ? window.POOLED_ROSTER.map(escapeHtml).join(', ')
+          : '<em>no available pooled CSMs configured</em>';
+      }).catch(()=>{});
+    }
   })();
 }
 // Shared row renderer for the inbox queue. Builds the dense rows for the active segment,
