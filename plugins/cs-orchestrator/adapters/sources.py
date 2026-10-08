@@ -104,6 +104,9 @@ class Zendesk:
             "by_instance": {identity.normalise(account_ref): last7},
             "_source": "zendesk-live",
             "_org_name": org_name,
+            # Origin-source deep link to the Zendesk organisation record.
+            "zendesk_url": (f"https://{sub}.zendesk.com/agent/organizations/{org_id}/tickets"
+                            if (sub and org_id) else None),
         }
 
     # ---- Writes (increment 3): reply to and close/transfer tickets so a CSM can resolve
@@ -285,6 +288,12 @@ class Pendo:
             "plan_price": agent.get("planprice"),
             "site": agent.get("sitename"),
             "by_instance": {ref: {"days_since_last_visit": days_since_visit}},
+            # Origin-source deep link to the Pendo account view, ONLY when the app's
+            # subscription/app id is configured (PENDO_APP_URL, e.g.
+            # https://app.pendo.io/s/<subId>/account/). The per-account URL path is
+            # install-specific, so we never guess it - no config means no link.
+            "pendo_url": ((config.env("PENDO_APP_URL").rstrip("/") + "/" + ref)
+                          if config.env("PENDO_APP_URL") else None),
             "_source": "pendo-live",
         }
 
@@ -647,6 +656,7 @@ class Stripe:
             # Identity for the Payment Risk Report: the Stripe customer id builds the
             # dashboard link, and the customer email is a billing-contact fallback.
             "customer_id": cid,
+            "stripe_url": (f"https://dashboard.stripe.com/customers/{cid}" if cid else None),
             "customer_email": cust_email,
             "_source": "stripe-live",
         }

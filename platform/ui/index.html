@@ -4881,7 +4881,16 @@ function renderCompanyPage(id,d){
     field('AI Forecast',forecastPillHtml)+
     '<h3>Key Contacts</h3>'+attachments+
     '<h3>Live Coverage</h3>'+
-    Object.keys(conn).map(k=>'<div class="cp-field"><span class="cp-fk">'+k+'</span><span class="cp-fv">'+(conn[k]?'<span class="pill g">live</span>':'<span class="pill pln">off</span>')+'</span></div>').join('')+
+    Object.keys(conn).map(k=>{
+      // Origin-source deep links: when a source is live and exposes a record URL, make
+      // the row a link to that system (HubSpot company, Zendesk org, Stripe customer,
+      // Pendo account). Honest: no URL -> plain live/off pill, never a dead link.
+      const urlMap={hubspot:hs.hubspot_url,zendesk:zd.zendesk_url,stripe:st.stripe_url,usage:us.pendo_url};
+      const url=conn[k]?urlMap[k]:null;
+      const pill=conn[k]?'<span class="pill g">live</span>':'<span class="pill pln">off</span>';
+      const label=url?('<a href="'+escapeHtml(url)+'" target="_blank" rel="noopener" title="Open in '+escapeHtml(k)+'">'+pill+' ↗</a>'):pill;
+      return '<div class="cp-field"><span class="cp-fk">'+k+'</span><span class="cp-fv">'+label+'</span></div>';
+    }).join('')+
   '</aside>';
   // Assemble. Each section is tagged with the tabs it belongs to (data-cpt, space-separated)
   // so cpTab() can show the relevant subset; Overview shows everything.
