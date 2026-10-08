@@ -1133,6 +1133,39 @@ class HubSpot:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
 
+    _portal_id_cache = None
+
+    def portal_id(self) -> str | None:
+        """The HubSpot portal (hub) id, resolved once from the account-info API and cached.
+        Used to build 'View in HubSpot' deep links to the real company record. An explicit
+        HUBSPOT_PORTAL_ID env wins (lets a deploy pin it without an extra API call). Returns
+        None when unavailable, so callers simply omit the link rather than build a dead one."""
+        if HubSpot._portal_id_cache:
+            return HubSpot._portal_id_cache
+        env_pid = config.env("HUBSPOT_PORTAL_ID")
+        if env_pid:
+            HubSpot._portal_id_cache = str(env_pid).strip()
+            return HubSpot._portal_id_cache
+        if not self.live():
+            return None
+        try:
+            info = config.http_get("https://api.hubapi.com/account-info/v3/details", self._headers())
+            pid = (info or {}).get("portalId")
+            if pid:
+                HubSpot._portal_id_cache = str(pid)
+                return HubSpot._portal_id_cache
+        except Exception:  # noqa: BLE001 - deep-link convenience; never block the account view
+            return None
+        return None
+
+    def company_url(self, company_id) -> str | None:
+        """Build the 'open this company in HubSpot' URL, or None when we can't (no portal
+        id or no company id) so the UI omits the link rather than render a broken one."""
+        pid = self.portal_id()
+        if not pid or not company_id:
+            return None
+        return f"https://app.hubspot.com/contacts/{pid}/company/{company_id}"
+
     def revenue_motion_deals(self, window_days: int | None = None) -> dict:
         """Aggregate booked revenue motion from HubSpot deals over a rolling window.
 
@@ -1468,6 +1501,7 @@ class HubSpot:
         pooled = (str(customer_tier or "").strip().lower() == "pooled") if customer_tier else None
         return {
             "company_id": c.get("id"),
+            "hubspot_url": self.company_url(c.get("id")),
             "name": p.get("name"),
             "segment": self._map_segment(raw_segment),  # engine model: Strategic / Scaled
             "segment_label": raw_segment,               # original HubSpot label for display

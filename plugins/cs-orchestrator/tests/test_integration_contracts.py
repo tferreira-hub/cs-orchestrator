@@ -2341,3 +2341,28 @@ def test_warm_batch_metrics_populates_cache_for_ndr(monkeypatch):
     finally:
         engine._BATCH_METRICS["data"] = {}
         engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_hubspot_company_url_builds_origin_deep_link(monkeypatch):
+    """The account 360 'View in HubSpot' link uses the portal id (env override wins,
+    else resolved from account-info) + company id. Returns None when either is missing,
+    so the UI omits the link rather than render a dead one."""
+    from adapters import sources, config
+
+    hs = sources.HubSpot()
+    sources.HubSpot._portal_id_cache = None  # reset the module-level cache
+
+    # Env override pins the portal without an API call.
+    monkeypatch.setattr(config, "env", lambda k: "6426676" if k == "HUBSPOT_PORTAL_ID" else None)
+    assert hs.portal_id() == "6426676"
+    assert hs.company_url("12345") == "https://app.hubspot.com/contacts/6426676/company/12345"
+    # No company id -> no link (honest omission).
+    assert hs.company_url(None) is None
+
+    # No portal id resolvable -> no link.
+    sources.HubSpot._portal_id_cache = None
+    monkeypatch.setattr(config, "env", lambda k: None)
+    monkeypatch.setattr(hs, "live", lambda: False)
+    assert hs.company_url("12345") is None
+
+    sources.HubSpot._portal_id_cache = None  # leave cache clean for other tests

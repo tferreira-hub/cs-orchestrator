@@ -4888,7 +4888,9 @@ function renderCompanyPage(id,d){
   const left='<div>'+
     '<div class="cp-title"><a class="cp-back" href="#" onclick="event.preventDefault();history.back()" title="Back">&#x2190;</a><h1>'+escapeHtml(title)+'</h1>'+circle+
       '<div class="cp-actions"><button class="ask-account-btn" onclick="askAgentAboutAccount()">✦ Ask Jane</button>'+
-      '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button></div></div>'+
+      '<button class="ask-account-btn prep-meeting-btn" onclick="janePrepareMeeting()">◷ Prepare meeting</button>'+
+      (hs.hubspot_url?('<a class="ask-account-btn origin-link" href="'+escapeHtml(hs.hubspot_url)+'" target="_blank" rel="noopener" title="Open this company record in HubSpot">⬡ View in HubSpot ↗</a>'):'')+
+      '</div></div>'+
     '<div data-cpt="overview related usage revenue">'+tiles+'</div>'+
     '<div class="cp-section" data-cpt="overview related"><div class="cp-shead"><h2>Signals</h2></div>'+signals+'</div>'+
     '<div class="cp-section" data-cpt="revenue"><div class="cp-shead"><h2>Revenue &amp; renewal</h2><span class="cp-cnt">commercials</span></div>'+
