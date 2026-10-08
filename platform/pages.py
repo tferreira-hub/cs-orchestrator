@@ -19,7 +19,7 @@ from __future__ import annotations
 # configured). Lets you sign in as any email to exercise per-user scoping without
 # a real IdP. Admin-ness comes from AUTH_ADMIN_EMAILS / CS_ADMIN_GROUPS.
 _DEV_LOGIN_HTML = """<!doctype html><html><head><meta charset=utf-8>
-<title>CS Platform — Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>The CIA - Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
 display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 .card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:36px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
@@ -31,8 +31,8 @@ button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;backgr
 .app{flex:1;text-align:center;padding:10px;border:1px solid #2c3854;border-radius:9px;font-size:.8em;color:#9ab}
 .app.on{border-color:#3b82f6;color:#cfe;background:#12203a}</style></head>
 <body><form class=card method=POST action="/auth/dev-login">
-<h1>CS Platform</h1><div class=sub>Customer Success · sign in to your book</div>
-<div class=apps><div class="app on">CS Platform</div><div class=app>JA Observe</div></div>
+<h1>The CIA</h1><div class=sub>Customer Intelligence Agent · sign in to your book</div>
+<div class=apps><div class="app on">The CIA</div><div class=app>JA Observe</div></div>
 <label>Work email</label><input name=email type=email placeholder="you@jobadder.com" autofocus required>
 <button type=submit>Sign in</button>
 <div class=dev>Dev login (AUTH_DEV_LOGIN). Production uses Okta via Cognito SSO.</div>
@@ -44,7 +44,7 @@ button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:9px;backgr
 # them immediately). Instead we land on a clear CS signed-out screen with an explicit
 # "Sign in again" button that the user chooses to click.
 _SIGNED_OUT_HTML = """<!doctype html><html><head><meta charset=utf-8>
-<title>CS Platform — Signed out</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>The CIA - Signed out</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
 display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 .card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:40px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
@@ -52,21 +52,21 @@ h1{font-size:1.25em;margin:0 0 6px}.sub{color:#8aa;font-size:.88em;margin-bottom
 a.btn{display:block;padding:12px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#7c3aed);color:#fff;font-weight:600;font-size:1em;text-decoration:none}</style></head>
 <body><div class=card>
 <h1>You're signed out</h1>
-<div class=sub>Your CS Platform session has ended.</div>
+<div class=sub>Your CIA session has ended.</div>
 <a class=btn href="/login">Sign in again</a>
 </div></body></html>"""
 
 # Shown when a user authenticates successfully but is NOT entitled to the CS Platform
 # (not in a CS admin or user group). Defense-in-depth behind the UI launcher.
 _NOT_AUTHORISED_HTML = """<!doctype html><html><head><meta charset=utf-8>
-<title>CS Platform — Access required</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>The CIA - Access required</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1420;color:#e8edf5;
 display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 .card{background:#171f2e;border:1px solid #263149;border-radius:16px;padding:40px;max-width:440px;text-align:center}
 h1{font-size:1.25em;margin:0 0 10px}p{color:#9ab;line-height:1.5;font-size:.9em}
 a{color:#8ab4ff}</style></head>
 <body><div class=card>
-<h1>You don't have access to the CS Platform</h1>
+<h1>You don't have access to the CIA</h1>
 <p>Your JobAdder sign-in worked, but your account isn't yet a member of a Customer
 Success access group. Ask your CS lead or platform admin to add you to the
 <b>CS-Platform-Admins</b> group in Identity Center.</p>
@@ -79,7 +79,7 @@ Success access group. Ask your CS lead or platform admin to add you to the
 # (labelled trend line, renewal-stage bars, health gauge) and the sign-in panel. Pure
 # inline SVG/CSS, no external assets, CSP-friendly. Figures are illustrative mock data.
 _SSO_LOGIN_HTML = """<!doctype html><html lang=en><head><meta charset=utf-8>
-<title>CS Platform, Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>The CIA, Sign in</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -96,7 +96,7 @@ linear-gradient(90deg,transparent 95%,rgba(96,130,195,.07) 95%) 0 0/36px 100%;po
 .z{position:relative;z-index:2}
 .hinner{position:relative;z-index:2;width:100%;max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
 .hbrand{display:flex;align-items:center;gap:13px}
-.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;box-shadow:0 10px 28px rgba(59,130,246,.4)}
+.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.82em;letter-spacing:.5px;color:#fff;box-shadow:0 10px 28px rgba(59,130,246,.4)}
 .hbrand h1{font-size:1.12em;margin:0}.hbrand .t{color:#93a9cc;font-size:.78em;margin-top:2px}
 .htag{max-width:600px}
 .htag h2{font-size:2.05em;line-height:1.14;margin:0 0 12px;font-weight:720;letter-spacing:-.6px}
@@ -123,7 +123,7 @@ linear-gradient(90deg,transparent 95%,rgba(96,130,195,.07) 95%) 0 0/36px 100%;po
 .side{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;background:#0c1120;border-left:1px solid #1a2238}
 .card{width:100%;max-width:380px}
 .pb{display:flex;align-items:center;gap:11px;margin-bottom:30px}
-.pb .lg{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
+.pb .lg{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78em;letter-spacing:.4px;color:#fff}
 .pb .nm{font-size:.82em;color:#93a9cc}
 .card h3{font-size:1.5em;margin:0 0 8px;letter-spacing:-.3px}
 .sub{color:#a6b8d6;font-size:.9em;line-height:1.55;margin-bottom:26px}
@@ -145,7 +145,7 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
   <section class=hero>
     <div class=grid></div><div class="glow b"></div><div class="glow p"></div>
     <div class=hinner>
-    <div class="hbrand z"><div class=logo>CS</div><div><h1>CS Platform</h1><div class=t>Customer Success at JobAdder</div></div></div>
+    <div class="hbrand z"><div class=logo>CIA</div><div><h1>The CIA</h1><div class=t>Customer Intelligence Agent · JobAdder</div></div></div>
     <div class="htag z">
       <h2>Your whole book,<br><span>one prioritised view</span></h2>
       <p>Portfolio health, renewal cadence, churn risk and expansion signals, pulled together and ranked so you act on what matters first.</p>
@@ -216,10 +216,10 @@ a.sso:hover{filter:brightness(1.08);box-shadow:0 14px 34px rgba(79,110,220,.45)}
 
   <section class=side>
     <div class=card>
-      <div class=pb><div class=lg>CS</div><div class=nm>Customer Success Platform</div></div>
+      <div class=pb><div class=lg>CIA</div><div class=nm>Customer Intelligence Agent</div></div>
       __ERROR__
       <h3>Welcome back</h3>
-      <div class=sub>Access is restricted to JobAdder staff. Sign in with your company account to open your Customer Success workspace.</div>
+      <div class=sub>Access is restricted to JobAdder staff. Sign in with your company account to open your Customer Intelligence Agent workspace.</div>
       <a class=sso href="/login?sso=1">
         <svg viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1=15 y1=12 x2=3 y2=12/></svg>
         Sign in with JobAdder SSO</a>

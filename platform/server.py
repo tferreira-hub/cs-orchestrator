@@ -622,7 +622,7 @@ class Handler(BaseHTTPRequestHandler):
                 if UI_PATH.exists():
                     self._send(200, UI_PATH.read_bytes(), "text/html; charset=utf-8")
                 else:
-                    self._send(200, b"<h1>CS Platform</h1><p>UI not found.</p>", "text/html")
+                    self._send(200, b"<h1>The CIA</h1><p>UI not found.</p>", "text/html")
                 return
             # --- Tableau embedding (Connected App direct-trust SSO) --------- #
             # Config describes which dashboards to embed and where; it never returns
