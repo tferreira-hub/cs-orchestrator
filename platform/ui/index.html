@@ -1435,7 +1435,7 @@ function ccTab(tab){
 // My Renewals tab, built from live accounts that carry a renewal date/forecast.
 function renderCcRenewals(){
   const host=document.getElementById('cc-pane-renewals'); if(!host||!DATA)return;
-  const rows=filteredAccounts().filter(a=>a.renewal_date).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
+  const rows=filteredAccounts().filter(a=>a.renewal_date&&_renewalDateSane(a.renewal_date)).sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
   if(!rows.length){ host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">Upcoming renewals with the deterministic forecast</span></div><div class="body"><div class="empty">No accounts carry a renewal date in HubSpot yet.</div></div></div>'; return; }
   const body=rows.map(a=>{
     const fc=a.renewal_forecast;
@@ -1723,7 +1723,7 @@ function renderMyDashboard(){
   // ones hid the actionable overdue set.
   const today=new Date();
   const _rdays=a=>a.renewal_date?((new Date(a.renewal_date)-today)/86400000):null;
-  const ren90=accts.filter(a=>{const dd=_rdays(a);return dd!=null && dd<=90 && !a.churned;})
+  const ren90=accts.filter(a=>{const dd=_rdays(a);return dd!=null && dd<=90 && !a.churned && _renewalDateSane(a.renewal_date);})
     .sort((x,y)=>String(x.renewal_date).localeCompare(String(y.renewal_date)));
   const _renOverdue=ren90.filter(a=>_rdays(a)<0).length;
 
@@ -1880,13 +1880,14 @@ function renderMyWorkflows(){
 function renderMyRenewals(){
   const host=document.getElementById('md-pane-renewals'); if(!host||!DATA)return;
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const counts={};filteredAccounts().forEach(a=>{if(a.renewal_date){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
+  const counts={};filteredAccounts().forEach(a=>{if(a.renewal_date&&_renewalDateSane(a.renewal_date)){const m=new Date(a.renewal_date).getMonth();if(!isNaN(m))counts[m]=(counts[m]||0)+1;}});
   const maxM=Math.max(1,...Object.values(counts),1);
   const cal=months.map((m,i)=>'<div class="ren-mo"><div class="ren-bar-wrap"><div class="ren-bar" style="height:'+Math.round(((counts[i]||0)/maxM)*100)+'%"></div></div><div class="ren-n">'+(counts[i]||0)+'</div><div class="ren-m">'+m+'</div></div>').join('');
-  const withDates=filteredAccounts().filter(a=>a.renewal_date);
+  const withDates=filteredAccounts().filter(a=>a.renewal_date&&_renewalDateSane(a.renewal_date));
   const rows=withDates.length?withDates.map(a=>{const h=a.health;const circle=h&&h.computable?'<span class="hcircle '+hband(h.band)+'">'+h.score+'</span>':'<span class="hcircle hc-none">–</span>';
     const fc=a.renewal_forecast,label=(fc&&fc.applicable&&fc.label)?fc.label:'not classified';
-    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set in HubSpot.</td></tr>';
+    const rationale=(fc&&fc.applicable&&fc.rationale)?fc.rationale:'';
+    return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td><td class="muted">-</td><td class="muted">'+escapeHtml(a.renewal_date)+'</td><td class="mono">'+(a.arr_usd!=null?fmt(Math.round(a.arr_usd/12)):'-')+'</td><td>'+escapeHtml(label)+(rationale?' <span class="muted" style="font-size:.85em">'+escapeHtml(rationale)+'</span>':'')+'</td><td><span class="pill pln">open</span></td></tr>';}).join(''):'<tr><td colspan="7" class="empty" style="padding:24px">Nothing to display. Renewals appear here once a renewal date is set in HubSpot.</td></tr>';
   host.innerHTML='<div class="panel"><div class="head"><h2>My Renewals</h2><span class="note">Line-item end date by month</span></div>'+_mdFilterBar()+
     '<div class="body pad"><div class="ren-cal">'+cal+'</div></div></div>'+
     '<div class="panel"><div class="head"><h2>Renewal detail</h2><span class="note">You have 0 overdue line items</span></div>'+
@@ -3322,7 +3323,7 @@ async function renderCommandCenter(){
   // 12 forward buckets keyed by year-month from the current month.
   const fwd=new Array(12).fill(0); let overdueArr12=0;
   accts.forEach(a=>{
-    if(!a.renewal_date) return;
+    if(!a.renewal_date || !_renewalDateSane(a.renewal_date)) return;
     const dd=_rbmDays(a.renewal_date); const arr=a.arr_usd||0;
     if(dd==null) return;
     if(dd<0){ overdueArr12+=arr; return; }
@@ -3349,7 +3350,7 @@ async function renderCommandCenter(){
   // separate columns, and categories with no accounts simply drop out (no empty "0" bar).
   let fcRen=0,fcChurn=0,fcExp=0,fcNone=0, fcRenArr=0,fcChurnArr=0,fcExpArr=0,fcNoneArr=0;
   accts.forEach(a=>{
-    if(!a.renewal_date) return;
+    if(!a.renewal_date || !_renewalDateSane(a.renewal_date)) return;
     const fc=a.renewal_forecast; const lbl=(fc&&fc.applicable&&fc.label)?fc.label:null; const arr=a.arr_usd||0;
     if(lbl==='Churn Risk'){fcChurn++;fcChurnArr+=arr;}
     else if(lbl==='Expansion'){fcExp++;fcExpArr+=arr;}
@@ -3375,7 +3376,7 @@ async function renderCommandCenter(){
   // mislabelled past-due accounts as "on track".
   const _ccAsOf=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
   const _ccDays=d=>d?Math.round((new Date(d+(String(d).length<=10?'T00:00:00':''))-_ccAsOf)/86400000):null;
-  const dated=accts.filter(a=>a.renewal_date);
+  const dated=accts.filter(a=>a.renewal_date&&_renewalDateSane(a.renewal_date));
   const overdueRen=dated.filter(a=>{const dd=_ccDays(a.renewal_date);return dd!=null&&dd<0&&!a.churned;})
     .sort((x,y)=>String(y.renewal_date).localeCompare(String(x.renewal_date))); // most-overdue context: newest-past first
   const upcomingRen=dated.filter(a=>{const dd=_ccDays(a.renewal_date);return dd==null||dd>=0;})
@@ -4157,6 +4158,19 @@ function enrichMyBook(){
       }
     } finally { _bookEnrichPolling=false; }
   })();
+}
+// A renewal date is only "sane" if it is plausibly real for an active subscription.
+// HubSpot carries corrupt values (year 1314/1700, the 1970 epoch, dates thousands of days
+// in the past) that are data-entry errors, not genuine renewals. Mirror the server bound:
+// at most ~2 years (730d) overdue, at most ~5 years (1825d) out. Keeps '260,334 days ago'
+// garbage out of the renewal views instead of presenting it as an upcoming renewal.
+function _renewalDateSane(dateStr){
+  if(!dateStr) return false;
+  const d=new Date(String(dateStr)+(String(dateStr).length<=10?'T00:00:00':''));
+  if(isNaN(d)) return false;
+  const today=(window.DATA&&DATA.as_of)?new Date(DATA.as_of):new Date();
+  const days=Math.round((d-today)/86400000);
+  return days>=-730 && days<=1825;
 }
 // Planhat shows renewal as a relative "in days" value, not a raw date.
 function renewalDays(dateStr){

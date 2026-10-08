@@ -680,7 +680,7 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
     hs = account.get("hubspot", {}) or {}
     churn = account.get("churn", {}) or {}
 
-    if not hs.get("renewal_date"):
+    if not hs.get("renewal_date") or not _renewal_date_is_sane(hs.get("renewal_date")):
         return {"applicable": False, "label": None, "rationale": None, "evidence": []}
 
     band = health.get("band") if isinstance(health, dict) else None
@@ -930,8 +930,35 @@ def expansion_score(account: dict, segment_median_arr: float | None = None) -> d
                       "utilization, API surge, renewal timing and ARR headroom (not an ML model)"}
 
 
+def _renewal_date_is_sane(renewal_date) -> bool:
+    """Whether a renewal date is plausibly real for an active subscription, rather than a
+    HubSpot data-entry error. We regularly see corrupt values (year 1314/1700, the Unix
+    epoch 1970-01-01, or dates thousands of days in the past) that are clearly not genuine
+    renewals. A sane renewal sits within a sensible window: at most ~2 years overdue and at
+    most ~5 years out. Anything outside that is treated as missing/garbage so it never
+    pollutes the renewal views or the forecast. Honest: we drop obviously-bad data rather
+    than present '260,334 days overdue' as an upcoming renewal."""
+    if not renewal_date:
+        return False
+    from datetime import date, datetime
+    try:
+        rd = datetime.fromisoformat(str(renewal_date)[:10]).date()
+    except (ValueError, TypeError):
+        return False
+    today_env = os.environ.get("CS_TODAY")
+    try:
+        today = datetime.fromisoformat(today_env).date() if today_env else date.today()
+    except ValueError:
+        today = date.today()
+    delta = (rd - today).days
+    # Window: up to ~2 years (730d) overdue, up to ~5 years (1825d) in the future.
+    return -730 <= delta <= 1825
+
+
 def _days_to_renewal(renewal_date) -> int | None:
     if not renewal_date:
+        return None
+    if not _renewal_date_is_sane(renewal_date):
         return None
     from datetime import date, datetime
     try:
