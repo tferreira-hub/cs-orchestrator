@@ -47,6 +47,14 @@ def _isolate_shared_globals():
         os.environ["CS_REPORT_CACHE_TTL"] = "0"
         if hasattr(engine, "_REPORT_CACHE"):
             engine._REPORT_CACHE.clear()
+        # Isolate the inbound queue: start empty and mark it already-loaded so _load_inbound
+        # does NOT read a stray on-disk store between tests. Tests that exercise persistence
+        # set CS_INBOUND_FILE + reset the flag themselves. Mirrors the presence isolation.
+        if hasattr(engine, "_INBOUND_QUEUE"):
+            engine._INBOUND_QUEUE.clear()
+            engine._INBOUND_QUEUE_LOADED = True
+            os.environ["CS_INBOUND_FILE"] = os.path.join(
+                os.environ.get("TMPDIR", "/tmp"), ".cs-inbound-test-isolated.jsonl")
 
     yield
 
@@ -54,3 +62,6 @@ def _isolate_shared_globals():
     engine = sys.modules.get("engine")
     if engine is not None:
         engine.set_principal(prev_principal)
+        if hasattr(engine, "_INBOUND_QUEUE"):
+            engine._INBOUND_QUEUE.clear()
+            engine._INBOUND_QUEUE_LOADED = True

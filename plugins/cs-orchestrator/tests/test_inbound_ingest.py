@@ -211,3 +211,41 @@ def test_start_inbound_ingest_is_single_flight(monkeypatch):
         if engine.inbound_ingest_status()["state"] == "done":
             break
         time.sleep(0.02)
+
+
+def test_inbound_queue_persists_across_restart(monkeypatch, tmp_path):
+    """record_inbound writes to the JSONL store; after clearing in-memory state and the
+    load flag (simulating a task restart), _load_inbound rehydrates the queue, including a
+    status change made via resolve_inbound. This is what makes the pooled Inbox survive
+    deploys without a manual re-pull."""
+    import engine
+    store = tmp_path / "inbound.jsonl"
+    monkeypatch.setenv("CS_INBOUND_FILE", str(store))
+    # Fresh state.
+    engine._INBOUND_QUEUE.clear()
+    engine._INBOUND_QUEUE_LOADED = False
+
+    engine.record_inbound([
+        {"id": "hs-1", "channel": "mailbox", "account_ref": "au1-1", "subject": "add seats",
+         "intent": "general", "destination": "cs_pooled_queue", "assigned_to": "Sam",
+         "received_at": 1_000_000, "sla_due": 1_086_400},
+        {"id": "hs-2", "channel": "mailbox", "account_ref": "au1-2", "subject": "crash",
+         "intent": "technical", "destination": "zendesk_handoff",
+         "received_at": 1_000_000, "sla_due": 1_086_400},
+    ])
+    assert store.exists()
+    # Resolve one so a status change is also persisted.
+    engine.resolve_inbound("hs-2", status="resolved")
+
+    # Simulate a restart: wipe memory + the load flag, then hydrate from disk only.
+    engine._INBOUND_QUEUE.clear()
+    engine._INBOUND_QUEUE_LOADED = False
+    engine._load_inbound()
+
+    q = engine._INBOUND_QUEUE
+    assert set(q.keys()) == {"hs-1", "hs-2"}
+    assert q["hs-1"]["status"] == "open"
+    assert q["hs-2"]["status"] == "resolved"          # status change replayed
+    assert q["hs-1"]["account_ref"] == "au1-1"
+    engine._INBOUND_QUEUE.clear()
+    engine._INBOUND_QUEUE_LOADED = False

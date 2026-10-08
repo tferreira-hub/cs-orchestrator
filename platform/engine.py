@@ -3050,12 +3050,62 @@ def pooled_roster(with_availability: bool = True) -> dict:
 # without changing the intake/triage contract. Resolving a ticket (reply/close via the
 # Zendesk writes, or marking handled) sets its status.
 _INBOUND_QUEUE: dict[str, dict] = {}
+_INBOUND_QUEUE_LOADED = False
+
+
+def _inbound_path() -> Path:
+    """EFS-persisted inbound-queue store (append-only JSONL, latest-per-id wins). Keeps the
+    pooled triage queue across task restarts and multiple ECS tasks, exactly like the CSM
+    presence / task-events / history stores. Falls back to a repo-local file for tests/dev.
+    Set CS_INBOUND_FILE to the EFS path in production."""
+    return Path(os.environ.get("CS_INBOUND_FILE",
+                               str(Path(__file__).resolve().parents[1] / ".cs-inbound.jsonl")))
+
+
+def _load_inbound() -> None:
+    """Hydrate _INBOUND_QUEUE from the JSONL store once per process. Later lines overwrite
+    earlier ones for the same ticket id (upserts + status changes + reassignments), so the
+    final state replays correctly. Never raises; a corrupt line is skipped."""
+    global _INBOUND_QUEUE_LOADED
+    if _INBOUND_QUEUE_LOADED:
+        return
+    _INBOUND_QUEUE_LOADED = True
+    path = _inbound_path()
+    if not path.exists():
+        return
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            tid = row.get("id")
+            if tid:
+                _INBOUND_QUEUE[tid] = row
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _append_inbound(row: dict) -> None:
+    """Append a ticket's current full state to the JSONL store (best-effort; never breaks
+    the write path). Append-only + latest-per-id-wins means every upsert, status change and
+    reassignment is replayed on the next boot."""
+    try:
+        path = _inbound_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _live_pooled_load() -> dict[str, int]:
     """Current OPEN inbound-ticket count per pooled CSM, from the live queue. Seeds the
     inbound engine's least-loaded assignment so each new batch balances against the real
     standing workload, not a per-call reset. Only open tickets count toward load."""
+    _load_inbound()
     load: dict[str, int] = {}
     for r in _INBOUND_QUEUE.values():
         if r.get("status") == "open" and r.get("assigned_to"):
@@ -3066,6 +3116,7 @@ def _live_pooled_load() -> dict[str, int]:
 def record_inbound(tickets: list[dict]) -> int:
     """Persist triaged tickets into the inbound queue (upsert by id). Returns how many
     were stored/updated. Status defaults to 'open'; existing status is preserved."""
+    _load_inbound()
     n = 0
     for t in tickets or []:
         tid = t.get("id")
@@ -3076,6 +3127,7 @@ def record_inbound(tickets: list[dict]) -> int:
         row["status"] = prev.get("status", "open")
         row["recorded_at"] = prev.get("recorded_at") or datetime.now(timezone.utc).isoformat()
         _INBOUND_QUEUE[tid] = row
+        _append_inbound(row)
         n += 1
     return n
 
@@ -3214,8 +3266,9 @@ def inbound_queue(status: str | None = None) -> dict:
     recomputed each read against the CURRENT time and live CSM presence, not frozen at
     intake. This satisfies UC1's '20h -> auto-reassign' and the 24h SLA: a ticket that
     crosses the thresholds while sitting in the queue, or whose owner later goes OOO,
-    now surfaces correctly without needing a fresh intake batch."""
+    now needing one without a fresh intake batch."""
     import time as _t
+    _load_inbound()
     now = int(_t.time())
     SLA_H, REASSIGN_H = 24, 20  # mirror inbound.SLA_HOURS / REASSIGN_AFTER_HOURS
     # Live availability + running load so a reassignment goes to the least-loaded
@@ -3252,6 +3305,7 @@ def inbound_queue(status: str | None = None) -> dict:
                 r["reassigned_at"] = datetime.now(timezone.utc).isoformat()
                 _live_load[best["name"]] = _live_load.get(best["name"], 0) + 1
                 r["needs_reassign"] = False
+                _append_inbound(r)
             else:
                 r["needs_reassign"] = True
         else:
@@ -3282,11 +3336,13 @@ def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
     status = (status or "resolved").strip().lower()
     if status not in ("open", "resolved", "handed_off", "closed"):
         raise ValueError(f"invalid status {status!r}")
+    _load_inbound()
     row = _INBOUND_QUEUE.get(ticket_id)
     if not row:
         raise KeyError(ticket_id)
     row["status"] = status
     row["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    _append_inbound(row)
     return row
 
 

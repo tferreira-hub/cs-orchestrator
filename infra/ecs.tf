@@ -59,6 +59,9 @@ locals {
     # Pooled-CSM presence (OOO/available) must persist so the inbound round-robin and
     # auto-reassignment keep working across task restarts and >1 ECS task.
     CS_PRESENCE_FILE = "/data/.cs-presence.jsonl"
+    # Inbound/triage queue must persist so the pooled Inbox + Escalations survive restarts
+    # and multiple ECS tasks (append-only JSONL, latest-per-ticket-id wins on replay).
+    CS_INBOUND_FILE = "/data/.cs-inbound.jsonl"
   })
 
   container_environment = [for k, v in local.computed_env : { name = k, value = tostring(v) }]
