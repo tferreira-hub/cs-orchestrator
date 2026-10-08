@@ -3399,27 +3399,9 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     churned_arr = 0
     expansion_pipeline_arr = 0
     expansion_accounts = 0
-    # NDR from the warehouse monthly ARR series (rpt_account_ndr_monthly): dollar-weighted
-    # current-period revenue vs the same accounts' prior-year revenue. This is REALISED
-    # net revenue retention (expansion - contraction - churn on the existing base), the
-    # board metric, not pipeline. Only accounts with BOTH figures contribute.
-    ndr_current = 0.0
-    ndr_prior = 0.0
-    ndr_accounts = 0
     for aid, a in accounts.items():
         live = _live_account(a)
         hs = live.get("hubspot", {})
-        m = live.get("metrics", {}) or {}
-        try:
-            cur, prior = m.get("revenue_prev_year_usd"), None
-            # metrics() exposes current revenue as mrr_usd and prior as revenue_prev_year_usd.
-            cur = m.get("mrr_usd"); prior = m.get("revenue_prev_year_usd")
-            if cur not in (None, "") and prior not in (None, "") and float(prior) > 0:
-                ndr_current += float(cur)
-                ndr_prior += float(prior)
-                ndr_accounts += 1
-        except (TypeError, ValueError):
-            pass
         arr = hs.get("arr_usd") or 0
         if not arr:
             continue
@@ -3438,6 +3420,79 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
         } for t in acct_tasks):
             expansion_pipeline_arr += arr
             expansion_accounts += 1
+
+    # NDR from the warehouse monthly ARR series (rpt_account_ndr_monthly), computed
+    # DIRECTLY off the batched whole-book snapshot keyed by uppercase AUx-yyyy ref rather
+    # than relying on each account dict already carrying a metrics block (the roster join
+    # dropped ~99% of accounts, zeroing the prior-year sum and forcing an honest None).
+    # Dollar-weighted current-period revenue (mrr_usd) over the same accounts' prior-year
+    # revenue (revenue_prev_year_usd). This is REALISED net retention (expansion minus
+    # contraction minus churn on the existing base), the board metric, not pipeline. Only
+    # rows with BOTH figures present and a positive prior contribute, so the number is
+    # never inflated. Admin / no-principal scope spans the whole book; a CSM principal is
+    # restricted to their owned refs (the accounts passed in are already owner-scoped by
+    # _retention_accounts). When the warehouse snapshot is unavailable we fall back to any
+    # per-account metrics blocks the caller attached, so the figure stays honest in both
+    # live and fixture paths.
+    ndr_current = 0.0
+    ndr_prior = 0.0
+    ndr_accounts = 0
+
+    def _add_ndr(cur, prior):
+        nonlocal ndr_current, ndr_prior, ndr_accounts
+        if cur in (None, "") or prior in (None, ""):
+            return
+        try:
+            cur_f = float(cur)
+            prior_f = float(prior)
+        except (TypeError, ValueError):
+            return
+        if prior_f > 0:
+            ndr_current += cur_f
+            ndr_prior += prior_f
+            ndr_accounts += 1
+
+    try:
+        from adapters import identity as _id
+        snapshot = _batch_metrics_for([]) or {}
+        # Any per-account metrics the caller already attached (fixture path / enriched slice).
+        inline_metrics = any((a.get("metrics") or {}) for a in accounts.values())
+        if not snapshot and not inline_metrics:
+            # The lazy whole-book cache is non-blocking and empty until the boot warm (or a
+            # prior request) populates it, which would make a cold first request show a false
+            # "no data". Warm it synchronously here so NDR is warehouse-driven and honest on
+            # the first call too. Still a no-op (returns {}) when the source is not live.
+            try:
+                warm_batch_metrics()
+            except Exception:  # noqa: BLE001
+                pass
+            snapshot = _batch_metrics_for([]) or {}
+        if snapshot:
+            p = get_principal()
+            scoped_refs = None
+            if p and p.get("role") not in (None, "admin"):
+                # Owner-scoped: only count this CSM's owned refs. Build the uppercase ref
+                # set from the accounts passed in (already owner-scoped by
+                # _retention_accounts).
+                scoped_refs = set()
+                for a in accounts.values():
+                    ref = (a.get("hubspot", {}) or {}).get("account_id") or a.get("account_id")
+                    if ref:
+                        scoped_refs.add(_id.normalise(str(ref)).upper())
+            for ref, m in snapshot.items():
+                if scoped_refs is not None and str(ref).upper() not in scoped_refs:
+                    continue
+                if not isinstance(m, dict):
+                    continue
+                _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
+        else:
+            # Fallback: no warehouse snapshot, use whatever per-account metrics are present.
+            for a in accounts.values():
+                m = a.get("metrics") or {}
+                if isinstance(m, dict) and m:
+                    _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
+    except Exception:  # noqa: BLE001 - NDR augmentation is best-effort, stay honest on failure
+        pass
 
     ndr_pct = round(100.0 * ndr_current / ndr_prior, 1) if ndr_prior > 0 else None
 

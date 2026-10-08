@@ -369,6 +369,19 @@ table.acct-list .col-play,table.acct-list th.col-play{width:26px;padding-left:6p
 table.acct-list input[type=checkbox]{width:14px;height:14px;accent-color:var(--brand);cursor:pointer;vertical-align:middle}
 table.acct-list .rowplay{color:var(--muted);font-size:.8em;opacity:0;transition:opacity .12s}
 table.acct-list tr:hover .rowplay{opacity:1;color:var(--brand)}
+/* --- Pooled CS Inbox queue (renderPooledInbox): segment filter + dense rows --- */
+.ibx-segs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+.ibx-seg{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:.8em;font-weight:600;color:var(--ink2);background:#fff;border:1px solid #dfe3ed;border-radius:999px;padding:5px 12px;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+.ibx-seg:hover{border-color:var(--brand);color:var(--brand)}
+.ibx-seg.on{background:var(--brandsoft);border-color:#d7d9fb;color:var(--brand)}
+.ibx-segn{font-size:.85em;font-weight:800;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:0 7px;min-width:18px;text-align:center;color:var(--ink2)}
+.ibx-seg.on .ibx-segn{background:#fff;border-color:#d7d9fb;color:var(--brand)}
+table.ibx-table td{padding:8px 16px;vertical-align:middle}
+table.ibx-table .ibx-co{font-weight:600;color:var(--ink);line-height:1.25}
+table.ibx-table .ibx-subj{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default}
+table.ibx-table tr.ibx-breach td{background:var(--redbg)}
+table.ibx-table tr.ibx-breach:hover td{background:#fbe0e1}
+
 .hcircle.hc-none{border-color:var(--line);color:var(--muted);background:#fff}
 /* (AI) Business Health numeric pill */
 .bhpill{display:inline-block;min-width:30px;text-align:center;border-radius:7px;padding:2px 8px;font-size:.8em;font-weight:700;font-variant-numeric:tabular-nums}
@@ -1639,32 +1652,50 @@ function renderPooledDashboard(){
   const host=document.getElementById('sc-pane-dashboard'); if(!host||!DATA)return;
   const pool=filteredAccounts().filter(a=>(a.arr_usd==null)||a.arr_usd<10001);
   const totalArr=pool.reduce((s,a)=>s+(a.arr_usd||0),0);
-  const phases={};pool.forEach(a=>{const p=a.lifecycle_stage||'Unknown';phases[p]=(phases[p]||0)+1;});
-  const maxP=Math.max(1,...Object.values(phases));
-  const phaseBars=Object.entries(phases).sort((a,b)=>b[1]-a[1]).map(([p,n])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+n+'</span><div class="cc-distbar" style="height:'+Math.round((n/maxP)*100)+'%;background:var(--brand)"></div></div><div class="cc-distlbl">'+escapeHtml(p)+'</div></div>').join('');
-  // Segment distribution across the pool (Agency / Corporate / etc.).
-  const segs={};pool.forEach(a=>{const s=a.segment||'Unknown';segs[s]=(segs[s]||0)+1;});
-  const maxS=Math.max(1,...Object.values(segs));
-  const segBars=Object.entries(segs).sort((a,b)=>b[1]-a[1]).map(([s,n])=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+n+'</span><div class="cc-distbar" style="height:'+Math.round((n/maxS)*100)+'%;background:var(--brand2,#7c5cff)"></div></div><div class="cc-distlbl">'+escapeHtml(s)+'</div></div>').join('');
-  // Health distribution across the pool (scored accounts only).
+  // Scored accounts drive the health view; everything else is a count distribution.
   const scored=pool.filter(a=>a.health&&a.health.computable);
   const hb={red:0,amber:0,green:0};scored.forEach(a=>{hb[a.health.band]=(hb[a.health.band]||0)+1;});
   const notScored=pool.length-scored.length;
-  const maxH=Math.max(1,hb.red,hb.amber,hb.green,notScored);
-  const healthBars='<div class="cc-dist" style="height:130px">'+[['At risk',hb.red,'var(--red)'],['Watch',hb.amber,'var(--amber)'],['Healthy',hb.green,'var(--green)'],['Not scored',notScored,'var(--muted)']].map(x=>'<div class="cc-distcol"><div class="cc-distbarwrap"><span class="cc-distn">'+x[1]+'</span><div class="cc-distbar" style="height:'+Math.round((x[1]/maxH)*100)+'%;background:'+x[2]+'"></div></div><div class="cc-distlbl">'+x[0]+'</div></div>').join('')+'</div>';
   const avgHealth=scored.length?Math.round(scored.reduce((s,a)=>s+a.health.score,0)/scored.length):0;
+  const atRiskArr=pool.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
+  // Horizontal bar renderer: shows the label, the count, and the share as a percentage,
+  // with a proportional fill. Used for segment, phase, and health mixes so every row is
+  // readable at a glance and the three cards stay visually consistent.
+  function hbars(entries,total,fallback){
+    if(!entries.length||total<=0) return '<div class="muted" style="font-size:.86em">'+fallback+'</div>';
+    const maxN=Math.max(1,...entries.map(e=>e[1]));
+    return '<div class="seg-bars">'+entries.map(function(e){
+      const label=e[0],n=e[1],colour=e[2]||'var(--brand)';
+      const pct=Math.round((n/total)*100);
+      const w=Math.round((n/maxN)*100);
+      return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(label)+'</span>'+
+        '<span class="seg-val">'+n.toLocaleString()+' <span class="muted" style="font-weight:600">'+pct+'%</span></span></div>'+
+        '<div class="hbar" style="width:100%"><span class="hfill" style="width:'+w+'%;background:'+colour+'"></span></div></div>';
+    }).join('')+'</div>';
+  }
+  // Segment mix across the pool (Agency / Corporate / etc.).
+  const segs={};pool.forEach(a=>{const s=a.segment||'Unknown';segs[s]=(segs[s]||0)+1;});
+  const segEntries=Object.entries(segs).sort((a,b)=>b[1]-a[1]).map(e=>[e[0],e[1],'var(--brand2,#7c5cff)']);
+  const segBars=hbars(segEntries,pool.length,'No segment data.');
+  // Phase mix (lifecycle stage).
+  const phases={};pool.forEach(a=>{const p=a.lifecycle_stage||'Unknown';phases[p]=(phases[p]||0)+1;});
+  const phaseEntries=Object.entries(phases).sort((a,b)=>b[1]-a[1]).map(e=>[e[0],e[1],'var(--brand)']);
+  const phaseBars=hbars(phaseEntries,pool.length,'No pooled customers.');
+  // Health distribution. Percentages are shares of the whole pool so Not scored stays honest.
+  const healthEntries=[['At risk',hb.red,'var(--red)'],['Watch',hb.amber,'var(--amber)'],['Healthy',hb.green,'var(--green)'],['Not scored',notScored,'var(--muted)']].filter(x=>x[1]>0);
+  const healthBars=hbars(healthEntries,pool.length,'No pooled customers.');
   host.innerHTML='<div class="cc-headline" style="margin-bottom:16px;grid-template-columns:repeat(4,1fr)">'+
     '<div class="cc-big"><div class="cc-big-l">Total ARR</div><div class="cc-big-v">'+fmt(totalArr)+'</div></div>'+
-    '<div class="cc-big"><div class="cc-big-l">Pooled Customers</div><div class="cc-big-v">'+pool.length+'</div></div>'+
-    '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v '+(avgHealth>=75?'good':avgHealth<50?'warn':'')+'">'+(scored.length?avgHealth:'-')+'</div><div class="cc-big-s">'+scored.length+' scored of '+pool.length+'</div></div>'+
-    '<div class="cc-big"><div class="cc-big-l">At risk</div><div class="cc-big-v '+(hb.red>0?'warn':'good')+'">'+hb.red+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">Pooled Customers</div><div class="cc-big-v">'+pool.length.toLocaleString()+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">Avg Health</div><div class="cc-big-v '+(avgHealth>=75?'good':avgHealth<50?'warn':'')+'">'+(scored.length?avgHealth:'-')+'</div><div class="cc-big-s">'+scored.length.toLocaleString()+' scored of '+pool.length.toLocaleString()+'</div></div>'+
+    '<div class="cc-big"><div class="cc-big-l">At-risk ARR</div><div class="cc-big-v '+(atRiskArr>0?'warn':'good')+'">'+fmt(atRiskArr)+'</div></div>'+
   '</div>'+
   '<div class="mdw-grid" style="margin-bottom:16px">'+
-    _widget('Pooled customers by phase','<div class="cc-dist">'+(phaseBars||'<div class="empty" style="width:100%">No pooled customers.</div>')+'</div>')+
-    _widget('Pooled customers by segment','<div class="cc-dist">'+(segBars||'<div class="empty" style="width:100%">No segment data.</div>')+'</div>')+
+    _widget('Segment mix',segBars,'wide')+
+    _widget('Phase mix',phaseBars,'wide')+
+    _widget('Health distribution',healthBars,'wide')+
   '</div>'+
-  '<div class="panel"><div class="head"><h2>Pooled health distribution</h2></div><div class="body pad">'+healthBars+'</div></div>'+
-  '<div class="panel" id="csm-presence-panel" style="margin-top:16px"><div class="head"><h2>Pooled team availability</h2><span class="note">Feeds the inbound round-robin</span></div><div class="body pad" id="csm-presence-body"><span class="muted">Loading…</span></div></div>';
+  '<div class="panel" id="csm-presence-panel"><div class="head"><h2>Pooled team availability</h2><span class="note">Feeds the inbound round-robin</span></div><div class="body pad" id="csm-presence-body"><span class="muted">Loading...</span></div></div>';
   loadCsmPresence();
 }
 // CSM presence feed, Available/OOO toggles that drive the inbound round-robin (WoW §3).
@@ -2541,33 +2572,101 @@ function renderPooledInbox(){
       body='<div class="panel"><div class="body pad"><div class="empty"><b>No inbound items yet</b>'+
         '<div class="sub" style="margin-top:6px">The triage + round-robin engine is live. Press <strong>Pull from HubSpot</strong> to ingest recent Service Hub tickets, or connect the five inbound channels (Zendesk misroutes, Slack call logs, '+
         'accountmanagement@ mailbox, campaign replies, high-intent forms). Items are classified by intent '+
-        '(technical → Zendesk, billing → CS queue, expansion → CSQL) and round-robined to available pooled CSMs under a 24-hour SLA. No sample data is shown.</div></div></div></div>';
+        '(technical to Zendesk, billing to CS queue, expansion to CSQL) and round-robined to available pooled CSMs under a 24-hour SLA. No sample data is shown.</div></div></div></div>';
+      host.innerHTML=header+body;
     } else {
-      const rows=tickets.map(t=>{
-        const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':'a';
-        const dueTxt=t.sla_breached?'<span class="pill r">SLA breached</span>':(t.needs_reassign?'<span class="pill a">reassign</span>':'<span class="pill g">on track</span>');
-        // Zendesk-handoff items that carry a real ticket id get reply/close actions so a CSM
-        // can resolve them in-platform (increment 3). Gated server-side (dry-run until the
-        // Zendesk write token is live).
-        const tid=(t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute')?String(t.id||''):'';
-        const actions=tid?('<button class="btn" style="padding:4px 9px" onclick="zdReply(\''+escapeHtml(tid)+'\',this)">Reply</button> '+
-          '<button class="btn" style="padding:4px 9px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):
-          (t.status==='open'?'<button class="btn btn-ghost" style="padding:4px 9px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted">-</span>');
-        return '<tr><td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="sub">'+escapeHtml(t.from||'')+' · '+escapeHtml(t.channel||'')+'</div></td>'+
-          '<td>'+escapeHtml(t.account_name||t.account_ref||'-')+'</td>'+
-          '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent)+'</span></td>'+
-          '<td class="muted">'+escapeHtml((t.destination||'').replace(/_/g,' '))+'</td>'+
-          '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+(t.reassigned_from?('<div class="sub">reassigned from '+escapeHtml(t.reassigned_from)+(t.reassigned_reason?(' · '+escapeHtml(t.reassigned_reason)):'')+'</div>'):'')+'</td>'+
-          '<td>'+dueTxt+'</td>'+
-          '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
-      }).join('');
-      body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+tickets.length+' items</span></div>'+
-        '<div class="body"><table class="acct-list"><thead><tr><th>Item</th><th>Company</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+      // Segment classifier: SLA-breached is a cross-cutting bucket shown first; the rest map
+      // from the triage intent (technical, billing, expansion) with everything else as general.
+      const segOf=(t)=>{
+        const i=(t.intent||'').toLowerCase();
+        if(i==='technical')return 'technical';
+        if(i==='billing')return 'billing';
+        if(i==='expansion')return 'expansion';
+        return 'general';
+      };
+      // Stable sort: SLA-breached first, then the original queue order (round-robin order).
+      const ordered=tickets.map((t,i)=>({t,i})).sort((a,b)=>{
+        const ab=a.t.sla_breached?0:1, bb=b.t.sla_breached?0:1;
+        return ab!==bb?ab-bb:a.i-b.i;
+      }).map(x=>x.t);
+      // Keep a live reference for the segment-filter + show-all handlers.
+      window._INBOX_TICKETS=ordered;
+      const counts={all:ordered.length,sla:0,technical:0,billing:0,expansion:0,general:0};
+      ordered.forEach(t=>{ if(t.sla_breached)counts.sla++; counts[segOf(t)]++; });
+      const segBtn=(key,label)=>'<button class="ibx-seg'+(key==='all'?' on':'')+'" data-seg="'+key+'" onclick="inboxFilter(\''+key+'\',this)">'+label+' <span class="ibx-segn">'+counts[key]+'</span></button>';
+      const filterbar='<div class="ibx-segs">'+
+        segBtn('all','All')+
+        segBtn('sla','SLA breached')+
+        segBtn('technical','Technical')+
+        segBtn('billing','Billing')+
+        segBtn('expansion','Expansion')+
+        segBtn('general','General')+
+      '</div>';
+      body='<div class="panel"><div class="head"><h2>Triaged queue</h2><span class="note">'+ordered.length+' items</span></div>'+
+        '<div class="body"><div style="padding:12px 16px 0">'+filterbar+'</div>'+
+        '<table class="acct-list ibx-table"><thead><tr><th>Company</th><th>Intent</th><th>Routed to</th><th>Owner</th><th>SLA</th><th>Actions</th></tr></thead>'+
+        '<tbody id="ibx-rows"></tbody></table>'+
+        '<div id="ibx-more" style="padding:12px 16px"></div></div></div>';
+      host.innerHTML=header+body;
+      // Render rows (initial cap 50) through the shared renderer so the segment-filter and
+      // the show-all control both reuse the exact same row markup and wiring.
+      window._inboxSegOf=segOf;
+      inboxRenderRows('all',false);
     }
-    host.innerHTML=header+body;
     // Populate the round-robin roster chip from live presence (best-effort, non-blocking).
     try{ const pr=await (await api('/api/csm/availability')).json(); window.POOLED_ROSTER=(pr.roster||[]).filter(c=>c.available!==false).map(c=>c.name); }catch(e){}
   })();
+}
+// Shared row renderer for the inbox queue. Builds the dense rows for the active segment,
+// caps the initial render to ~50 rows, and exposes a 'Show all N' control that reveals the
+// rest without permanently hiding anything. Reused by the segment filter and show-all click.
+function inboxRenderRows(seg,showAll){
+  const tbody=document.getElementById('ibx-rows');
+  const more=document.getElementById('ibx-more');
+  if(!tbody)return;
+  const all=window._INBOX_TICKETS||[];
+  const segOf=window._inboxSegOf||(()=> 'general');
+  const CAP=50;
+  const list=all.filter(t=> seg==='all' ? true : (seg==='sla' ? !!t.sla_breached : segOf(t)===seg));
+  const shown=showAll?list:list.slice(0,CAP);
+  const rows=shown.map(t=>{
+    const intentCls=t.intent==='expansion'?'g':t.intent==='technical'?'nc2':t.intent==='billing'?'a':'nc2';
+    const dueTxt=t.sla_breached?'<span class="pill r">SLA breached</span>':(t.needs_reassign?'<span class="pill a">reassign</span>':'<span class="pill g">on track</span>');
+    // Zendesk-handoff items that carry a real ticket id get reply/close actions so a CSM
+    // can resolve them in-platform. Gated server-side (dry-run until the write token is live).
+    const tid=(t.destination==='zendesk_handoff'||t.channel==='zendesk_misroute')?String(t.id||''):'';
+    const actions=tid?('<button class="btn" style="padding:3px 8px" onclick="zdReply(\''+escapeHtml(tid)+'\',this)">Reply</button> '+
+      '<button class="btn" style="padding:3px 8px;background:#6b7280" onclick="zdClose(\''+escapeHtml(tid)+'\',this)">Close</button>'):
+      (t.status==='open'?'<button class="btn btn-ghost" style="padding:3px 8px" onclick="resolveInbound(\''+escapeHtml(String(t.id)).replace(/\x27/g,"")+'\')">Mark handled</button>':'<span class="muted">-</span>');
+    const subj=t.subject||'(no subject)';
+    const subTitle=escapeHtml(subj+(t.from?('  '+t.from):''));
+    const rowCls=t.sla_breached?' class="ibx-breach"':'';
+    return '<tr'+rowCls+'>'+
+      '<td><div class="ibx-co">'+escapeHtml(t.account_name||t.account_ref||'-')+'</div>'+
+        '<div class="sub ibx-subj" title="'+subTitle+'">'+escapeHtml(subj)+'</div></td>'+
+      '<td><span class="pill '+intentCls+'">'+escapeHtml(t.intent||'-')+'</span></td>'+
+      '<td class="muted">'+escapeHtml((t.destination||'').replace(/_/g,' ')||'-')+'</td>'+
+      '<td>'+(t.assigned_to?escapeHtml(t.assigned_to):'<span class="muted">-</span>')+(t.reassigned_from?('<div class="sub">reassigned from '+escapeHtml(t.reassigned_from)+(t.reassigned_reason?(', '+escapeHtml(t.reassigned_reason)):'')+'</div>'):'')+'</td>'+
+      '<td>'+dueTxt+'</td>'+
+      '<td>'+actions+' <span class="muted" id="zd-status-'+escapeHtml(tid)+'" style="font-size:.8em"></span></td></tr>';
+  }).join('');
+  tbody.innerHTML=rows||'<tr><td colspan="6" class="muted" style="padding:16px">No items in this segment.</td></tr>';
+  if(more){
+    if(!showAll && list.length>CAP){
+      more.innerHTML='<button class="btn btn-ghost" style="padding:5px 12px" onclick="inboxRenderRows(\''+seg+'\',true)">Show all '+list.length+'</button> <span class="muted" style="font-size:.82em">showing first '+CAP+'</span>';
+    } else if(showAll && list.length>CAP){
+      more.innerHTML='<span class="muted" style="font-size:.82em">showing all '+list.length+'</span> <button class="btn btn-ghost" style="padding:5px 12px;margin-left:8px" onclick="inboxRenderRows(\''+seg+'\',false)">Collapse</button>';
+    } else {
+      more.innerHTML='';
+    }
+  }
+}
+// Switch the active segment: toggle the pressed button and re-render rows (reset to capped).
+function inboxFilter(seg,btn){
+  const segs=document.querySelectorAll('.ibx-seg');
+  segs.forEach(b=>b.classList.remove('on'));
+  if(btn)btn.classList.add('on');
+  inboxRenderRows(seg,false);
 }
 // Trigger a background HubSpot inbound pull, then poll status and refresh the inbox.
 function ingestHubspotInbound(btn){
@@ -2720,18 +2819,59 @@ function renderPooledNrrQuarter(){
   const pool=_pooledAccts();
   const totalArr=pool.reduce((s,a)=>s+(a.arr_usd||0),0);
   const atRiskArr=pool.filter(a=>a.health&&a.health.band==='red').reduce((s,a)=>s+(a.arr_usd||0),0);
-  const securedPct=totalArr?Math.round(((totalArr-atRiskArr)/totalArr)*100):0;
+  const securedArr=totalArr-atRiskArr;
+  const securedPct=totalArr?Math.round((securedArr/totalArr)*100):null;
   const churned=pool.filter(a=>(a.lifecycle_stage||'').indexOf('Churn')>=0).length;
-  const logoChurn=pool.length?Math.round((churned/pool.length)*100):0;
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>NRR Quarter</h2><span class="note">Pooled retention this quarter · computed from live health + ARR</span></div><div class="body pad">'+
-    '<div class="mdw-grid">'+
-      _widget('Secured ARR (proxy NRR)','<div class="mdw-big good">'+securedPct+'%</div>')+
-      _widget('Gross Retention','<div class="mdw-big '+(securedPct>=90?'good':'warn')+'">'+securedPct+'%</div>')+
-      _widget('Customer Churn (Logo)','<div class="mdw-big '+(logoChurn>0?'warn':'good')+'">'+logoChurn+'%</div>')+
-      _widgetBig('Pooled ARR',fmt(totalArr))+
-      _widgetBig('At-risk ARR',fmt(atRiskArr),atRiskArr>0?'warn':'')+
-      _widgetBig('Pooled companies',pool.length)+
-    '</div></div></div>';
+  const logoChurn=pool.length?Math.round((churned/pool.length)*100):null;
+  const retainedLogoPct=pool.length?Math.round(((pool.length-churned)/pool.length)*100):null;
+  // Honest dash helper: show a dash when the figure cannot be computed from live data.
+  const dash='<span class="muted">-</span>';
+  const pctOrDash=v=>v==null?dash:v+'%';
+  // Quarter renewal mix, derived from the renewal_forecast already attached to each pooled
+  // account (same field the Renewals < 180 Days page uses). We only bucket accounts whose
+  // renewal_date falls in the current calendar quarter. If none do, we say so plainly rather
+  // than inventing a mix.
+  const now=new Date();
+  const qStart=new Date(now.getFullYear(),Math.floor(now.getMonth()/3)*3,1);
+  const qEnd=new Date(qStart.getFullYear(),qStart.getMonth()+3,0,23,59,59);
+  const qNum=Math.floor(now.getMonth()/3)+1;
+  const qLabel='Q'+qNum+' '+now.getFullYear();
+  const dueThisQ=pool.filter(a=>{if(!a.renewal_date)return false;const d=new Date(a.renewal_date);return !isNaN(d)&&d>=qStart&&d<=qEnd;});
+  const mix={Renewal:0,Expansion:0,'Churn Risk':0,'Not classified':0};
+  dueThisQ.forEach(a=>{const fc=a.renewal_forecast;const label=(fc&&fc.applicable&&fc.label)?fc.label:'Not classified';if(mix[label]==null)mix[label]=0;mix[label]++;});
+  const mixColours={Renewal:'var(--green)',Expansion:'var(--brand2,#7c5cff)','Churn Risk':'var(--red)','Not classified':'var(--muted)'};
+  let mixBody;
+  if(!dueThisQ.length){
+    mixBody='<div class="muted" style="font-size:.86em">No pooled renewals fall in '+qLabel+'. Renewal mix fills in once renewal dates land in the current quarter.</div>';
+  } else {
+    const maxN=Math.max(1,...Object.values(mix));
+    mixBody='<div class="seg-bars">'+Object.entries(mix).filter(e=>e[1]>0).map(function(e){
+      const label=e[0],n=e[1];const pct=Math.round((n/dueThisQ.length)*100);const w=Math.round((n/maxN)*100);
+      return '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(label)+'</span>'+
+        '<span class="seg-val">'+n+' <span class="muted" style="font-weight:600">'+pct+'%</span></span></div>'+
+        '<div class="hbar" style="width:100%"><span class="hfill" style="width:'+w+'%;background:'+(mixColours[label]||'var(--brand)')+'"></span></div></div>';
+    }).join('')+'</div>';
+  }
+  // Each card carries a one-line plain-English caption so a proxy figure is never mistaken
+  // for realised retention. We do not have prior-period ARR here, so true NRR/GRR are shown
+  // as honest dashes rather than fabricated.
+  const card=function(title,value,cls,caption){
+    return _widget(title,'<div class="mdw-big '+(cls||'')+'">'+value+'</div><div class="mdw-na">'+caption+'</div>');
+  };
+  const scorecard='<div class="mdw-grid">'+
+    card('Secured ARR (proxy)',pctOrDash(securedPct),securedPct!=null&&securedPct>=90?'good':'warn','Share of pooled ARR not currently flagged at risk. A proxy, not realised NRR.')+
+    card('Net Revenue Retention',dash,'','Needs prior-period ARR, not available here, so shown as a dash.')+
+    card('Gross Retention',dash,'','Needs realised churn and downgrade ARR, not available here.')+
+    card('Logo Retention',pctOrDash(retainedLogoPct),retainedLogoPct!=null&&retainedLogoPct>=95?'good':'',(pool.length-churned).toLocaleString()+' of '+pool.length.toLocaleString()+' pooled logos retained to date.')+
+    card('Customer Churn (Logo)',pctOrDash(logoChurn),logoChurn!=null&&logoChurn>0?'warn':'good',churned+' pooled logos in a churn lifecycle stage.')+
+    card('At-risk ARR',fmt(atRiskArr),atRiskArr>0?'warn':'','Pooled ARR on accounts currently scored red.')+
+    card('Pooled ARR',fmt(totalArr),'','Total ARR across all pooled accounts in view.')+
+    card('Pooled companies',pool.length.toLocaleString(),'','Count of accounts in the pooled cohort.')+
+  '</div>';
+  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>NRR Quarter</h2><span class="note">Pooled retention scorecard, '+qLabel+' · computed from live health plus ARR</span></div><div class="body pad">'+
+    scorecard+
+    '<div class="mdw-grid" style="margin-top:16px"><div class="mdw wide"><div class="mdw-h">Renewal mix, '+escapeHtml(qLabel)+' ('+dueThisQ.length+' due)</div><div class="mdw-b">'+mixBody+'</div></div></div>'+
+  '</div></div>';
 }
 function renderAdoptInsights(){
   const host=document.getElementById('oa-pane-insights'); if(!host||!DATA)return;

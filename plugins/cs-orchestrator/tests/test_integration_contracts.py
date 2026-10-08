@@ -440,10 +440,14 @@ def test_jiminny_negative_sentiment_raises_computed_risk():
     assert risk["computed"] is True
 
 
-def test_retention_metrics_compute_grr_and_expansion_pipeline():
+def test_retention_metrics_compute_grr_and_expansion_pipeline(monkeypatch):
     """GRR must compute from real churn; expansion is reported as a SEPARATE pipeline
     figure (opportunity), never folded into an inflated NDR percentage."""
     import engine
+    # Isolate from any live warehouse snapshot so this GRR/expansion test is deterministic:
+    # with no warehouse rows and no per-account metrics, NDR is honestly None.
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
     accounts = {
         "au1-1": {"hubspot": {"name": "A", "segment": "Strategic", "arr_usd": 400000},
                   "sources": {"hubspot": "live"}, "churn": {}, "usage": {}, "zendesk": {},
@@ -468,10 +472,14 @@ def test_retention_metrics_compute_grr_and_expansion_pipeline():
     assert r["target"] == {"grr_pct": 92, "ndr_pct": 100}
 
 
-def test_ndr_computed_from_warehouse_monthly_arr():
+def test_ndr_computed_from_warehouse_monthly_arr(monkeypatch):
     """NDR is dollar-weighted current vs prior-year revenue from rpt_account_ndr_monthly,
     across accounts that carry both figures."""
     import engine
+    # Isolate from any live warehouse snapshot so NDR is computed from the per-account
+    # metrics blocks the accounts carry (deterministic across the full suite).
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
     accounts = {
         "au1-1": {"hubspot": {"name": "A", "arr_usd": 120000}, "sources": {"hubspot": "live", "metrics": "live"},
                   "metrics": {"mrr_usd": 120000, "revenue_prev_year_usd": 100000},
