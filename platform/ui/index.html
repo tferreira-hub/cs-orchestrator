@@ -2861,19 +2861,45 @@ function renderPooledResponseRates(){
 }
 // --- Process leaf ---
 function renderPooledOnboarding(){
-  const rows=_pooledAccts().filter(a=>{const p=(a.lifecycle_stage||'').toLowerCase();return p.indexOf('onboard')>=0||p.indexOf('lead')>=0||p.indexOf('opportunit')>=0;});
-  const body=rows.map(a=>{const r=_pooledRow(a);return '<tr class="click" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><td>'+r.circle+'</td><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+escapeHtml(a.segment||'')+'</div></td><td class="muted">'+(a.csm_owner?escapeHtml(a.csm_owner):'-')+'</td><td class="mono">'+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</td><td>'+(a.lifecycle_stage?escapeHtml(a.lifecycle_stage):'-')+'</td><td class="muted">'+r.last+'</td></tr>';}).join('');
-  // Rocket Lane is the system of record for onboarding (projects/status/health). It is
-  // read per account on the detail page; the whole-book onboarding roster depends on it
-  // being connected. When there are no onboarding rows, say WHY honestly instead of
-  // implying the book simply has nobody onboarding.
-  const live=(DATA&&DATA.summary&&DATA.summary.live_sources)||[];
-  const rlLive=live.some(s=>/rocket\s*lane/i.test(String(s)));
-  const emptyRow=rows.length?'':(rlLive
-    ? '<tr><td colspan="6" class="empty" style="padding:24px">No pooled companies are currently in onboarding. Onboarding status comes from Rocket Lane; open an account to see its onboarding project detail.</td></tr>'
-    : '<tr><td colspan="6" class="empty" style="padding:24px"><b>Onboarding source (Rocket Lane) is not connected.</b><div class="sub" style="margin-top:6px">Onboarding is tracked in Rocket Lane, not inferred from CRM stage. Set <code>ROCKET_LANE_KEY</code> to populate this view. No sample data is shown.</div></td></tr>');
-  const srcNote=rlLive?'Live from Rocket Lane':'Rocket Lane not connected';
-  _pooledHost().innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">Pooled 1-20 agency + Corporate in onboarding · '+srcNote+'</span></div><div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled cohort</span><span class="fpill active">Phase: Onboarding</span><span class="fb-count">'+rows.length+' companies</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>ARR</th><th>Phase</th><th>Last seen</th></tr></thead><tbody>'+(rows.length?body:emptyRow)+'</tbody></table></div></div>';
+  const host=_pooledHost();
+  const _tok=_pooledRenderToken;
+  host.innerHTML='<div class="panel"><div class="body pad"><span class="muted">Loading onboarding…</span></div></div>';
+  (async()=>{
+    // Onboarding is tracked in Rocket Lane (projects), NOT inferred from the HubSpot
+    // lifecycle stage. Read the same source-first governance feed the CS Leadership
+    // onboarding view uses, then scope it to the pooled cohort: a project is shown when it
+    // matches a pooled account, or when it is unmatched (the long-tail / pooled book is
+    // mostly name-unmatched, so these are overwhelmingly pooled - flagged as "unmatched").
+    let d; try{ d=await (await api('/api/onboarding-governance')).json(); }
+    catch(e){ if(_pooledStale(_tok))return; host.innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2></div><div class="body pad"><div class="empty">Could not load onboarding projects.</div></div></div>'; return; }
+    if(_pooledStale(_tok))return;
+    if(!d.connected){
+      host.innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">Rocket Lane not connected</span></div><div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>Status</th><th>Due</th><th>Days in</th></tr></thead><tbody><tr><td colspan="6" class="empty" style="padding:24px"><b>Onboarding source (Rocket Lane) is not connected.</b><div class="sub" style="margin-top:6px">Set <code>ROCKET_LANE_KEY</code> to populate this view. No sample data is shown.</div></td></tr></tbody></table></div></div>';
+      return;
+    }
+    const pooledIds=new Set(_pooledAccts().map(a=>a.account_id));
+    const all=(d.projects||[]);
+    // Pooled view: projects matched to a pooled account, plus unmatched projects (long-tail).
+    const rows=all.filter(p=>(p.account_id&&pooledIds.has(p.account_id))||p.matched_account===false);
+    rows.sort((a,b)=>(b.days_in_onboarding||0)-(a.days_in_onboarding||0));
+    const stalledN=rows.filter(p=>p.stalled).length;
+    const body=rows.map(p=>{
+      const hb=(String(p.health||'').toLowerCase().indexOf('red')>=0||p.stalled)?'r':(String(p.health||'').toLowerCase().indexOf('green')>=0?'g':'pln');
+      const circle='<span class="hcircle hc-none">-</span>';
+      const unmatched=p.matched_account===false?' <span class="pill" style="font-size:.64em">unmatched</span>':'';
+      const due=p.due_date?escapeHtml(String(p.due_date).slice(0,10)):'<span class="muted">-</span>';
+      const di=(p.days_in_onboarding==null)?'<span class="muted">-</span>':p.days_in_onboarding;
+      const statusPill='<span class="pill '+hb+'">'+escapeHtml(p.status||'-')+(p.stalled?' · stalled':'')+'</span>';
+      const click=p.account_id?(' class="click" onclick="openAccount(\''+escapeHtml(p.account_id)+'\')"'):'';
+      return '<tr'+click+'><td>'+circle+'</td><td><strong>'+escapeHtml(p.name||p.project_name||'Unknown')+'</strong>'+unmatched+'<div class="sub">'+escapeHtml(p.project_name||'')+'</div></td><td class="muted">'+escapeHtml(p.owner||'-')+'</td><td>'+statusPill+'</td><td class="muted">'+due+'</td><td class="mono">'+di+'</td></tr>';
+    }).join('');
+    const srcNote='Live from Rocket Lane · '+rows.length+' pooled/long-tail of '+all.length+' active projects'+(stalledN?' · '+stalledN+' stalled':'');
+    host.innerHTML='<div class="panel"><div class="head"><h2>Onboarding</h2><span class="note">'+srcNote+'</span></div>'+
+      '<div class="filterbar" style="padding:10px 16px 4px"><span class="fpill active">Pooled + long-tail</span><span class="fpill active">Active Rocket Lane projects</span><span class="fb-count">'+rows.length+' projects</span></div>'+
+      '<div class="body"><table class="acct-list"><thead><tr><th>Health</th><th>Company</th><th>Owner</th><th>Status</th><th>Due</th><th>Days in</th></tr></thead><tbody>'+
+      (rows.length?body:'<tr><td colspan="6" class="empty" style="padding:24px">No pooled or long-tail onboarding projects are active in Rocket Lane right now.</td></tr>')+
+      '</tbody></table></div></div>';
+  })();
 }
 function _pooledWorkflowTable(title,note,tasks){
   const body=tasks.length?tasks.map(t=>'<tr class="click" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><td><strong>'+escapeHtml(t.account)+'</strong></td><td class="muted">'+(t.owner?escapeHtml(t.owner):'-')+'</td><td>0%</td><td class="muted">'+escapeHtml(t.due||t.sla||'-')+'</td><td>'+escapeHtml((t.trigger||'').slice(0,44))+'</td></tr>').join(''):'<tr><td colspan="5" class="empty" style="padding:24px">No workflows match right now.</td></tr>';
