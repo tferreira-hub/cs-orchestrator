@@ -2029,8 +2029,14 @@ class HubSpot:
 
         This is the Option A PULL source for the Tech-Touch pooled queue: instead of
         waiting for an external webhook, the platform reads the tickets it already has
-        access to (/crm/v3/objects/tickets) via the existing HubSpot token and feeds them
-        through the same triage + round-robin as the webhook seam.
+        access to via the existing HubSpot token and feeds them through the same triage +
+        round-robin as the webhook seam.
+
+        Tickets are fetched NEWEST-FIRST via the CRM search endpoint with a createdate
+        lower bound, because the plain list endpoint returns oldest-first and a portal
+        with tens of thousands of historical tickets would never reach recent ones within
+        a sane page cap. The company association (needed to resolve the account) is read
+        per candidate ticket by id, since the search endpoint does not return associations.
 
         Each returned item is {id, channel, from, subject, body, company_id, received_at}
         where company_id is the FIRST associated HubSpot company (resolved to an account
@@ -2039,10 +2045,9 @@ class HubSpot:
 
         FILTERING (so the pooled queue gets real customer inbound, not internal noise):
           - recency window: only tickets created in the last CS_HS_INBOUND_WINDOW_DAYS
-            (default 7) are considered 'today's inbound'.
+            (default 7).
           - open only: tickets whose pipeline stage is a closed/resolved stage are
-            skipped (CS_HS_INBOUND_CLOSED_STAGES, comma-separated, default '4' - the
-            default Support pipeline 'Closed' stage).
+            skipped (CS_HS_INBOUND_CLOSED_STAGES, comma-separated, default '4').
           - exclude internal mirrors: tickets whose subject matches any term in
             CS_HS_INBOUND_EXCLUDE (default 'slack channel,new post in') are dropped, so
             Slack-notification mirror tickets never reach a CSM as customer inbound.
@@ -2058,50 +2063,63 @@ class HubSpot:
                          (config.env("CS_HS_INBOUND_EXCLUDE") or "slack channel,new post in").split(",")
                          if t.strip()]
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        since_ms = int(since.timestamp() * 1000)
 
-        props = ["subject", "content", "hs_pipeline_stage", "source_type",
-                 "createdate", "hs_ticket_category"]
-        base = ("https://api.hubapi.com/crm/v3/objects/tickets"
-                f"?limit=100&associations=companies&archived=false&properties=" + ",".join(props))
+        props = ["subject", "content", "hs_pipeline_stage", "source_type", "createdate"]
+        search_url = "https://api.hubapi.com/crm/v3/objects/tickets/search"
         items: list[dict] = []
         after = None
-        fetched = 0
-        # Page until we have scanned up to page_cap tickets or run out.
-        while fetched < page_cap:
-            url = base + (f"&after={after}" if after else "")
+        scanned = 0
+        # Page the search newest-first until we exhaust the window or hit the scan cap.
+        while scanned < page_cap:
+            body = {
+                "filterGroups": [{"filters": [
+                    {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)}]}],
+                "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
+                "properties": props,
+                "limit": 100,
+            }
+            if after:
+                body["after"] = after
             try:
-                res = config.http_get(url, self._headers())
+                res = config.http_post_readonly(search_url, self._headers(), body)
             except Exception:  # noqa: BLE001 - best-effort read; honest empty on failure
                 break
             results = res.get("results", []) if isinstance(res, dict) else []
             if not results:
                 break
             for t in results:
-                fetched += 1
+                scanned += 1
                 p = t.get("properties", {}) or {}
-                # Recency gate.
-                created_raw = p.get("createdate")
+                # Open-only gate.
+                if str(p.get("hs_pipeline_stage") or "") in closed_stages:
+                    continue
+                subject = (p.get("subject") or "").strip()
+                sl = subject.lower()
+                if any(term in sl for term in exclude_terms):
+                    continue
+                # Recency timestamp (filter already bounds this; parse for received_at).
                 received_ts = None
+                created_raw = p.get("createdate")
                 if created_raw:
                     try:
                         dt = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=timezone.utc)
-                        if dt < since:
-                            continue
                         received_ts = int(dt.timestamp())
                     except ValueError:
                         pass
-                # Open-only gate.
-                if str(p.get("hs_pipeline_stage") or "") in closed_stages:
-                    continue
-                subject = (p.get("subject") or "").strip()
-                # Exclude internal Slack-mirror / notification tickets.
-                sl = subject.lower()
-                if any(term in sl for term in exclude_terms):
-                    continue
-                assoc = (((t.get("associations") or {}).get("companies") or {}).get("results") or [])
-                company_id = str(assoc[0].get("id")) if assoc and assoc[0].get("id") else None
+                # Resolve the associated company by id (search omits associations).
+                company_id = None
+                try:
+                    det = config.http_get(
+                        "https://api.hubapi.com/crm/v3/objects/tickets/"
+                        f"{t.get('id')}?associations=companies", self._headers())
+                    assoc = (((det.get("associations") or {}).get("companies") or {}).get("results") or [])
+                    if assoc and assoc[0].get("id"):
+                        company_id = str(assoc[0]["id"])
+                except Exception:  # noqa: BLE001 - skip association on error, keep ticket unmapped
+                    company_id = None
                 items.append({
                     "id": "hs-" + str(t.get("id")),
                     "channel": "mailbox",

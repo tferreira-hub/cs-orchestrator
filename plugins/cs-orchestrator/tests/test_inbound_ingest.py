@@ -28,14 +28,15 @@ def _iso(dt):
 
 
 def _ticket(tid, subject, content, company_id, created, stage="1"):
-    assoc = {"companies": {"results": [{"id": company_id}]}} if company_id else {}
+    # Search results carry properties but NOT associations; the adapter resolves the
+    # company by a per-id GET. _COMPANY_BY_TICKET records the association for the GET stub.
     return {
         "id": tid,
         "properties": {
             "subject": subject, "content": content,
             "hs_pipeline_stage": stage, "createdate": created,
         },
-        "associations": assoc,
+        "_company_id": company_id,  # test-only hint for the GET stub
     }
 
 
@@ -48,22 +49,38 @@ def test_inbound_tickets_normalises_and_filters(monkeypatch):
 
     now = datetime.now(timezone.utc)
     recent = _iso(now - timedelta(hours=2))
-    old = _iso(now - timedelta(days=30))
 
-    page = {"results": [
+    # The search endpoint already applies the recency (createdate GTE) filter server-side,
+    # so the stub returns only in-window tickets; the adapter still applies the open-only
+    # and Slack-exclusion filters client-side.
+    search_results = [
         _ticket("111", "Licence portal is down", "Cannot log in", "comp-1", recent),
         _ticket("222", "New Post in APAC Slack channel", "slack mirror", "comp-2", recent),  # excluded
-        _ticket("333", "Old ticket", "stale", "comp-1", old),                                 # too old
-        _ticket("444", "Closed already", "resolved", "comp-3", recent, stage="4"),            # closed stage
+        _ticket("444", "Closed already", "resolved", "comp-3", recent, stage="4"),            # closed
         _ticket("555", "Please add seats", "want more licences", "comp-9", recent),
-    ]}
+    ]
+    company_by_ticket = {t["id"]: t["_company_id"] for t in search_results}
+
+    def _search(url, headers, body, *a, **k):
+        assert url.endswith("/tickets/search")
+        # Newest-first, createdate lower bound present.
+        assert body["sorts"][0]["direction"] == "DESCENDING"
+        assert body["filterGroups"][0]["filters"][0]["propertyName"] == "createdate"
+        return {"results": [{"id": t["id"], "properties": t["properties"]} for t in search_results]}
+
+    def _get(url, headers, *a, **k):
+        tid = url.split("/tickets/")[1].split("?")[0]
+        cid = company_by_ticket.get(tid)
+        results = [{"id": cid}] if cid else []
+        return {"associations": {"companies": {"results": results}}}
 
     monkeypatch.setattr(sources.HubSpot, "live", lambda self: True)
-    monkeypatch.setattr(sources.config, "http_get", lambda url, headers, *a, **k: page)
+    monkeypatch.setattr(sources.config, "http_post_readonly", _search)
+    monkeypatch.setattr(sources.config, "http_get", _get)
 
     items = hs.inbound_tickets(window_days=7)
     ids = {i["id"] for i in items}
-    # Only the two genuine, recent, open, non-Slack tickets survive.
+    # Only the two genuine, open, non-Slack tickets survive.
     assert ids == {"hs-111", "hs-555"}
     first = next(i for i in items if i["id"] == "hs-111")
     assert first["channel"] == "mailbox"
