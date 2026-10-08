@@ -62,12 +62,12 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .app.side-collapsed{grid-template-columns:var(--side-w-collapsed) 1fr}
 
 /* Sidebar, Planhat-style light, flat, collapsible */
-.side{background:var(--side-bg);color:var(--side-ink);border-right:1px solid var(--side-line);padding:14px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;overflow-x:hidden}
+.side{background:linear-gradient(180deg,#131c33 0%,var(--side-bg) 42%,#0c1222 100%);color:var(--side-ink);border-right:1px solid var(--side-line);box-shadow:inset -1px 0 0 rgba(0,0,0,.25);padding:14px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:auto;overflow-x:hidden}
 /* Thin, subtle scrollbar so a long nav does not show a chunky OS bar. */
 .side{scrollbar-width:thin;scrollbar-color:#2b3a5c transparent}
 .side::-webkit-scrollbar{width:7px}
 .side::-webkit-scrollbar-thumb{background:#2b3a5c;border-radius:8px}
-.side::-webkit-scrollbar-thumb:hover{background:#c0c8d8}
+.side::-webkit-scrollbar-thumb:hover{background:#3a4b70}
 .side::-webkit-scrollbar-track{background:transparent}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 6px 14px;position:relative}
 .brand .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:11px;letter-spacing:.3px;box-shadow:0 3px 10px rgba(91,91,240,.32);flex:0 0 32px}
@@ -109,15 +109,15 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 .ns-ico.ns-pooled{background:#0e9f9f}
 .ns-ico.ns-reports{background:#3b82f6}
 .nav button{position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;border:0;color:var(--side-ink);padding:8px 11px;border-radius:9px;font-size:.87em;font-weight:500;cursor:pointer;font-family:inherit;transition:background .12s,color .12s;white-space:nowrap;overflow:hidden}
-.nav button:hover{background:var(--side-hover);color:var(--ink)}
-.nav button.active{background:var(--side-active-bg);color:var(--side-active-ink);font-weight:600}
+.nav button:hover{background:var(--side-hover);color:#eef2fb}
+.nav button.active{background:linear-gradient(90deg,var(--side-active-bg),rgba(28,39,64,.4));color:#dfe4ff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(174,185,255,.08)}
 /* Active-item accent bar on the left edge, like a real product sidebar. */
-.nav button.active::before{content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);width:3px;height:17px;border-radius:3px;background:var(--brand)}
+.nav button.active::before{content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);width:3px;height:17px;border-radius:3px;background:linear-gradient(180deg,var(--brand),var(--brand2));box-shadow:0 0 8px rgba(124,108,247,.6)}
 .navsection>.nav button.active::before{left:16px}
 .nav .ico{width:17px;text-align:center;font-size:1em;opacity:.85;flex:0 0 17px}
 .nav button.active .ico{opacity:1}
 .nav .label{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.nav .count{margin-left:auto;background:#eef1f6;color:var(--side-ink);border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px;min-width:22px;text-align:center;flex:0 0 auto}
+.nav .count{margin-left:auto;background:rgba(174,185,255,.14);color:#c3cde0;border-radius:999px;font-size:.72em;font-weight:700;padding:1px 8px;min-width:22px;text-align:center;flex:0 0 auto}
 .nav button.active .count{background:#fff;color:var(--side-active-ink)}
 .nav .count.red{background:var(--red);color:#fff}
 .side .foot{margin-top:auto;font-size:.66em;color:var(--side-ink2);padding:14px 8px 0;border-top:1px solid var(--side-line);line-height:1.6}
