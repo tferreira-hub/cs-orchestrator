@@ -2413,3 +2413,58 @@ def test_ingestion_status_reports_warming_and_ready(monkeypatch):
     finally:
         engine._BATCH_METRICS["data"] = {}
         engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_book_readiness_is_owner_scoped_and_counts_gaps(monkeypatch):
+    """Per-CSM book readiness: owner-scoped, counts missing required fields + ARR at risk,
+    computes an overall readiness %, and ranks fix-first by gaps then ARR."""
+    import types
+    import engine
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "faizaa@x"})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def company_url(self, cid):
+            return ("https://app.hubspot.com/contacts/6426676/company/" + str(cid)) if cid else None
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                # This CSM's accounts.
+                {"account_id": "AU1-1", "company_id": "c1", "name": "Complete", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 10000, "renewal_date": "2027-01-01",
+                 "segment": "Agency", "subscription_type": "annual"},
+                {"account_id": "AU1-2", "company_id": "c2", "name": "TwoGaps", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 50000, "renewal_date": None,
+                 "segment": "Corporate", "subscription_type": None},
+                {"account_id": "AU1-3", "company_id": "c3", "name": "OneGap", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 20000, "renewal_date": None,
+                 "segment": "Agency", "subscription_type": "annual"},
+                # Churned (excluded) + another owner (excluded).
+                {"account_id": "AU9-9", "company_id": "c9", "name": "Churned", "owner_id": "999",
+                 "lifecycle_stage": "churned"},
+                {"account_id": "AU8-8", "company_id": "c8", "name": "NotHers", "owner_id": "111",
+                 "lifecycle_stage": "customer", "arr_usd": 999},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    try:
+        r = engine.book_readiness()
+        assert r["scope"] == "csm"
+        assert r["total_accounts"] == 3           # churned + other owner excluded
+        assert r["fully_complete"] == 1           # only "Complete"
+        assert r["accounts_with_gaps"] == 2
+        # Renewal date missing on TwoGaps + OneGap = 2; subscription missing on TwoGaps = 1.
+        gaps = {g["field"]: g for g in r["field_gaps"]}
+        assert gaps["Renewal date"]["missing"] == 2
+        assert gaps["Renewal date"]["arr_at_risk_usd"] == 70000   # 50000 + 20000
+        assert gaps["Subscription type"]["missing"] == 1
+        # Fix-first: most gaps first -> TwoGaps (2 gaps) before OneGap (1 gap).
+        assert r["fix_first"][0]["name"] == "TwoGaps"
+        assert r["fix_first"][0]["hubspot_url"].endswith("/company/c2")
+        # 3 accounts x 4 fields = 12 cells; missing = 2 renewal + 1 sub = 3; filled 9 -> 75%.
+        assert r["readiness_pct"] == 75
+    finally:
+        engine.set_principal(None)

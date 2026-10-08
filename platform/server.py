@@ -711,6 +711,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.integrations()); return
             if path == "/api/ingestion-status":
                 self._json(200, engine.ingestion_status()); return
+            if path == "/api/book-readiness":
+                # Per-CSM 'your book readiness': owner-scoped data-completeness summary.
+                self._json(200, engine.book_readiness()); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
             if path == "/api/my-book/progress":

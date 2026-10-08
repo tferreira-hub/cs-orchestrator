@@ -1072,6 +1072,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <div class="cc-pane on" id="cc-pane-command">
         <div class="scopebar" id="scopebar" style="display:none"></div>
         <div id="cc-command-top"></div>
+        <div id="cc-book-readiness"></div>
         </div><!-- /cc-pane-command -->
         <div class="cc-pane" id="cc-pane-companies"><div class="panel"><div class="head"><h2>My Companies</h2><span class="note">Click any company for the full profile</span></div><div class="body" id="accounts-body-cc"></div></div></div>
         <div class="cc-pane" id="cc-pane-renewals"></div>
@@ -3135,11 +3136,52 @@ async function checkIngestion(){
 }
 function dismissIngest(){ sessionStorage.setItem('cs_ingest_dismissed','1'); const el=document.getElementById('ingestBanner'); if(el)el.style.display='none'; }
 
+// ===== Book Readiness card (per-CSM data completeness) =====
+// Shows how complete the data is on the CSM's own book - an honest readiness % plus the
+// top accounts to fix first, each linking straight to its HubSpot record. Admins see the
+// whole book. Hidden entirely when there are no gaps (nothing to action).
+async function renderBookReadiness(){
+  const el=document.getElementById('cc-book-readiness'); if(!el) return;
+  let r; try{ r=await (await api('/api/book-readiness')).json(); }catch(_){ el.innerHTML=''; return; }
+  if(!r||!r.total_accounts){ el.innerHTML=''; return; }
+  const pct=(r.readiness_pct!=null)?r.readiness_pct:0;
+  const tone=pct>=90?'g':pct>=60?'a':'r';
+  const scopeLbl=r.scope==='csm'?'your book':'the book';
+  // Per-field gap bars.
+  const gapBars=(r.field_gaps||[]).filter(f=>f.missing>0).map(f=>
+    '<div class="seg-row"><div class="seg-top"><span class="seg-name">'+escapeHtml(f.field)+'</span>'+
+    '<span class="seg-val">'+f.missing+' missing <span class="muted" style="font-size:.85em">· '+fmt(f.arr_at_risk_usd)+' ARR</span></span></div>'+
+    '<div class="hbar" style="width:100%"><span class="hfill" style="width:'+Math.max(6,Math.round(100*f.missing/(r.total_accounts||1)))+'%;background:var(--amber)"></span></div></div>'
+  ).join('');
+  // Fix-first list with HubSpot deep links.
+  const fixRows=(r.fix_first||[]).map(a=>
+    '<tr><td><strong>'+escapeHtml(a.name||a.account_id)+'</strong></td>'+
+    '<td class="mono">'+fmt(a.arr_usd)+'</td>'+
+    '<td>'+a.missing.map(escapeHtml).join(', ')+'</td>'+
+    '<td>'+(a.hubspot_url?('<a class="origin-mini" href="'+escapeHtml(a.hubspot_url)+'" target="_blank" rel="noopener">⬡ fix in HubSpot ↗</a>'):'<span class="muted">-</span>')+'</td></tr>'
+  ).join('');
+  const complete=(r.accounts_with_gaps===0);
+  el.innerHTML='<div class="panel" style="margin-top:16px"><div class="head"><h2>Book readiness</h2>'+
+    '<span class="note">How complete is the data on '+scopeLbl+' that drives the platform</span></div>'+
+    '<div class="body pad">'+
+      '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px">'+
+        '<div class="mdw-big '+(tone==='g'?'good':'warn')+'" style="font-size:2em">'+pct+'%</div>'+
+        '<div class="muted" style="font-size:.9em">'+r.fully_complete+' of '+r.total_accounts+' accounts have every required field set'+
+        (complete?'':(' · '+r.accounts_with_gaps+' need attention'))+'</div>'+
+      '</div>'+
+      (complete?'<div class="empty" style="padding:10px">All required fields are set on '+scopeLbl+'. Nicely done.</div>':
+        ('<div style="max-width:560px;margin-bottom:14px">'+gapBars+'</div>'+
+         '<div class="sub" style="margin-bottom:8px"><b>Fix these first</b> <span class="muted">(highest ARR, most gaps). Click to open the record in HubSpot.</span></div>'+
+         '<table class="acct-list"><thead><tr><th>Company</th><th>ARR</th><th>Missing fields</th><th></th></tr></thead><tbody>'+fixRows+'</tbody></table>'))+
+    '</div></div>';
+}
+
 // ===== My Command Center top band (mirrors Planhat's Command Center) =====
 // Three headline metrics + Upcoming Meetings, Company Distribution by Health,
 // and Upcoming Renewals, all from live signals; honest "not connected" otherwise.
 async function renderCommandCenter(){
   const host=document.getElementById('cc-command-top'); if(!host||!DATA)return;
+  renderBookReadiness();
   const tasks=filteredTasks(), accts=filteredAccounts();
   const openRisks=tasks.filter(t=>t.mandate==='MUST_PROTECT').length;
   const _active=_filterActive();

@@ -3852,6 +3852,87 @@ def ingestion_status() -> dict:
     }
 
 
+def book_readiness() -> dict:
+    """Per-CSM 'your book readiness' summary: for the CURRENT principal's owned accounts,
+    how complete is the data that drives the platform? Reports the count + ARR of accounts
+    missing each required HubSpot field (renewal date, owner, segment, subscription), an
+    overall readiness %, and the top accounts to fix first (highest ARR with the most
+    gaps). Owner-scoped and HubSpot-grounded (cheap roster scan, no per-account fan-out);
+    honest - it reflects exactly what is set in HubSpot, nothing inferred.
+
+    This gives each CSM a personal, actionable cleanup list and makes the 'shared effort'
+    on data hygiene concrete rather than abstract.
+    """
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    fields = [
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("segment", "Segment (ICP)"),
+        ("subscription_type", "Subscription type"),
+    ]
+    rows = []
+    try:
+        if _src.HUBSPOT.live():
+            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+                if "churn" in str(c.get("lifecycle_stage") or "").lower():
+                    continue  # active book only
+                if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+                    continue  # this CSM's book only (admin sees all)
+                rows.append(c)
+    except Exception:  # noqa: BLE001
+        rows = []
+
+    total = len(rows)
+    field_missing = {label: {"count": 0, "arr_usd": 0.0} for _, label in fields}
+    per_account = []
+    def _hs_url(cid):
+        try:
+            return _src.HUBSPOT.company_url(cid) if cid else None
+        except Exception:  # noqa: BLE001
+            return None
+    for c in rows:
+        arr = c.get("arr_usd") or 0
+        missing = []
+        for key, label in fields:
+            if c.get(key) in (None, ""):
+                missing.append(label)
+                field_missing[label]["count"] += 1
+                field_missing[label]["arr_usd"] += arr if isinstance(arr, (int, float)) else 0
+        if missing:
+            per_account.append({
+                "account_id": c.get("account_id") or ("rl-" + str(c.get("company_id"))),
+                "name": c.get("name"),
+                "arr_usd": arr if isinstance(arr, (int, float)) else 0,
+                "missing": missing,
+                "missing_count": len(missing),
+                "hubspot_url": _hs_url(c.get("company_id")),
+            })
+
+    # Overall readiness = fraction of (account x required-field) cells that are populated.
+    cells = total * len(fields)
+    filled = cells - sum(v["count"] for v in field_missing.values())
+    readiness_pct = round(100 * filled / cells) if cells else None
+
+    # Top accounts to fix first: most gaps, then highest ARR.
+    per_account.sort(key=lambda r: (-r["missing_count"], -(r["arr_usd"] or 0)))
+    fully_complete = total - len(per_account)
+
+    return {
+        "scope": ("csm" if owner_id else "all"),
+        "total_accounts": total,
+        "fully_complete": fully_complete,
+        "accounts_with_gaps": len(per_account),
+        "readiness_pct": readiness_pct,
+        "field_gaps": [
+            {"field": label, "missing": field_missing[label]["count"],
+             "arr_at_risk_usd": round(field_missing[label]["arr_usd"])}
+            for _, label in fields
+        ],
+        "fix_first": per_account[:15],
+    }
+
+
 def datagaps() -> dict:
     """Data Gap Analysis (Requirements §4). For each account, report which source
     systems have it (coverage) and which required CS fields are empty in HubSpot,
