@@ -911,6 +911,28 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 self._json(200, result)
                 return
+            if path == "/api/inbound/ingest-hubspot":
+                # Option A PULL trigger: read recent HubSpot Service Hub tickets via the
+                # existing token, resolve to accounts, triage + round-robin, and persist
+                # into the pooled queue. Admin-only (it ingests across the whole book);
+                # also runs on boot warm. Honest no-op when HubSpot is not live.
+                if principal and principal.get("role") not in (None, "admin"):
+                    self._json(403, {"error": "admin only"}); return
+                try:
+                    wd = body.get("window_days")
+                    wd = int(wd) if wd is not None else None
+                except (TypeError, ValueError):
+                    wd = None
+                try:
+                    summary = engine.ingest_hubspot_inbound(window_days=wd)
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": f"{type(exc).__name__}: {exc}"}); return
+                try:
+                    record_audit("inbound_ingest_hubspot", principal, summary)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(200, summary)
+                return
             if path == "/api/inbound/resolve":
                 tid = str(body.get("ticket_id") or body.get("id") or "").strip()
                 status = (body.get("status") or "resolved").strip()
@@ -1318,6 +1340,12 @@ def main() -> int:
         # so the first admin page load is instant. warm_reports() writes directly
         # to the cache (bypassing _cached_report's warming placeholder).
         engine.warm_reports()
+        # Pull HubSpot Service Hub tickets into the pooled queue so the inbound inbox
+        # is populated on the first load after deploy (Option A). Best-effort.
+        try:
+            engine.warm_inbound_ingest()
+        except Exception:  # noqa: BLE001
+            pass
     import threading as _thr
     _thr.Thread(target=_warm, daemon=True).start()
     try:

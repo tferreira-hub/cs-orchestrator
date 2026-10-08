@@ -2024,6 +2024,98 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 
+    def inbound_tickets(self, window_days: int | None = None, limit: int | None = None) -> list[dict]:
+        """Read recent Service Hub tickets and normalise them to the inbound-intake shape.
+
+        This is the Option A PULL source for the Tech-Touch pooled queue: instead of
+        waiting for an external webhook, the platform reads the tickets it already has
+        access to (/crm/v3/objects/tickets) via the existing HubSpot token and feeds them
+        through the same triage + round-robin as the webhook seam.
+
+        Each returned item is {id, channel, from, subject, body, company_id, received_at}
+        where company_id is the FIRST associated HubSpot company (resolved to an account
+        by the engine). Returns [] when HubSpot is not live, so the caller shows an honest
+        empty queue rather than fabricating tickets.
+
+        FILTERING (so the pooled queue gets real customer inbound, not internal noise):
+          - recency window: only tickets created in the last CS_HS_INBOUND_WINDOW_DAYS
+            (default 7) are considered 'today's inbound'.
+          - open only: tickets whose pipeline stage is a closed/resolved stage are
+            skipped (CS_HS_INBOUND_CLOSED_STAGES, comma-separated, default '4' - the
+            default Support pipeline 'Closed' stage).
+          - exclude internal mirrors: tickets whose subject matches any term in
+            CS_HS_INBOUND_EXCLUDE (default 'slack channel,new post in') are dropped, so
+            Slack-notification mirror tickets never reach a CSM as customer inbound.
+        """
+        if not self.live():
+            return []
+        from datetime import datetime, timezone, timedelta
+        window_days = int(config.env("CS_HS_INBOUND_WINDOW_DAYS") or window_days or 7)
+        page_cap = int(config.env("CS_HS_INBOUND_LIMIT") or limit or 200)
+        closed_stages = {s.strip() for s in
+                         (config.env("CS_HS_INBOUND_CLOSED_STAGES") or "4").split(",") if s.strip()}
+        exclude_terms = [t.strip().lower() for t in
+                         (config.env("CS_HS_INBOUND_EXCLUDE") or "slack channel,new post in").split(",")
+                         if t.strip()]
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+
+        props = ["subject", "content", "hs_pipeline_stage", "source_type",
+                 "createdate", "hs_ticket_category"]
+        base = ("https://api.hubapi.com/crm/v3/objects/tickets"
+                f"?limit=100&associations=companies&archived=false&properties=" + ",".join(props))
+        items: list[dict] = []
+        after = None
+        fetched = 0
+        # Page until we have scanned up to page_cap tickets or run out.
+        while fetched < page_cap:
+            url = base + (f"&after={after}" if after else "")
+            try:
+                res = config.http_get(url, self._headers())
+            except Exception:  # noqa: BLE001 - best-effort read; honest empty on failure
+                break
+            results = res.get("results", []) if isinstance(res, dict) else []
+            if not results:
+                break
+            for t in results:
+                fetched += 1
+                p = t.get("properties", {}) or {}
+                # Recency gate.
+                created_raw = p.get("createdate")
+                received_ts = None
+                if created_raw:
+                    try:
+                        dt = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt < since:
+                            continue
+                        received_ts = int(dt.timestamp())
+                    except ValueError:
+                        pass
+                # Open-only gate.
+                if str(p.get("hs_pipeline_stage") or "") in closed_stages:
+                    continue
+                subject = (p.get("subject") or "").strip()
+                # Exclude internal Slack-mirror / notification tickets.
+                sl = subject.lower()
+                if any(term in sl for term in exclude_terms):
+                    continue
+                assoc = (((t.get("associations") or {}).get("companies") or {}).get("results") or [])
+                company_id = str(assoc[0].get("id")) if assoc and assoc[0].get("id") else None
+                items.append({
+                    "id": "hs-" + str(t.get("id")),
+                    "channel": "mailbox",
+                    "from": "",  # ticket objects do not carry a sender email; left blank honestly
+                    "subject": subject,
+                    "body": (p.get("content") or "").strip(),
+                    "company_id": company_id,
+                    "received_at": received_ts,
+                })
+            after = (((res.get("paging") or {}).get("next") or {}).get("after"))
+            if not after:
+                break
+        return items
+
 
 # Singletons the router uses.
 ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (

@@ -3080,6 +3080,67 @@ def record_inbound(tickets: list[dict]) -> int:
     return n
 
 
+def ingest_hubspot_inbound(window_days: int | None = None) -> dict:
+    """PULL recent HubSpot Service Hub tickets, resolve each to an account, triage with the
+    live pooled roster + current load, and persist into the inbound queue.
+
+    This is the Option A ingress for the Tech-Touch pooled queue (UC1): the platform reads
+    the tickets it already has access to via the existing HubSpot token (no webhook, no new
+    credential) and runs them through the SAME triage + least-loaded allocation as the
+    /api/inbound/hubspot webhook seam. Idempotent: record_inbound upserts by id and
+    preserves an existing ticket's status, so re-running does not reopen resolved tickets
+    or duplicate rows.
+
+    Honest no-op when HubSpot is not live: returns zero counts rather than fabricating.
+    Returns a summary {live, fetched, ingested, skipped_no_account, by_intent}.
+    """
+    if not _src.HUBSPOT.live():
+        return {"live": False, "fetched": 0, "ingested": 0, "skipped_no_account": 0,
+                "note": "HubSpot not live; inbound ingest is a no-op."}
+    import inbound as _inbound
+    raw = _src.HUBSPOT.inbound_tickets(window_days=window_days)
+    # company_id -> account_id, from the full account roster (admin scope: ingest is a
+    # system task, not a per-CSM view, so it must see every account to resolve ownership).
+    accounts = orchestrate.load_accounts()
+    company_to_account: dict[str, str] = {}
+    for aid, acct in accounts.items():
+        cid = (acct.get("hubspot", {}) or {}).get("company_id")
+        if cid:
+            company_to_account[str(cid)] = aid
+    items = []
+    skipped = 0
+    for t in raw:
+        aid = company_to_account.get(str(t.get("company_id"))) if t.get("company_id") else None
+        if not aid:
+            # No matching account in the platform roster: skip rather than queue an
+            # orphan ticket a CSM cannot action.
+            skipped += 1
+            continue
+        it = {k: v for k, v in t.items() if k != "company_id"}
+        it["account_ref"] = aid
+        items.append(it)
+    roster = pooled_roster().get("roster", [])
+    result = _inbound.triage_inbound(items, roster=roster, current_load=_live_pooled_load())
+    ingested = record_inbound(result.get("tickets", []))
+    return {
+        "live": True,
+        "fetched": len(raw),
+        "ingested": ingested,
+        "skipped_no_account": skipped,
+        "by_intent": result.get("summary", {}).get("by_intent", {}),
+    }
+
+
+def warm_inbound_ingest() -> int:
+    """Best-effort synchronous inbound pull for the boot warm thread, so the pooled queue
+    is populated on the first request after deploy. Returns tickets ingested (0 on
+    not-live / error). Never raises."""
+    try:
+        return int(ingest_hubspot_inbound().get("ingested", 0))
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        return 0
+
+
 def inbound_queue(status: str | None = None) -> dict:
     """The persisted inbound queue (newest first), optionally filtered by status, with a
     summary by destination/intent/SLA so the pooled team can work it like an inbox.
