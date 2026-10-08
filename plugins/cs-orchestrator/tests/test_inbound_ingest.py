@@ -156,3 +156,54 @@ def test_warm_inbound_ingest_never_raises(monkeypatch):
     monkeypatch.setattr(engine, "ingest_hubspot_inbound",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     assert engine.warm_inbound_ingest() == 0
+
+
+def test_start_inbound_ingest_runs_in_background(monkeypatch):
+    """The fire-and-forget trigger returns immediately and the background thread records a
+    done status with the ingest summary (so the request never blocks on the slow pull)."""
+    import engine
+    import time
+
+    def _slow_ingest(window_days=None):
+        time.sleep(0.05)  # simulate a slow pull without blocking the caller
+        return {"live": True, "fetched": 5, "ingested": 3, "skipped_no_account": 2,
+                "by_intent": {"billing": 3}}
+
+    monkeypatch.setattr(engine, "ingest_hubspot_inbound", _slow_ingest)
+    # Reset status so the test is deterministic regardless of prior runs.
+    engine._INBOUND_INGEST_STATUS.update({"state": "idle", "started_at": None,
+                                          "finished_at": None, "summary": None, "error": None})
+
+    status = engine.start_inbound_ingest(window_days=7)
+    assert status["state"] == "running"           # returned immediately, work still going
+    assert status["already_running"] is False
+
+    # Poll the status until the background thread finishes.
+    for _ in range(50):
+        s = engine.inbound_ingest_status()
+        if s["state"] == "done":
+            break
+        time.sleep(0.02)
+    s = engine.inbound_ingest_status()
+    assert s["state"] == "done"
+    assert s["summary"]["ingested"] == 3
+    assert s["error"] is None
+
+
+def test_start_inbound_ingest_is_single_flight(monkeypatch):
+    """A second trigger while one is running does not start a second pull."""
+    import engine
+    import time
+    monkeypatch.setattr(engine, "ingest_hubspot_inbound",
+                        lambda window_days=None: (time.sleep(0.1) or {"live": True, "ingested": 0}))
+    engine._INBOUND_INGEST_STATUS.update({"state": "idle", "started_at": None,
+                                          "finished_at": None, "summary": None, "error": None})
+    first = engine.start_inbound_ingest()
+    second = engine.start_inbound_ingest()
+    assert first["already_running"] is False
+    assert second["already_running"] is True
+    # let it finish so it does not leak into other tests
+    for _ in range(50):
+        if engine.inbound_ingest_status()["state"] == "done":
+            break
+        time.sleep(0.02)

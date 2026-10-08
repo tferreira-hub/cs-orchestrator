@@ -671,6 +671,10 @@ class Handler(BaseHTTPRequestHandler):
                 # The persisted inbound queue (Option A channels -> triaged tickets).
                 st = (query.get("status") or [None])[0]
                 self._json(200, engine.inbound_queue(status=st)); return
+            if path == "/api/inbound/ingest-status":
+                # Status of the background HubSpot inbound pull (idle|running|done|error),
+                # so the UI can poll after triggering /api/inbound/ingest-hubspot.
+                self._json(200, engine.inbound_ingest_status()); return
             if path == "/api/strategic/review-queue":
                 # Strategic monthly draft/review/approve queue (28th-31st window).
                 period = (query.get("period") or [None])[0]
@@ -914,8 +918,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/inbound/ingest-hubspot":
                 # Option A PULL trigger: read recent HubSpot Service Hub tickets via the
                 # existing token, resolve to accounts, triage + round-robin, and persist
-                # into the pooled queue. Admin-only (it ingests across the whole book);
-                # also runs on boot warm. Honest no-op when HubSpot is not live.
+                # into the pooled queue. Admin-only (it ingests across the whole book).
+                # FIRE-AND-FORGET: the pull can exceed the 60s edge timeout (full-book load
+                # + ticket fetch + association resolution), so we start it in the background
+                # and return 202 immediately; the UI polls /api/inbound/ingest-status and
+                # re-reads the queue. Also runs on boot warm.
                 if principal and principal.get("role") not in (None, "admin"):
                     self._json(403, {"error": "admin only"}); return
                 try:
@@ -923,15 +930,13 @@ class Handler(BaseHTTPRequestHandler):
                     wd = int(wd) if wd is not None else None
                 except (TypeError, ValueError):
                     wd = None
+                status = engine.start_inbound_ingest(window_days=wd)
                 try:
-                    summary = engine.ingest_hubspot_inbound(window_days=wd)
-                except Exception as exc:  # noqa: BLE001
-                    self._json(500, {"error": f"{type(exc).__name__}: {exc}"}); return
-                try:
-                    record_audit("inbound_ingest_hubspot", principal, summary)
+                    record_audit("inbound_ingest_hubspot", principal,
+                                 {"window_days": wd, "already_running": status.get("already_running")})
                 except Exception:  # noqa: BLE001
                     pass
-                self._json(200, summary)
+                self._json(202, status)
                 return
             if path == "/api/inbound/resolve":
                 tid = str(body.get("ticket_id") or body.get("id") or "").strip()

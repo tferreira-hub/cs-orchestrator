@@ -3141,6 +3141,51 @@ def warm_inbound_ingest() -> int:
         return 0
 
 
+# Background inbound-ingest status so the manual trigger can be fire-and-forget: the pull
+# (full-book load + HubSpot ticket fetch + association resolution) can take longer than the
+# edge/ALB request timeout, so a synchronous request would 504. The route starts a daemon
+# thread and returns immediately; the UI polls this status and re-reads /api/inbound/queue.
+_INBOUND_INGEST_STATUS: dict = {"state": "idle", "started_at": None, "finished_at": None,
+                                "summary": None, "error": None}
+_INBOUND_INGEST_LOCK = __import__("threading").Lock()
+
+
+def inbound_ingest_status() -> dict:
+    return dict(_INBOUND_INGEST_STATUS)
+
+
+def start_inbound_ingest(window_days: int | None = None) -> dict:
+    """Kick off a background inbound pull if one is not already running. Returns the current
+    status immediately (never blocks the request). One ingest runs at a time; a concurrent
+    trigger returns the in-flight status rather than starting a second pull."""
+    import threading
+    import time as _t
+    with _INBOUND_INGEST_LOCK:
+        if _INBOUND_INGEST_STATUS["state"] == "running":
+            return {**_INBOUND_INGEST_STATUS, "already_running": True}
+        _INBOUND_INGEST_STATUS.update({"state": "running", "started_at": _t.time(),
+                                       "finished_at": None, "summary": None, "error": None})
+
+    def _bg():
+        import time as _t2
+        principal = get_principal()
+        try:
+            # Ingest is a system/admin task across the whole book; run unscoped so it can
+            # resolve every company to its account.
+            set_principal(None)
+            summary = ingest_hubspot_inbound(window_days=window_days)
+            _INBOUND_INGEST_STATUS.update({"state": "done", "summary": summary,
+                                           "finished_at": _t2.time(), "error": None})
+        except Exception as exc:  # noqa: BLE001
+            _INBOUND_INGEST_STATUS.update({"state": "error", "error": f"{type(exc).__name__}: {exc}",
+                                           "finished_at": _t2.time()})
+        finally:
+            set_principal(principal)
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return {**_INBOUND_INGEST_STATUS, "already_running": False}
+
+
 def inbound_queue(status: str | None = None) -> dict:
     """The persisted inbound queue (newest first), optionally filtered by status, with a
     summary by destination/intent/SLA so the pooled team can work it like an inbox.
