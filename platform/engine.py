@@ -2466,6 +2466,17 @@ def account_performance(account_id: str) -> dict:
         tickets = {"status": "not_connected",
                    "note": "Zendesk connected but no organisation matched this account."}
 
+    # --- warehouse user metrics (active vs committed seats + Vs-Prev change) --
+    # Mirrors JobAdder's native 'Users: 168 (-3)' header: active_users is the latest
+    # max-daily-users-over-month and user_change is the warehouse-computed delta. Honest
+    # {} when the metrics warehouse is not connected (never fabricated).
+    acct_metrics = {}
+    try:
+        if _src.ACCOUNT_METRICS.live():
+            acct_metrics = _src.ACCOUNT_METRICS.metrics(ref) or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        acct_metrics = {}
+
     # --- identity header ------------------------------------------------------
     name = (hubspot.get("name") or dim.get("account_name") or account_id)
     arr_usd = hubspot.get("arr_usd")
@@ -2479,6 +2490,14 @@ def account_performance(account_id: str) -> dict:
         "plan": dim.get("tier_name"),
         "tier": dim.get("tier_name"),
         "country": dim.get("country") or hubspot.get("country"),
+        # Users (native-dashboard parity): active = latest max-daily-users-over-month,
+        # change = warehouse Vs-Prev delta. None/{} when the metrics warehouse is not live.
+        "users": ({
+            "active": acct_metrics.get("active_users"),
+            "committed": acct_metrics.get("committed_users"),
+            "change": acct_metrics.get("user_change"),
+            "utilization_pct": acct_metrics.get("user_utilization_pct"),
+        } if acct_metrics else None),
         "stripe_customer_id": dim.get("stripe_customer_id"),
         "global_customer_id": dim.get("global_customer_id"),
         "hubspot_connected": bool(hubspot),

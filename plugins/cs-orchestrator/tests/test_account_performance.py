@@ -331,3 +331,49 @@ def test_new_signals_not_connected_when_dim_absent(monkeypatch):
     assert sig["enhanced_profile"]["status"] == "not_connected"
     assert sig["event_availability"]["status"] == "not_connected"
     assert card["connected"]["warehouse_dimension"] is False
+
+
+# --------------------------------------------------------------------------- #
+# (e) Users identity field (native-dashboard 'Users: 168 (-3)' parity)
+# --------------------------------------------------------------------------- #
+def test_users_block_populated_from_metrics(monkeypatch):
+    """The identity.users block mirrors JobAdder's native 'Users: 168 (-3)' header,
+    sourced from the warehouse metrics adapter (active_users + user_change). Honest None
+    when the metrics warehouse is not connected."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    # Metrics warehouse connected and returning native user counts + delta.
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountMetrics, "metrics", lambda self, ref: {
+        "active_users": 168, "committed_users": 200, "user_change": -3,
+        "user_utilization_pct": 84, "_source": "redshift-live",
+    })
+    # Everything else offline -> honest gaps elsewhere; users must still populate.
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: False)
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+
+    engine.set_principal(None)
+    card = engine.account_performance("au1-1")
+    users = card["identity"]["users"]
+    assert users is not None
+    assert users["active"] == 168
+    assert users["committed"] == 200
+    assert users["change"] == -3
+    assert users["utilization_pct"] == 84
+
+
+def test_users_block_none_when_metrics_offline(monkeypatch):
+    """No metrics warehouse -> identity.users is honestly None (never fabricated)."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    _offline_all_sources(monkeypatch)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+
+    engine.set_principal(None)
+    card = engine.account_performance("au1-1")
+    assert card["identity"]["users"] is None

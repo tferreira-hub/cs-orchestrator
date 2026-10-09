@@ -2501,6 +2501,16 @@ function _acctRenderScorecard(d){
             metaChip('Status', id.account_status||'—')+
             metaChip('Type', id.account_type||'—')+
             metaChip('Plan', id.plan||id.tier||'—')+
+            (function(){
+              // Users: 'active (±change)' — native-dashboard parity. Honest when absent.
+              var u=id.users;
+              if(!u||u.active===null||u.active===undefined) return metaChip('Users','not connected');
+              var txt=Number(u.active).toLocaleString();
+              if(u.change!==null&&u.change!==undefined&&u.change!==0){
+                txt+=' ('+(u.change>0?'+':'')+Number(u.change).toLocaleString()+')';
+              }
+              return metaChip('Users', txt);
+            })()+
             metaChip('ARR', arrTxt)+
             metaChip('Country', id.country||'—')+
             metaChip('Peer group', peers?('Agency · '+peers+' peers'):'not connected')+
