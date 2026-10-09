@@ -653,7 +653,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/portfolio":
-                self._json(200, engine.portfolio()); return
+                import time as _pt, sys as _ps
+                _p0 = _pt.time()
+                _pf = engine.portfolio()
+                _warm = bool(isinstance(_pf, dict) and _pf.get("summary", {}).get("warming"))
+                _n = len(_pf.get("accounts", [])) if isinstance(_pf, dict) else 0
+                print(f"[req] /api/portfolio warming={_warm} accounts={_n} "
+                      f"took={round(_pt.time()-_p0,2)}s", file=_ps.stderr, flush=True)
+                self._json(200, _pf); return
             if path == "/api/roster":
                 # Tier-1 whole-book roster (all customers, Managed vs Pooled/Scaled).
                 # ?cohort=managed|pooled|all. Scoped to the principal (admin=all).

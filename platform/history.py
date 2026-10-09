@@ -25,6 +25,16 @@ HISTORY_FILE = Path(os.environ.get(
     str(Path(__file__).resolve().parents[1] / ".cs-health-history.jsonl")))
 _LOCK = Lock()
 
+# In-memory cache of the parsed history, validated against the file's mtime+size so an
+# external writer (another task on the shared EFS mount, a restart) is picked up, but
+# repeated reads in one process do not re-read+re-parse the whole file. Without this,
+# record_portfolio() was O(accounts x filesize): 4,300 accounts each triggering a full
+# file scan via _has_snapshot -> _all_rows, which on the EFS-backed prod volume took so
+# long the boot warm never finished and the dashboard stayed stuck on "Checking sources".
+_CACHE_ROWS: list[dict] | None = None
+_CACHE_SIG: tuple[float, int] | None = None          # (mtime, size) of the file when cached
+_CACHE_INDEX: set[tuple[str, str]] = set()           # {(account_id, date)} for O(1) existence
+
 
 def _today() -> str:
     env = os.environ.get("CS_TODAY")
@@ -48,6 +58,14 @@ def record_snapshot(account_id: str, snapshot: dict, on_day: str | None = None) 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         with HISTORY_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, default=str) + "\n")
+        # Keep the in-memory cache coherent with our own append so the rest of a
+        # record_portfolio() loop stays O(1) and does not re-read the growing file. We
+        # refresh the signature to the post-write (mtime,size) so the next read trusts
+        # the cache rather than reloading from disk.
+        if _CACHE_ROWS is not None:
+            _CACHE_ROWS.append(row)
+            _CACHE_INDEX.add((account_id, day))
+            globals()["_CACHE_SIG"] = _file_sig()
 
 
 def record_portfolio(accounts: dict, health_fn, on_day: str | None = None) -> int:
@@ -82,24 +100,47 @@ def record_portfolio(accounts: dict, health_fn, on_day: str | None = None) -> in
     return written
 
 
-def _all_rows() -> list[dict]:
-    if not HISTORY_FILE.exists():
-        return []
-    rows = []
-    for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+def _file_sig() -> tuple[float, int] | None:
+    try:
+        st = HISTORY_FILE.stat()
+        return (st.st_mtime, st.st_size)
+    except FileNotFoundError:
+        return None
+
+
+def _refresh_cache() -> None:
+    """(Re)load the history into memory if the file changed since we last read it. Builds
+    both the row list and the (account_id, date) existence index. Must hold nothing; the
+    public callers that mutate state hold _LOCK."""
+    global _CACHE_ROWS, _CACHE_SIG, _CACHE_INDEX
+    sig = _file_sig()
+    if _CACHE_ROWS is not None and sig == _CACHE_SIG:
+        return
+    rows: list[dict] = []
+    index: set[tuple[str, str]] = set()
+    if sig is not None:
+        for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
             try:
-                rows.append(json.loads(line))
+                r = json.loads(line)
             except Exception:  # noqa: BLE001
-                pass
-    return rows
+                continue
+            rows.append(r)
+            aid, dt = r.get("account_id"), r.get("date")
+            if aid is not None and dt is not None:
+                index.add((aid, dt))
+    _CACHE_ROWS, _CACHE_SIG, _CACHE_INDEX = rows, sig, index
+
+
+def _all_rows() -> list[dict]:
+    _refresh_cache()
+    return list(_CACHE_ROWS or [])
 
 
 def _has_snapshot(account_id: str, day: str) -> bool:
-    for r in _all_rows():
-        if r.get("account_id") == account_id and r.get("date") == day:
-            return True
-    return False
+    _refresh_cache()
+    return (account_id, day) in _CACHE_INDEX
 
 
 def history_for(account_id: str) -> list[dict]:
