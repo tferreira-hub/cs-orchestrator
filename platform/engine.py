@@ -698,7 +698,67 @@ def health_score(account: dict) -> dict:
             score -= pen
             reasons.append(f"ROI AI adoption {int(roi_adopt)} (-{pen})")
 
-    if str(churn.get("churn_status") or "").lower() == "churned":
+    # Live warehouse metrics (Redshift rpt_account_ndr_monthly): net-dollar retention
+    # and seat change are hard, deterministic account-health signals available for the
+    # WHOLE book in one batched query (Option B). NDR < 100% is revenue contraction (a
+    # real risk); NDR >= 110% is genuine expansion (a modest positive). A negative
+    # user_change is seat loss. These make 'Not churned' accounts computable from a real
+    # signal rather than staying blank - never a fabricated green.
+    metrics = account.get("metrics", {}) or {}
+    # Warehouse account status (authoritative lifecycle from the NDR mart). A warehouse
+    # 'Churned' is a hard negative that must cap health to red and must suppress the
+    # otherwise-positive 'stable/growing seats' colour (an account churned in the
+    # warehouse is NOT healthy just because its zero seats are 'stable').
+    _rms = str(metrics.get("account_status_rms") or "").strip().lower()
+    _rms_churned = _rms in ("churned", "cancelrequested")
+    if _rms_churned:
+        score -= 40
+        reasons.append(f"warehouse status: {metrics.get('account_status_rms')} (-40)")
+    elif _rms == "paymentrequired":
+        score -= 10
+        reasons.append("warehouse status: PaymentRequired (-10)")
+    ndr = metrics.get("ndr_pct")
+    if isinstance(ndr, (int, float)):
+        if ndr < 100:
+            # Graduated: shallow contraction a light touch, deep contraction material.
+            pen = min(25, round((100 - ndr) * 0.5))
+            if pen > 0:
+                score -= pen
+                reasons.append(f"NDR {int(ndr)}% (revenue contraction) (-{pen})")
+            else:
+                reasons.append(f"NDR {int(ndr)}% (stable)")
+        elif ndr >= 110:
+            score = min(100.0, score + 3)
+            reasons.append(f"NDR {int(ndr)}% (expansion) (+3)")
+        else:
+            # 100-109%: healthy/flat retention. No score change, but cite it so a
+            # computable green always has a traceable reason (never a bare 100).
+            reasons.append(f"NDR {int(ndr)}% (healthy retention)")
+    # Seat movement. The warehouse column is CATEGORICAL ("Growing"/"Stable"/
+    # "Contracting"), though a numeric delta is also supported. Contraction is a real
+    # protect signal; growth a modest positive. Either form makes health computable.
+    # Positive/stable colour is suppressed for a warehouse-churned account (its seats
+    # being 'stable' at zero is not a health signal).
+    uchg = metrics.get("user_change")
+    _uchg_num = isinstance(uchg, (int, float))
+    _uchg_str = str(uchg or "").strip().lower()
+    if _uchg_num and uchg < 0:
+        pen = min(15, round(abs(uchg) * 2))
+        if pen > 0:
+            score -= pen
+            reasons.append(f"seat change {int(uchg)} (contraction) (-{pen})")
+    elif _uchg_str == "contracting":
+        score -= 10
+        reasons.append("seats contracting (-10)")
+    elif _uchg_str == "growing" and not _rms_churned:
+        score = min(100.0, score + 3)
+        reasons.append("seats growing (+3)")
+    elif _uchg_str == "stable" and not _rms_churned:
+        # No score change, but cite it so a 'Stable'-only active account (no NDR) is
+        # computable WITH evidence rather than a bare, unexplained 100.
+        reasons.append("seats stable")
+
+    if str(churn.get("churn_status") or "").lower() == "churned" or _rms_churned:
         score = min(score, 49)
     score = max(0, min(100, round(score)))
     band = "green" if score >= 75 else "amber" if score >= 50 else "red"
@@ -719,6 +779,13 @@ def health_score(account: dict) -> dict:
         or stripe.get("dunning_stage")
         or jiminny.get("sentiment")
         or roi_ai.get("adoption_score") is not None
+        # Warehouse metrics: NDR or a seat delta is a real, computable health signal.
+        or isinstance(metrics.get("ndr_pct"), (int, float))
+        or isinstance(metrics.get("user_change"), (int, float))
+        or str(metrics.get("user_change") or "").strip().lower() in ("growing", "stable", "contracting")
+        # Warehouse account status is itself an authoritative lifecycle signal.
+        or str(metrics.get("account_status_rms") or "").strip().lower()
+           in ("active", "churned", "cancelrequested", "paymentrequired")
     )
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
@@ -1682,6 +1749,17 @@ def portfolio() -> dict:
     try:
         if _src.HUBSPOT.live():
             _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+            # Whole-book batched signals (Option B): the churn status/score for the ENTIRE
+            # book is already available in ONE Redshift query (not a per-account fan-out).
+            # Merge it into every roster row below so health is COMPUTABLE across all ~4,300
+            # clients - not just the deeply-enriched ~50 - without any extra vendor calls.
+            # {} when the churn source is not live (rows then stay roster-band, honest).
+            _book_churn = _batch_churn_for() or {}
+            # Whole-book warehouse metrics (NDR / seat change) in ONE batched Redshift
+            # query - the second Option B signal, so 'Not churned' accounts (which a bare
+            # churn status leaves non-computable) still get a real, computable health band
+            # from revenue/seat movement instead of staying blank. {} when not live.
+            _book_metrics = _batch_metrics_for([]) or {}
             # Resolve the distinct HubSpot owner IDs on the whole-book roster to CSM NAMES
             # once (there are only ~15-20 CSMs; _owner_name is cached, so this is a handful
             # of calls). Without this, roster rows carry only the numeric owner_id and the
@@ -1707,6 +1785,33 @@ def portfolio() -> dict:
                     continue  # active book by default; churned available via filter/env
                 band = _roster_band(c)
                 _rd = c.get("renewal_date") or None
+                # Option B: build a minimal account dict carrying the WHOLE-BOOK batched
+                # signals (churn status/score + warehouse NDR/seat metrics, both keyed by
+                # uppercase-hyphen ref) and run the REAL health score, so this roster row
+                # gets a computable, signal-driven RAG band like the enriched slice - with
+                # no per-account fan-out. Falls back to the neutral roster band only when
+                # the account has NO batched signal at all (honest "not scored yet").
+                _ref_up = str(aid).upper()
+                _churn_sig = _book_churn.get(_ref_up) or {}
+                _metrics_sig = _book_metrics.get(_ref_up) or {}
+                if _churn_sig or _metrics_sig:
+                    _batched_account = {
+                        "hubspot": {"renewal_date": _rd, "arr_usd": c.get("arr_usd")},
+                        "churn": _churn_sig,
+                        "metrics": _metrics_sig,
+                        "zendesk": {}, "usage": {}, "stripe": {}, "jiminny": {},
+                    }
+                    _h = health_score(_batched_account)
+                    health = _h if _h.get("computable") else band
+                else:
+                    health = band
+                # Which batched live signals actually backed this row's health, so the UI
+                # can honestly show them as connected without a per-account fetch.
+                _conn = {}
+                if _churn_sig:
+                    _conn["churn"] = True
+                if _metrics_sig:
+                    _conn["metrics"] = True
                 rows.append({
                     "account_id": aid,
                     "name": c.get("name"),
@@ -1723,11 +1828,13 @@ def portfolio() -> dict:
                     "csm_owner_id": c.get("owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
                     "churned": is_churned,
-                    "health": band,
-                    "renewal_forecast": (renewal_forecast({"hubspot": {"renewal_date": _rd}, "arr_usd": c.get("arr_usd")}, band)
+                    "health": health,
+                    "renewal_forecast": (renewal_forecast({"hubspot": {"renewal_date": _rd}, "arr_usd": c.get("arr_usd")}, health)
                                          if _rd else
                                          {"applicable": False, "label": None, "rationale": None, "evidence": []}),
-                    "connected": {},
+                    # Batched live signals present on this whole-book row (churn/metrics),
+                    # so the UI can honestly show them as connected without a per-account fetch.
+                    "connected": _conn,
                     "usage_days_since_visit": None,
                     "open_task_count": 0,
                     "enriched": False,

@@ -88,7 +88,7 @@ Following Fowler/Böckeler's model, a harness is Guides (feedforward) + Sensors 
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
 | `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (93 tests) | computational | feedback |
+| `pytest` (324 tests) | computational | feedback |
 | `playbook_judge.py` (queue checker keyed on stable `rule_id`, returns PASS / NEEDS_CHANGES, wired into `orchestrate()`) | computational | feedback |
 | `cs-playbook-judge` agent (LLM-as-judge, semantic review on top of the code checks) | inferential | feedback |
 
@@ -125,7 +125,7 @@ python3 plugins/cs-orchestrator/mcp-servers/cs_stack_server.py
 pip install -r requirements-dev.txt
 python3 -m pytest plugins/cs-orchestrator/tests/ -v
 ```
-93 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
+324 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
 
 **As a Copilot plugin:**
 

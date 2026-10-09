@@ -18,6 +18,7 @@ Nothing here contains a secret; all credentials come from config.env().
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from . import config, identity
@@ -1071,9 +1072,11 @@ class AccountMetrics:
         out: dict[str, dict] = {}
         sql = (
             f"SELECT {id_col}, revenue, revenue_for_the_previous_year, "
-            "max_daily_users_over_month, deal_committed_users, tenure_months, user_change FROM ("
+            "max_daily_users_over_month, deal_committed_users, tenure_months, user_change, "
+            "account_status_rms, revenue_change FROM ("
             f"  SELECT {id_col}, revenue, revenue_for_the_previous_year, "
             "  max_daily_users_over_month, deal_committed_users, tenure_months, user_change, "
+            "  account_status_rms, revenue_change, "
             f"  ROW_NUMBER() OVER (PARTITION BY {id_col} ORDER BY date_reporting_month DESC) AS rn "
             f"  FROM {table}"
             ") WHERE rn = 1"
@@ -1102,18 +1105,29 @@ class AccountMetrics:
                         continue
                     rev = cell(row[1]); rev_py = cell(row[2])
                     active_users = cell(row[3]); committed = cell(row[4])
+                    # Revenue comes back as a STRING ('0.00', '1234.50'). Coerce to float
+                    # for the guards: a non-empty string like '0.00' is truthy, so the old
+                    # `if rev_py:` guard let 0/0 through and silently nulled NDR. NDR is only
+                    # meaningful when BOTH years have real revenue (> 0).
+                    def _f2(x):
+                        try:
+                            return float(x) if x not in (None, "") else None
+                        except (TypeError, ValueError):
+                            return None
+                    rev_n, rev_py_n = _f2(rev), _f2(rev_py)
                     ndr_pct = None
-                    try:
-                        if rev_py:
-                            ndr_pct = round(100.0 * float(rev) / float(rev_py))
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        ndr_pct = None
+                    if rev_py_n and rev_py_n > 0 and rev_n is not None:
+                        try:
+                            ndr_pct = round(100.0 * rev_n / rev_py_n)
+                        except (ZeroDivisionError, ValueError):
+                            ndr_pct = None
                     user_util = None
-                    try:
-                        if committed:
-                            user_util = round(100.0 * float(active_users or 0) / float(committed))
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        user_util = None
+                    committed_n = _f2(committed)
+                    if committed_n and committed_n > 0:
+                        try:
+                            user_util = round(100.0 * float(active_users or 0) / committed_n)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            user_util = None
                     out[str(ref).upper()] = {
                         "mrr_usd": rev,
                         "revenue_prev_year_usd": rev_py,
@@ -1123,6 +1137,11 @@ class AccountMetrics:
                         "user_utilization_pct": user_util,
                         "tenure_months": cell(row[5]),
                         "user_change": cell(row[6]),
+                        # Warehouse account status (Active / Churned / PaymentRequired /
+                        # CancelRequested) and revenue trend - richer, authoritative signals
+                        # from the NDR mart that the health score can act on directly.
+                        "account_status_rms": cell(row[7]),
+                        "revenue_change": cell(row[8]),
                         "_source": "redshift-live",
                     }
                 token = res.get("NextToken")
@@ -1475,6 +1494,8 @@ class HubSpot:
                 "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
                 "renewal_date": (p.get("hs_next_renewal_date") or p.get("renewal_date")
                                  or p.get("contract_renewal_date") or None),
+                "renewal_source": ("company" if (p.get("hs_next_renewal_date") or p.get("renewal_date")
+                                                  or p.get("contract_renewal_date")) else None),
                 "subscription_type": p.get("subscription_type") or None,
                 "customer_tier": tier or None,
                 "pooled_team": (p.get("cs_pooled_team") or None),
@@ -1514,8 +1535,84 @@ class HubSpot:
                 after = (res.get("paging", {}) or {}).get("next", {}).get("after")
                 if not after:
                     break
+        # Whole-book renewal fallback: the renewal truth lives on the closed-won DEAL,
+        # not the company object (measured live: only ~75 of ~4,300 active customers carry
+        # any company-level renewal property, while the associated deal is derivable for
+        # effectively all of them). The deep per-account path already derives it; without
+        # this the whole-book Renewals-by-Month / Upcoming Renewals views would show ~75
+        # rows instead of the whole book. Batched (association + deal batch/read) so the
+        # scan stays within rate limits — never a per-account fan-out. Off via
+        # CS_ROSTER_DEAL_RENEWAL=0 for environments that don't want the extra calls.
+        if os.environ.get("CS_ROSTER_DEAL_RENEWAL", "1").strip().lower() not in ("0", "false", "no", "off"):
+            try:
+                self._fill_roster_renewals_from_deals(rows)
+            except Exception:  # noqa: BLE001 - best-effort enrichment, never break the roster
+                pass
         HubSpot._full_roster_cache = (_t.time(), rows, limit)
         return rows[:limit]
+
+    def _fill_roster_renewals_from_deals(self, rows: list[dict], batch: int = 100) -> int:
+        """For roster rows with no company-level renewal date, derive one from the
+        account's associated closed-won deal and fill it in place (renewal_source='deal').
+
+        Batched to stay within HubSpot rate limits:
+          1. v4 batch association read (companies -> deals), up to `batch` companies/call
+          2. v3 deals batch/read for the union of associated deal ids
+          3. per-company: pick the closed-won deal, derive (signed/close + term)
+
+        Returns the number of rows filled. Best-effort: any error leaves rows unchanged
+        (the company simply keeps renewal_date=None, an honest gap, never a fake value)."""
+        targets = [r for r in rows
+                   if not r.get("renewal_date") and r.get("company_id")]
+        if not targets:
+            return 0
+        headers = self._headers()
+        filled = 0
+        for i in range(0, len(targets), batch):
+            chunk = targets[i:i + batch]
+            by_company = {str(r["company_id"]): r for r in chunk}
+            # 1. company -> deal associations in one batched call.
+            assoc_body = {"inputs": [{"id": cid} for cid in by_company]}
+            assoc = config.http_post(
+                "https://api.hubapi.com/crm/v4/associations/companies/deals/batch/read",
+                headers, assoc_body)
+            company_deal_ids: dict[str, list[str]] = {}
+            all_deal_ids: set[str] = set()
+            for res in assoc.get("results", []):
+                cid = str((res.get("from") or {}).get("id") or "")
+                dids = [str(t.get("toObjectId")) for t in res.get("to", [])
+                        if t.get("toObjectId")]
+                if cid and dids:
+                    company_deal_ids[cid] = dids
+                    all_deal_ids.update(dids)
+            if not all_deal_ids:
+                continue
+            # 2. deal properties for the union of associated deals, in batched reads.
+            deal_props: dict[str, dict] = {}
+            ids = list(all_deal_ids)
+            for j in range(0, len(ids), 100):
+                sub = ids[j:j + 100]
+                body = {"inputs": [{"id": d} for d in sub],
+                        "properties": ["amount", "hs_arr", "closedate", "deal_signed_date",
+                                       "contract_length__months_", "hs_is_closed_won", "dealstage"]}
+                res = config.http_post(
+                    "https://api.hubapi.com/crm/v3/objects/deals/batch/read", headers, body)
+                for r in res.get("results", []):
+                    deal_props[str(r.get("id"))] = r.get("properties", {})
+            # 3. derive per company from its closed-won deal.
+            for cid, dids in company_deal_ids.items():
+                props = [deal_props[d] for d in dids if d in deal_props]
+                picked = self._pick_closed_won_deal(props)
+                if not picked:
+                    continue
+                renewal = self._derive_renewal_from_deal_props(picked)
+                if renewal:
+                    row = by_company.get(cid)
+                    if row is not None:
+                        row["renewal_date"] = renewal
+                        row["renewal_source"] = "deal"
+                        filled += 1
+        return filled
 
     def _find_company(self, account_ref: str) -> dict[str, Any]:
         # HubSpot stores the AUx-yyyy id in the `account_id` company property,
@@ -1681,13 +1778,10 @@ class HubSpot:
                                    "contract_length__months_", "hs_is_closed_won", "dealstage"]}
             res = config.http_post(
                 "https://api.hubapi.com/crm/v3/objects/deals/batch/read", self._headers(), body)
-            won = [r.get("properties", {}) for r in res.get("results", [])
-                   if str(r.get("properties", {}).get("hs_is_closed_won")).lower() == "true"]
-            pool = won or [r.get("properties", {}) for r in res.get("results", [])]
-            if not pool:
+            all_props = [r.get("properties", {}) for r in res.get("results", [])]
+            p = self._pick_closed_won_deal(all_props)
+            if not p:
                 return None
-            pool.sort(key=lambda pr: pr.get("closedate") or "", reverse=True)
-            p = pool[0]
 
             def _f(k):
                 try:
@@ -1696,23 +1790,45 @@ class HubSpot:
                     return None
 
             arr = _f("hs_arr") or _f("amount")
-            renewal = None
-            start = p.get("deal_signed_date") or p.get("closedate")
-            term = p.get("contract_length__months_")
-            if start and term:
-                try:
-                    from datetime import datetime
-                    base = datetime.fromisoformat(str(start)[:10])
-                    months = int(float(term))
-                    yy = base.year + (base.month - 1 + months) // 12
-                    mm = (base.month - 1 + months) % 12 + 1
-                    dd = min(base.day, 28)
-                    renewal = f"{yy:04d}-{mm:02d}-{dd:02d}"
-                except (ValueError, TypeError):
-                    renewal = None
+            renewal = self._derive_renewal_from_deal_props(p)
             return {"arr_usd": arr, "renewal_date": renewal}
         except Exception:  # noqa: BLE001
             return None
+
+    @staticmethod
+    def _derive_renewal_from_deal_props(p: dict) -> str | None:
+        """Derive a renewal date from a single deal's properties, identically for the
+        deep per-account path (_account_deal) and the whole-book roster path
+        (list_all_companies), so the two never disagree:
+            renewal_date <- (deal_signed_date or closedate) + contract_length__months_
+        Returns an ISO yyyy-mm-dd string, or None when the inputs are missing/unparsable.
+        Day is clamped to 28 to stay valid across month lengths (matches the original)."""
+        start = p.get("deal_signed_date") or p.get("closedate")
+        term = p.get("contract_length__months_")
+        if not (start and term):
+            return None
+        try:
+            base = datetime.fromisoformat(str(start)[:10])
+            months = int(float(term))
+            yy = base.year + (base.month - 1 + months) // 12
+            mm = (base.month - 1 + months) % 12 + 1
+            dd = min(base.day, 28)
+            return f"{yy:04d}-{mm:02d}-{dd:02d}"
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _pick_closed_won_deal(deal_props: list[dict]) -> dict | None:
+        """From a list of deal property dicts, pick the most relevant one for renewal
+        derivation: prefer closed-won deals, newest closedate first. Mirrors the
+        selection in _account_deal so the roster and deep paths agree."""
+        if not deal_props:
+            return None
+        won = [p for p in deal_props
+               if str(p.get("hs_is_closed_won")).lower() == "true"]
+        pool = won or deal_props
+        pool.sort(key=lambda pr: pr.get("closedate") or "", reverse=True)
+        return pool[0] if pool else None
 
     @staticmethod
     def _map_segment(label):
