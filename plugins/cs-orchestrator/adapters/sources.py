@@ -1563,20 +1563,37 @@ class HubSpot:
                 after = (res.get("paging", {}) or {}).get("next", {}).get("after")
                 if not after:
                     break
-        # Whole-book renewal fallback: the renewal truth lives on the closed-won DEAL,
-        # not the company object (measured live: only ~75 of ~4,300 active customers carry
-        # any company-level renewal property, while the associated deal is derivable for
-        # effectively all of them). The deep per-account path already derives it; without
-        # this the whole-book Renewals-by-Month / Upcoming Renewals views would show ~75
-        # rows instead of the whole book. Batched (association + deal batch/read) so the
-        # scan stays within rate limits — never a per-account fan-out. Off via
-        # CS_ROSTER_DEAL_RENEWAL=0 for environments that don't want the extra calls.
-        if os.environ.get("CS_ROSTER_DEAL_RENEWAL", "1").strip().lower() not in ("0", "false", "no", "off"):
-            try:
-                self._fill_roster_renewals_from_deals(rows)
-            except Exception:  # noqa: BLE001 - best-effort enrichment, never break the roster
-                pass
+        # Cache the roster rows IMMEDIATELY (the ~42s scan is done), so the dashboard gets
+        # the whole book on first paint. The renewal-from-deal fallback below is the slow
+        # part (~5min of batched association + deal reads for thousands of accounts), so it
+        # must NOT block this return — it runs in the background and updates the cached rows
+        # in place as derivations complete. CS_ROSTER_DEAL_RENEWAL=0 disables it entirely;
+        # CS_ROSTER_DEAL_RENEWAL_SYNC=1 forces the old blocking behaviour (used by tests).
         HubSpot._full_roster_cache = (_t.time(), rows, limit)
+        _deal_renewal_on = os.environ.get("CS_ROSTER_DEAL_RENEWAL", "1").strip().lower() \
+            not in ("0", "false", "no", "off")
+        _deal_renewal_sync = os.environ.get("CS_ROSTER_DEAL_RENEWAL_SYNC", "").strip().lower() \
+            in ("1", "true", "yes", "on")
+        if _deal_renewal_on:
+            def _fill_bg():
+                try:
+                    self._fill_roster_renewals_from_deals(rows)
+                    # Rows are mutated in place; refresh the cache timestamp so the enriched
+                    # rows (now carrying deal-derived renewals) are what subsequent reads get.
+                    HubSpot._full_roster_cache = (_t.time(), rows, limit)
+                except Exception:  # noqa: BLE001 - best-effort enrichment, never break the roster
+                    pass
+            if _deal_renewal_sync:
+                _fill_bg()
+            elif not getattr(HubSpot, "_roster_renewal_filling", False):
+                HubSpot._roster_renewal_filling = True
+                import threading
+                def _bg():
+                    try:
+                        _fill_bg()
+                    finally:
+                        HubSpot._roster_renewal_filling = False
+                threading.Thread(target=_bg, daemon=True).start()
         return rows[:limit]
 
     def _fill_roster_renewals_from_deals(self, rows: list[dict], batch: int = 100) -> int:
