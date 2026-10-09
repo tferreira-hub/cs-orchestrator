@@ -80,6 +80,12 @@ def test_warm_reports_populates_admin_cache(monkeypatch):
     # Patch the heavy builds so the test is hermetic and fast (no live fan-out).
     monkeypatch.setattr(engine, "_onboarding_governance_build", lambda: {"connected": True, "projects": []})
     monkeypatch.setattr(engine, "_payment_risk_report_build", lambda: {"stripe_connected": True, "pages": {}})
+    # warm_reports also warms the whole-book roster + batched metrics/churn; stub those so
+    # the test never hits a live HubSpot/Redshift scan (keeps it fast + deterministic).
+    import types
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=types.SimpleNamespace(live=lambda: False)))
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
+    monkeypatch.setattr(engine, "warm_batch_churn", lambda: 0)
     engine.warm_reports()
     # Both reports should now be cached under the admin key.
     assert ("onboarding_governance", "admin") in engine._REPORT_CACHE

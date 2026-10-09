@@ -2451,6 +2451,57 @@ def test_ingestion_status_reports_warming_and_ready(monkeypatch):
         engine._BATCH_METRICS["at"] = 0.0
 
 
+def test_ingestion_banner_covers_secondary_sources(monkeypatch):
+    """V5 audit follow-up: the degraded banner must reflect ROI AI / Rocket Lane / billing
+    sync. A CONFIGURED-but-not-live secondary source is 'failing' (degrades the banner);
+    an UNCONFIGURED one is 'not_configured' (informational, does not degrade)."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    # Core all live + metrics fresh so, absent secondary issues, the state would be 'ready'.
+    monkeypatch.setattr(dataaccess, "live_sources",
+                        lambda: ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"])
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"AU1-1": {}})
+
+    class _FakeRL:
+        def __init__(self, live): self._live = live
+        def live(self): return self._live
+
+    class _FakeHS:
+        def live(self): return True
+        def list_all_companies(self, cached_only=False):
+            return [{"account_id": "AU1-1", "lifecycle_stage": "customer"}]
+
+    monkeypatch.setattr(engine, "_report_cache_ttl", lambda: 600.0)
+    engine._BATCH_METRICS["data"] = {"AU1-1": {"mrr_usd": 1}}
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        # Rocket Lane CONFIGURED but not live -> 'failing' -> banner degraded.
+        monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS(),
+                                                                  ROCKET_LANE=_FakeRL(False)))
+        monkeypatch.setenv("ROCKET_LANE_KEY", "rl-key")
+        monkeypatch.setattr(engine, "roi_ai_configured", lambda: False)
+        s = engine.ingestion_status()
+        by = {x["system"]: x for x in s["secondary_sources"]}
+        assert by["Rocket Lane"]["status"] == "failing"
+        assert "Rocket Lane" in s["secondary_degraded"]
+        assert s["state"] == "degraded"          # a configured secondary failing degrades
+        assert by["ROI AI"]["status"] == "not_configured"   # unconfigured -> informational
+
+        # Rocket Lane now LIVE -> no secondary failure -> state back to ready.
+        monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS(),
+                                                                  ROCKET_LANE=_FakeRL(True)))
+        s2 = engine.ingestion_status()
+        assert s2["secondary_degraded"] == []
+        assert s2["state"] == "ready"
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
+
+
 def test_book_readiness_is_owner_scoped_and_counts_gaps(monkeypatch):
     """Per-CSM book readiness: owner-scoped, counts missing required fields + ARR at risk,
     computes an overall readiness %, and ranks fix-first by gaps then ARR."""

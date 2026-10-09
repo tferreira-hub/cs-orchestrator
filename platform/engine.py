@@ -299,6 +299,17 @@ def warm_reports():
     (not from a request handler). MUST NOT use _cached_report (which now returns a
     warming placeholder on cold miss)."""
     import time as _t
+    # Synchronously warm the WHOLE-BOOK roster cache so the very first portfolio() render
+    # shows the full customer book (~4,300), not just the deeply-enriched ~50 slice.
+    # portfolio() reads list_all_companies(cached_only=True), which returns [] on a cold
+    # cache (non-blocking by design); without this boot warm the dashboard headline count
+    # and the global filter population would be stuck at the enriched slice until a later
+    # request happened to warm it. Best-effort; never crashes the boot thread.
+    try:
+        if _src.HUBSPOT.live():
+            _src.HUBSPOT.list_all_companies()  # blocking full scan, populates the cache
+    except Exception:  # noqa: BLE001
+        pass
     # Load whole-book warehouse metrics (NDR inputs + licence utilisation) up front so the
     # first dashboard load shows a real Portfolio NDR instead of "no data" while the lazy
     # non-blocking cache warms. Best-effort; never crashes the boot thread.
@@ -3580,6 +3591,19 @@ def inbound_queue(status: str | None = None) -> dict:
     by_dest: dict[str, int] = {}
     by_intent: dict[str, int] = {}
     breached = open_count = reassign = 0
+    # Response/resolution timing (UC3 queue analytics): first-response time ~ triage
+    # latency (recorded_at - received_at); resolution time = resolved_at - received_at for
+    # closed tickets. Collected in hours and averaged; honest None when no sample.
+    def _iso_to_epoch(v):
+        if not v:
+            return None
+        try:
+            s = str(v).replace("Z", "+00:00")
+            return datetime.fromisoformat(s).timestamp()
+        except (ValueError, TypeError):
+            return None
+    response_hours: list[float] = []
+    resolution_hours: list[float] = []
     for r in rows:
         by_dest[r.get("destination")] = by_dest.get(r.get("destination"), 0) + 1
         by_intent[r.get("intent")] = by_intent.get(r.get("intent"), 0) + 1
@@ -3589,9 +3613,29 @@ def inbound_queue(status: str | None = None) -> dict:
             breached += 1
         if r.get("needs_reassign"):
             reassign += 1
+        received = r.get("received_at")
+        received = received if isinstance(received, (int, float)) else _iso_to_epoch(received)
+        if received is not None:
+            recorded = _iso_to_epoch(r.get("recorded_at"))
+            if recorded is not None and recorded >= received:
+                response_hours.append((recorded - received) / 3600.0)
+            if r.get("status") in ("resolved", "closed", "handed_off"):
+                resolved = _iso_to_epoch(r.get("resolved_at"))
+                if resolved is not None and resolved >= received:
+                    resolution_hours.append((resolved - received) / 3600.0)
+
+    def _avg(xs):
+        return round(sum(xs) / len(xs), 2) if xs else None
+
     return {"count": len(rows), "open": open_count, "sla_breached": breached,
             "needs_reassign": reassign,
-            "by_destination": by_dest, "by_intent": by_intent, "tickets": rows}
+            "by_destination": by_dest, "by_intent": by_intent,
+            # Average first-response and resolution time in HOURS (None when no sample yet).
+            "avg_first_response_hours": _avg(response_hours),
+            "avg_resolution_hours": _avg(resolution_hours),
+            "response_sample": len(response_hours),
+            "resolution_sample": len(resolution_hours),
+            "tickets": rows}
 
 
 def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
@@ -4552,6 +4596,41 @@ def ingestion_status() -> dict:
     core = ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"]
     sources = [{"system": s, "live": s in live} for s in core]
 
+    # Secondary ingestion sources the V5 spec explicitly names for the degraded banner:
+    # ROI AI webhook telemetry, Rocket Lane onboarding, and the Stripe billing sync. These
+    # are tracked separately from core because the degraded signal must distinguish
+    # "configured but FAILING" (expected live, isn't -> warn) from "not configured yet /
+    # access pending" (nothing to warn about). Only a configured-but-not-live secondary
+    # source raises the banner; an unconfigured one is reported as informational.
+    def _secondary(system: str, configured: bool, is_live: bool) -> dict:
+        if not configured:
+            status = "not_configured"   # access pending / not wired yet - not a failure
+        elif is_live:
+            status = "live"
+        else:
+            status = "failing"          # expected to be live but isn't -> degraded
+        return {"system": system, "configured": configured, "live": is_live, "status": status}
+
+    try:
+        roi_configured = roi_ai_configured()
+    except Exception:  # noqa: BLE001
+        roi_configured = False
+    try:
+        rl_configured = bool((os.environ.get("ROCKET_LANE_KEY") or "").strip())
+        rl_live = _src.ROCKET_LANE.live()
+    except Exception:  # noqa: BLE001
+        rl_configured = rl_live = False
+    try:
+        stripe_configured = bool((os.environ.get("STRIPE_KEY") or "").strip())
+    except Exception:  # noqa: BLE001
+        stripe_configured = False
+    secondary = [
+        _secondary("ROI AI", roi_configured, "ROI AI" in live or roi_configured),
+        _secondary("Rocket Lane", rl_configured, rl_live),
+        _secondary("Billing Sync (Stripe)", stripe_configured, "Stripe" in live),
+    ]
+    secondary_degraded = [s["system"] for s in secondary if s["status"] == "failing"]
+
     # Warehouse metrics freshness + coverage (NDR / licence utilisation).
     bm = _BATCH_METRICS.get("data") or {}
     bm_at = _BATCH_METRICS.get("at") or 0
@@ -4575,8 +4654,9 @@ def ingestion_status() -> dict:
     core_live = all(s["live"] for s in sources if s["system"] in ("HubSpot",))
     degraded = [s["system"] for s in sources if not s["live"]]
     # Overall state: ready (core live + metrics fresh), warming (metrics loading), or
-    # degraded (a core source is down).
-    if not core_live:
+    # degraded (a core source is down, OR a CONFIGURED secondary source is failing — a
+    # wired ROI AI / Rocket Lane / billing sync that stops delivering must surface).
+    if not core_live or secondary_degraded:
         state = "degraded"
     elif not metrics_fresh:
         state = "warming"
@@ -4587,6 +4667,10 @@ def ingestion_status() -> dict:
         "state": state,
         "sources": sources,
         "degraded": degraded,
+        # Secondary sources (ROI AI / Rocket Lane / billing sync) + the subset that is
+        # configured-but-failing (what the banner should actually warn about).
+        "secondary_sources": secondary,
+        "secondary_degraded": secondary_degraded,
         "warehouse_metrics": {
             "accounts": len(bm),
             "fresh": metrics_fresh,

@@ -249,3 +249,49 @@ def test_inbound_queue_persists_across_restart(monkeypatch, tmp_path):
     assert q["hs-1"]["account_ref"] == "au1-1"
     engine._INBOUND_QUEUE.clear()
     engine._INBOUND_QUEUE_LOADED = False
+
+
+# --------------------------------------------------------------------------- #
+# V5 audit follow-up: avg response/resolution time in queue analytics (UC3)
+# --------------------------------------------------------------------------- #
+def test_inbound_queue_reports_avg_response_and_resolution(monkeypatch):
+    """engine.inbound_queue() must expose avg first-response (triage latency) and
+    resolution time in hours, computed from received_at/recorded_at/resolved_at."""
+    import engine
+    base = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+    received = base.timestamp()
+    # Ticket A: triaged 1h after receipt, resolved 5h after receipt.
+    # Ticket B: triaged 3h after receipt, still open.
+    queue = {
+        "a": {"id": "a", "status": "resolved", "intent": "billing", "destination": "pooled_queue",
+              "received_at": received,
+              "recorded_at": _iso(base + timedelta(hours=1)),
+              "resolved_at": _iso(base + timedelta(hours=5))},
+        "b": {"id": "b", "status": "open", "intent": "billing", "destination": "pooled_queue",
+              "received_at": received,
+              "recorded_at": _iso(base + timedelta(hours=3))},
+    }
+    monkeypatch.setattr(engine, "_INBOUND_QUEUE", queue)
+    monkeypatch.setattr(engine, "_load_inbound", lambda: None)
+    monkeypatch.setattr(engine, "pooled_roster", lambda: {"roster": []})
+    monkeypatch.setattr(engine, "_live_pooled_load", lambda: {})
+    monkeypatch.setattr(engine, "_presence_for", lambda who: True)
+
+    q = engine.inbound_queue()
+    # Response = triage latency for BOTH tickets: avg(1h, 3h) = 2.0h.
+    assert q["avg_first_response_hours"] == 2.0
+    assert q["response_sample"] == 2
+    # Resolution only for the resolved ticket: 5.0h.
+    assert q["avg_resolution_hours"] == 5.0
+    assert q["resolution_sample"] == 1
+
+
+def test_inbound_queue_timing_is_none_when_no_sample(monkeypatch):
+    import engine
+    monkeypatch.setattr(engine, "_INBOUND_QUEUE", {})
+    monkeypatch.setattr(engine, "_load_inbound", lambda: None)
+    monkeypatch.setattr(engine, "pooled_roster", lambda: {"roster": []})
+    monkeypatch.setattr(engine, "_live_pooled_load", lambda: {})
+    q = engine.inbound_queue()
+    assert q["avg_first_response_hours"] is None
+    assert q["avg_resolution_hours"] is None

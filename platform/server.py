@@ -1365,14 +1365,14 @@ def main() -> int:
     # Warm the live account cache in the background so the first request never waits on
     # the cold ~30s vendor fan-out (a slow origin response can make the edge time out).
     def _warm():
+        # Warm the whole-book roster + batched churn/metrics + TTL reports FIRST, so the
+        # subsequent portfolio() render finds a warm cache and shows the full customer book
+        # (not just the enriched ~50) and real health on the very first request.
+        engine.warm_reports()
         try:
             engine.portfolio()
         except Exception:  # noqa: BLE001
             pass
-        # Synchronously build both TTL-cached reports under the admin scope key
-        # so the first admin page load is instant. warm_reports() writes directly
-        # to the cache (bypassing _cached_report's warming placeholder).
-        engine.warm_reports()
         # Pull HubSpot Service Hub tickets into the pooled queue so the inbound inbox
         # is populated on the first load after deploy (Option A). Best-effort.
         try:
