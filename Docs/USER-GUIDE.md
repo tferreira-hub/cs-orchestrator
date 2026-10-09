@@ -81,8 +81,17 @@ Sidebar → **Pooled CS → Inbox**.
   - **Technical** ("login crash") → handed off to Zendesk — it never clogs your queue.
   - **Billing/Account** ("invoice question") → a pooled ticket, round-robin assigned.
   - **Expansion** ("add 10 seats") → flagged a **high-priority CSQL**.
-- Each ticket shows its **intent**, **who it's routed to**, and a **24-hour SLA** clock.
-  Rows breaching SLA sort to the top.
+- Each ticket shows its **intent**, a **Priority** score, **who it's routed to**, and a
+  **24-hour SLA** clock. The queue is ordered by a **blended priority**: your mandate/intent
+  sets the band, and each inbound **channel carries a weight** so the *source* also counts —
+  a self-served **high-intent form** outranks a generic **mailbox** email at the same intent
+  level, while a genuine fault still outranks a low-value channel. The channel-weight legend
+  is shown above the list (defaults: high-intent form 1.0 > Slack call 0.8 > Zendesk 0.6 >
+  campaign reply 0.4 > mailbox 0.3; admins can retune via `CS_CHANNEL_WEIGHTS`). Rows
+  breaching SLA sort to the top within a tie.
+- The platform **is the help desk** — these five paths wire straight into it (no HubSpot
+  Service Hub Pro). Technical issues hand off to Zendesk; everything account-related stays
+  in your queue.
 - **Set yourself Available / OOO** with the presence toggle. Round-robin only assigns to
   *available* CSMs; if a ticket sits 20 hours unanswered (or its owner goes OOO) it
   **auto-reassigns** to the next available person. Duplicate messages from the same sender
@@ -340,6 +349,7 @@ immutable log of every action and Jane answer.
    score, it means the source genuinely has nothing for that account — the platform never
    fabricates a number. Those blanks double as your data-cleanup worklist (Data Gaps).
 2. **Two things need a RevOps switch to go fully live** (not platform gaps): the **monthly
-   digest email send** (needs a HubSpot template) and the **5 live inbound channels** (needs
-   the Service Hub Pro decision). Everything else above is live today. See
+   digest email send** (needs a HubSpot template) and the **5 live inbound channels** (RevOps
+   wires each source's webhook to `/api/inbound/channel/*` — the platform is the help desk,
+   no HubSpot Service Hub Pro). Everything else above is live today. See
    `Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md`.

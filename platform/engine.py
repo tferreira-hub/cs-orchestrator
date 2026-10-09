@@ -3561,6 +3561,18 @@ def start_inbound_ingest(window_days: int | None = None) -> dict:
     return {**_INBOUND_INGEST_STATUS, "already_running": False}
 
 
+def _channel_weights_map() -> dict:
+    """Active per-channel prioritisation weights (defaults + any CS_CHANNEL_WEIGHTS
+    override) for the five inbound paths, for the UI/governance to display."""
+    try:
+        import inbound as _inbound
+        return {ch: _inbound.channel_weight(ch) for ch in
+                ("high_intent_form", "slack_call", "zendesk_misroute",
+                 "campaign_reply", "mailbox")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def inbound_queue(status: str | None = None) -> dict:
     """The persisted inbound queue (newest first), optionally filtered by status, with a
     summary by destination/intent/SLA so the pooled team can work it like an inbox.
@@ -3613,8 +3625,20 @@ def inbound_queue(status: str | None = None) -> dict:
                 r["needs_reassign"] = True
         else:
             r["needs_reassign"] = stale
-    rows = sorted(_INBOUND_QUEUE.values(),
-                  key=lambda r: r.get("recorded_at") or "", reverse=True)
+    # Order the inbox by the blended per-channel priority (lower priority_score = more
+    # urgent, so a high-intent form sits above a generic mailbox email at the same intent),
+    # SLA-breached first within a tie, then newest. Rows persisted before weighting existed
+    # fall back to their intent priority (then a neutral mid value) so ordering never breaks.
+    def _score(r):
+        ps = r.get("priority_score")
+        if isinstance(ps, (int, float)):
+            return float(ps)
+        pr = r.get("priority")
+        return float(pr) if isinstance(pr, (int, float)) else 3.0
+    # Two-pass stable sort: newest-first first, then by (score, SLA) — so within an equal
+    # score+SLA tie the newest ticket still leads, while the blended priority dominates.
+    rows = sorted(_INBOUND_QUEUE.values(), key=lambda r: r.get("recorded_at") or "", reverse=True)
+    rows.sort(key=lambda r: (_score(r), not r.get("sla_breached")))
     if status:
         rows = [r for r in rows if r.get("status") == status]
     by_dest: dict[str, int] = {}
@@ -3664,6 +3688,9 @@ def inbound_queue(status: str | None = None) -> dict:
             "avg_resolution_hours": _avg(resolution_hours),
             "response_sample": len(response_hours),
             "resolution_sample": len(resolution_hours),
+            # The active per-channel prioritisation weights (defaults + any CS_CHANNEL_WEIGHTS
+            # override), so the UI can show how each inbound path is weighted in the queue.
+            "channel_weights": _channel_weights_map(),
             "tickets": rows}
 
 

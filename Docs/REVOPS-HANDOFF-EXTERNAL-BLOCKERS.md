@@ -15,26 +15,35 @@ need to do**, and **how to verify** it is live.
 ## 1. Live inbound channels (Tech-Touch UC1)
 
 **Unlocks:** the 5-channel pooled inbound queue (Zendesk misroute, Slack call-log,
-mailbox, campaign replies, high-intent forms) running on real traffic instead of the
-HubSpot ticket pull.
+mailbox, campaign replies, high-intent forms) running on real traffic.
+
+**Decision:** We are **NOT using HubSpot Service Hub Pro.** The CS Platform IS the help
+desk; the five paths wire **directly into it**. (See `Docs/INBOUND-OPTIONS-SCENARIOS.md`.)
 
 **Already built (no code needed):**
 - Deterministic triage + round-robin + 24h SLA + 20h reassign + 2h dedupe (`inbound.py`).
 - All 5 channel normalisers (`inbound.py` `from_*` adapters) with tests.
-- A live PULL ingress today via `POST /api/inbound/ingest-hubspot` → `inbound_tickets()`
-  (reads Service Hub tickets with the existing HubSpot token — works now).
-- The webhook seam `POST /api/inbound/hubspot` for a push model.
+- **Per-channel prioritisation weighting** (blend with intent); configurable via
+  `CS_CHANNEL_WEIGHTS`.
+- Native per-channel endpoints `POST /api/inbound/channel/<channel>`, plus a zero-wiring
+  PULL path `POST /api/inbound/ingest-hubspot` (reads tickets via the existing HubSpot
+  token) so the inbox is populated today while the webhooks are stood up.
 
-**Your decision (A or B) — see `Docs/INBOUND-OPTIONS-SCENARIOS.md`:**
-- **Option A (recommended, lowest lift):** upgrade CS to **HubSpot Service Hub Pro** and
-  stand up the Account-Management ticket pipeline. The platform already pulls those
-  tickets; this just makes the 5 channels land in HubSpot. Needs: Service Hub Pro licence
-  + the ticket pipeline + the Zendesk misroute macro (`Ticket_Type = Account_Management`).
-- **Option B:** wire each channel's native webhook (mailbox, Slack workflow form, website
-  high-intent forms) to `POST /api/inbound/hubspot`. More wiring, no HubSpot upgrade.
+**What you need to do (internal, no licence):** point each source at its endpoint —
+  - Zendesk misroute macro (`Ticket_Type = Account_Management`) → webhook →
+    `/api/inbound/channel/zendesk_misroute`
+  - Slack call-log workflow form → `/api/inbound/channel/slack_call`
+  - `accountmanagement@` mailbox forward → `/api/inbound/channel/mailbox`
+  - Campaign/report reply-to → `/api/inbound/channel/campaign_reply`
+  - Website high-intent form → `/api/inbound/channel/high_intent_form`
 
-**Verify live:** trigger `POST /api/inbound/ingest-hubspot`, then `GET /api/inbound/queue`
-shows real tickets with intents/owners; the Pooled CS → Inbox UI populates.
+  Optionally tune `CS_CHANNEL_WEIGHTS` (JSON map) if the default channel ranking should
+  change (default: high-intent form 1.0 > slack 0.8 > zendesk 0.6 > campaign 0.4 > mailbox 0.3).
+
+**Verify live:** trigger `POST /api/inbound/ingest-hubspot` (or post a test payload to a
+channel endpoint), then `GET /api/inbound/queue` shows tickets ordered by the blended
+`priority_score`; the Pooled CS → Inbox UI populates with the Priority column + channel
+weighting legend.
 
 ---
 
@@ -91,7 +100,7 @@ after rotation; the Reports page still renders embedded dashboards.
 
 | Blocker | Owner | Platform ready? | Needs |
 |---|---|---|---|
-| 1. Live inbound channels | RevOps + CS | ✅ engine + pull ingress live | Service Hub Pro (A) or webhook wiring (B) |
+| 1. Live inbound channels | RevOps + CS | ✅ engine, weighting + pull ingress live | Wire 5 webhooks to `/api/inbound/channel/*` (no Service Hub Pro) |
 | 2. Monthly digest live send | RevOps + Marketing Ops | ✅ compile/schedule/send path | HubSpot email template + 3 env vars |
 | 3. Key rotation | RevOps / Security | ✅ guard already enforced | restricted Stripe key + Tableau secret |
 

@@ -8,8 +8,8 @@ Notes · Tech-Touch V3 · V5 Follow-Up Notes).
 (9 Oct) verified each against code + UI + tests rather than intent. The audit found four
 real code gaps that the previous (6 Oct) version of this scorecard had marked done or
 glossed; **all four are now fixed, tested, and on PR #167** (341 tests passing). The only
-items still not switched on are **external dependencies** (a HubSpot email template, the
-Service Hub Pro / inbound routing decision, two security key rotations) — not capability
+items still not switched on are **external dependencies** (a HubSpot email template, wiring
+the 5 inbound webhooks into the platform, two security key rotations) — not capability
 gaps. A few pillars are intentionally Phase-2 / non-platform per your own docs.
 
 **Key:** ✅ Live (built, tested, verified against source) · 🟡 Built, needs a
@@ -51,7 +51,7 @@ Marketing/Product).
 ## Use Case 1 — Scaled / Tech-Touch
 | Requirement | Status |
 |---|---|
-| 5-channel intake | 🟡 platform seam live; channel config pending (A/B) |
+| 5-channel intake (native, no Service Hub Pro) + per-channel weighting | 🟡 engine + weighting live; RevOps wires 5 webhooks to `/api/inbound/channel/*` |
 | Triage (technical→Zendesk, billing→pooled, expansion→CSQL) | ✅ |
 | Round-robin + availability + 24h SLA + 20h reassign | ✅ |
 | Monthly digest (85% CTA, Primary Admin) | ✅ built; 🟡 live send |
@@ -109,8 +109,10 @@ Marketing/Product).
 
 ## The only things not switched on (all external, not capability)
 1. **Send the monthly digest to customers** — needs a HubSpot transactional email template.
-2. **The 5 live inbound channels** — needs the Service Hub Pro decision (Option A) or the
-   platform-routing wiring (Option B). See `INBOUND-OPTIONS-SCENARIOS.md`.
+2. **The 5 live inbound channels** — RevOps wires each source's webhook to
+   `/api/inbound/channel/*`. The platform is the help desk (no Service Hub Pro); triage,
+   round-robin, SLA and **per-channel prioritisation weighting** are already live. See
+   `INBOUND-OPTIONS-SCENARIOS.md`.
 3. **Security hygiene** — rotate the Stripe key to read-only and the Tableau secret (no
    feature impact).
 

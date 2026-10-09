@@ -159,5 +159,5 @@ Ask for today's actions. Northwind comes back as a Priority-1 churn risk (ML chu
 - [Docs/REQUIREMENTS-COVERAGE-SCORECARD.md](Docs/REQUIREMENTS-COVERAGE-SCORECARD.md): requirement-by-requirement coverage vs the V5 spec (source-verified).
 - [Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md](Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md): the only not-live items (all external) and how to switch each on.
 - [Docs/PROVISIONING-CHECKLIST.md](Docs/PROVISIONING-CHECKLIST.md): the go-live provisioning steps and owners.
-- [Docs/INBOUND-OPTIONS-SCENARIOS.md](Docs/INBOUND-OPTIONS-SCENARIOS.md): inbound routing decision (Option A) + worked scenarios.
+- [Docs/INBOUND-OPTIONS-SCENARIOS.md](Docs/INBOUND-OPTIONS-SCENARIOS.md): inbound design — 5 native paths + per-channel prioritisation weighting (platform is the help desk; no Service Hub Pro).
 - [Docs/SECURITY-ROTATION-RUNBOOK.md](Docs/SECURITY-ROTATION-RUNBOOK.md): Stripe/Tableau key-rotation runbook.

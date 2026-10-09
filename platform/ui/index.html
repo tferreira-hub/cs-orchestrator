@@ -1528,6 +1528,12 @@ function _renderInbox(d){
   if(!tickets.length){ b.innerHTML='<p class="muted" style="margin:0">No inbound tickets yet. When the HubSpot Service Hub channels post to <code>/api/inbound/hubspot</code>, triaged tickets appear here, round-robined to available pooled CSMs under the 24h SLA.</p>'; return; }
   const rows=tickets.map(t=>
     '<tr>'+
+      '<td title="Blended priority: intent band + channel weight (lower = more urgent)">'+
+        '<span class="pill pln" style="padding:2px 8px"><strong>'+
+        (typeof t.priority_score==='number'?t.priority_score.toFixed(2):(t.priority!=null?t.priority:'-'))+
+        '</strong></span>'+
+        (typeof t.channel_weight==='number'?'<div class="muted" style="font-size:.74em;margin-top:2px">ch wt '+t.channel_weight.toFixed(1)+'</div>':'')+
+      '</td>'+
       '<td><span class="pill" style="background:var(--surface);border:1px solid var(--line);padding:2px 8px;border-radius:10px">'+escapeHtml(_channelLabel(t.channel))+'</span></td>'+
       '<td><strong>'+escapeHtml(t.subject||'(no subject)')+'</strong><div class="muted" style="font-size:.8em">'+escapeHtml(t.from||'')+'</div></td>'+
       '<td>'+escapeHtml(t.intent||'-')+'</td>'+
@@ -1547,7 +1553,9 @@ function _renderInbox(d){
       '<span class="mp-chip">Needs reassign: <strong>'+(d.needs_reassign||0)+'</strong></span>'+
     '</div>'+
     (loadChips?('<div class="mp-chips" style="margin-bottom:12px"><span class="muted" style="font-size:.8em;align-self:center;margin-right:4px">Open load per CSM (least-loaded gets the next ticket):</span>'+loadChips+'</div>'):'')+
-    '<div class="mp-list"><div class="mp-scroll"><table><thead><tr><th>Channel</th><th>Subject</th><th>Intent</th><th>Destination</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    (d.channel_weights?('<div class="mp-chips" style="margin-bottom:12px"><span class="muted" style="font-size:.8em;align-self:center;margin-right:4px">Channel priority weighting (higher = ranks sooner):</span>'+
+      Object.keys(d.channel_weights).sort((a,b)=>d.channel_weights[b]-d.channel_weights[a]).map(c=>'<span class="mp-chip">'+escapeHtml(_channelLabel(c))+': <strong>'+Number(d.channel_weights[c]).toFixed(1)+'</strong></span>').join('')+'</div>'):'')+
+    '<div class="mp-list"><div class="mp-scroll"><table><thead><tr><th>Priority</th><th>Channel</th><th>Subject</th><th>Intent</th><th>Destination</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 }
 function resolveInbound(id){
   fetch('/api/inbound/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket_id:id,status:'resolved'})})

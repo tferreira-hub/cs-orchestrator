@@ -76,6 +76,54 @@ INTENT_ROUTE = {
                 "note": "General enquiry. Standard CS service ticket in the pooled queue."},
 }
 
+# Per-channel prioritisation weighting (0.0–1.0). The platform IS the help desk — the five
+# inbound paths map straight in — and each path carries a weight so a request's SOURCE
+# nudges its position in the queue. Higher weight = higher commercial/urgency signal.
+# Default order: a self-served high-intent web form (buying signal) > a logged inbound call
+# (someone picked up the phone) > a Zendesk misroute (support already triaged it) > a reply
+# to a campaign/report > a generic mailbox email. Override with CS_CHANNEL_WEIGHTS, a JSON
+# map of {channel: weight}; unknown channels fall back to DEFAULT_CHANNEL_WEIGHT.
+DEFAULT_CHANNEL_WEIGHT = 0.3
+CHANNEL_WEIGHT = {
+    "high_intent_form": 1.0,
+    "slack_call": 0.8,
+    "zendesk_misroute": 0.6,
+    "campaign_reply": 0.4,
+    "mailbox": 0.3,
+}
+
+
+def channel_weight(channel: str) -> float:
+    """Resolve a channel's prioritisation weight (0.0–1.0). Operator-overridable via the
+    CS_CHANNEL_WEIGHTS env JSON; falls back to the built-in defaults then
+    DEFAULT_CHANNEL_WEIGHT for an unknown channel. Clamped to [0,1]."""
+    import json
+    import os
+    weights = dict(CHANNEL_WEIGHT)
+    raw = (os.environ.get("CS_CHANNEL_WEIGHTS") or "").strip()
+    if raw:
+        try:
+            override = json.loads(raw)
+            if isinstance(override, dict):
+                for k, v in override.items():
+                    try:
+                        weights[str(k)] = float(v)
+                    except (TypeError, ValueError):
+                        pass
+        except (ValueError, TypeError):
+            pass
+    w = weights.get(str(channel), DEFAULT_CHANNEL_WEIGHT)
+    return max(0.0, min(1.0, float(w)))
+
+
+def effective_priority_score(intent_priority: int, channel: str) -> float:
+    """Blend the intent priority band with the channel weight into a single sortable score
+    (LOWER sorts first, i.e. more urgent). Intent sets the band (a real outage/risk still
+    beats a web form); the channel weight breaks ties WITHIN/near a band so a high-intent
+    form outranks a generic mailbox email at the same intent level, without a low-value
+    channel ever leapfrogging a genuine fault (max channel swing is < 1 priority band)."""
+    return float(intent_priority) - channel_weight(channel)
+
 
 def classify_intent(text: str) -> str:
     """Classify inbound text into expansion | technical | billing | general.
@@ -221,6 +269,11 @@ def triage_inbound(items: list[dict], roster: list[dict] | None = None,
             "intent": intent,
             "destination": route["destination"],
             "priority": route["priority"],
+            # Per-channel prioritisation weighting (blend model): the channel's weight and
+            # the blended effective score (lower = more urgent). Intent sets the band;
+            # the channel weight orders within it so the SOURCE influences prioritisation.
+            "channel_weight": channel_weight(it.get("channel")),
+            "priority_score": round(effective_priority_score(route["priority"], it.get("channel")), 3),
             "csql": route["csql"],
             "routing_note": route["note"],
             "assigned_to": owner,
@@ -230,6 +283,12 @@ def triage_inbound(items: list[dict], roster: list[dict] | None = None,
             "needs_reassign": needs_reassign,
             "merged_ids": it.get("merged_ids", []),
         })
+
+    # Order the queue by the blended priority (lower score = more urgent), then put any
+    # SLA-breached items first within a tie, then oldest-first. This is the per-channel
+    # weighting made visible: at the same intent level a high-intent form sits above a
+    # generic mailbox email, while a genuine fault still outranks any low-value channel.
+    tickets.sort(key=lambda t: (t["priority_score"], not t["sla_breached"], t["received_at"]))
 
     # Summary counts for the UI / governance.
     by_intent = {k: 0 for k in ("expansion", "technical", "billing", "general")}
