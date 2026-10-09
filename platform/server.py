@@ -604,6 +604,10 @@ class Handler(BaseHTTPRequestHandler):
 
             # /api/me is the UI's "who am I" — returns principal or unauthenticated.
             if path == "/api/me":
+                import sys as _ps
+                print(f"[auth] /api/me authenticated={bool(principal)} "
+                      f"email={(principal or {}).get('email') if principal else None}",
+                      file=_ps.stderr, flush=True)
                 if principal:
                     self._json(200, {"authenticated": True, "email": principal.get("email"),
                                      "name": principal.get("name"), "role": principal.get("role"),
@@ -614,6 +618,11 @@ class Handler(BaseHTTPRequestHandler):
 
             # --- Auth gate: unauthenticated requests are turned away --------- #
             if auth.auth_required() and not principal:
+                if path.startswith("/api/"):
+                    import sys as _ps
+                    print(f"[auth] 401 no/invalid session for {path} "
+                          f"cookie={'yes' if self.headers.get('Cookie') else 'none'}",
+                          file=_ps.stderr, flush=True)
                 if path == "/" or not path.startswith("/api/"):
                     self._redirect("/login"); return
                 self._json(401, {"error": "authentication required", "login": "/login"}); return
