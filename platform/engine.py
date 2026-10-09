@@ -1865,6 +1865,8 @@ def portfolio() -> dict:
                     "subscription_type": c.get("subscription_type"),
                     "csm_owner": _owner_names.get(str(c.get("owner_id"))) if c.get("owner_id") else None,
                     "csm_owner_id": c.get("owner_id"),
+                    "csm_source": c.get("csm_source"),
+                    "record_owner_id": c.get("record_owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
                     "cs_lifecycle_stage": _cs_stage,
                     "churned": is_churned,
