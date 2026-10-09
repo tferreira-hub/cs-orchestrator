@@ -2391,10 +2391,18 @@ def _acct_perf_deltas(metrics: dict, previous: dict) -> dict:
     return out
 
 
-def account_performance(account_id: str) -> dict:
+def account_performance(account_id: str, business_type: str | None = None,
+                        size_band: str | None = None, peer_group: str | None = None) -> dict:
     """Assemble the per-account performance scorecard. Owner-scoped (ForbiddenError when the
     principal may not view the account); KeyError when the account id resolves to nothing in
-    any live system. Never fabricates — missing signals are not_connected / None / {}."""
+    any live system. Never fabricates — missing signals are not_connected / None / {}.
+
+    Optional benchmark cohort overrides (all default None => historical behaviour unchanged):
+      business_type  override the account_type the peer cohort is matched on
+      size_band      restrict the cohort to a seat-size band (see AccountPerformance)
+      peer_group     explicit cohort key selecting which auto dimensions to match on
+    The returned dict carries `benchmark_filters` = {applied, options} so the UI can render
+    and reflect the active filter controls."""
     if not can_view_account(account_id):
         raise ForbiddenError(account_id)
 
@@ -2484,9 +2492,26 @@ def account_performance(account_id: str) -> dict:
     benchmark = {}
     try:
         if _src.ACCOUNT_PERF.live():
-            benchmark = _src.ACCOUNT_PERF.benchmark(ref) or {}
+            benchmark = _src.ACCOUNT_PERF.benchmark(
+                ref, business_type=business_type, size_band=size_band,
+                peer_group=peer_group) or {}
     except Exception:  # noqa: BLE001
         benchmark = {}
+
+    # --- benchmark filter options (for the UI cohort controls) ----------------
+    # Options come from the live dim (distinct business types) + the fixed size-band /
+    # peer-group vocabularies. Honest {} when the warehouse is not connected.
+    benchmark_filter_options = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            benchmark_filter_options = _src.ACCOUNT_PERF.benchmark_filter_options() or {}
+    except Exception:  # noqa: BLE001
+        benchmark_filter_options = {}
+
+    # What the caller requested vs. what the cohort query actually applied. `applied` is the
+    # adapter's honest record (present only when a cohort was built); `requested` always
+    # echoes the inputs so the UI can keep its controls in sync even for a {} benchmark.
+    applied_filters = (benchmark.get("applied_filters") if isinstance(benchmark, dict) else None) or {}
 
     # --- feature / automation usage ------------------------------------------
     feature_usage = {}
@@ -2582,6 +2607,18 @@ def account_performance(account_id: str) -> dict:
             "connected": bool(perf),
         },
         "benchmark": benchmark,                      # {} when no comparable cohort / not live
+        # Cohort filter controls contract for the UI: `applied` is what actually shaped the
+        # cohort (honest {} when no benchmark built), `requested` echoes the inputs, and
+        # `options` enumerates the selectable values ({} when the warehouse isn't connected).
+        "benchmark_filters": {
+            "applied": applied_filters,
+            "requested": {
+                "business_type": business_type,
+                "size_band": size_band,
+                "peer_group": peer_group,
+            },
+            "options": benchmark_filter_options,
+        },
         "feature_usage": feature_usage,              # {} when none / not connected
         "tickets": tickets,                          # Zendesk signal or {status:not_connected}
         "signals": signals,
@@ -2601,6 +2638,20 @@ def account_performance(account_id: str) -> dict:
         "has_warehouse_performance": has_perf,
         "data_note": data_note,
     }
+
+
+def account_performance_filter_options() -> dict:
+    """Benchmark cohort filter options for the Accounts page controls (business types from
+    the live dim + the fixed size-band / peer-group vocabularies). Not account-specific, so
+    there is nothing per-account to owner-scope here — the data is the warehouse's distinct
+    account_type set, which the Accounts page is already allowed to browse. Honest {} (no
+    options) when the warehouse is not connected; the UI then hides the cohort controls."""
+    try:
+        if _src.ACCOUNT_PERF.live():
+            return _src.ACCOUNT_PERF.benchmark_filter_options() or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        return {}
+    return {}
 
 
 def account_performance_accounts() -> dict:

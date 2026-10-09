@@ -2602,6 +2602,56 @@ class AccountPerformance:
         "opportunities_created": "created_opportunities",
     }
 
+    # Size bands derived from a REAL column (max_daily_users_over_month in the perf table —
+    # the same seat/user signal JobAdder's native dashboard uses). Ordered; the last band is
+    # open-ended. Each entry: (band_label, lo_inclusive, hi_inclusive_or_None).
+    _SIZE_BANDS = [
+        ("1-25", 1, 25),
+        ("26-75", 26, 75),
+        ("76-100", 76, 100),
+        ("101+", 101, None),
+    ]
+
+    @classmethod
+    def _size_band_labels(cls) -> list:
+        return [b[0] for b in cls._SIZE_BANDS]
+
+    @classmethod
+    def _size_band_for(cls, users) -> str | None:
+        """Map a user/seat count to a size-band label. Honest None when the count is
+        missing (never buckets an unknown)."""
+        try:
+            u = float(users)
+        except (TypeError, ValueError):
+            return None
+        if u < 1:
+            return None
+        for label, lo, hi in cls._SIZE_BANDS:
+            if u >= lo and (hi is None or u <= hi):
+                return label
+        return None
+
+    # SQL CASE that reproduces _size_band_for() inside the cohort query, over the per-account
+    # MAX(max_daily_users_over_month). Kept in lock-step with _SIZE_BANDS above.
+    _SIZE_BAND_CASE = (
+        "CASE "
+        "WHEN users_max IS NULL OR users_max < 1 THEN NULL "
+        "WHEN users_max <= 25 THEN '1-25' "
+        "WHEN users_max <= 75 THEN '26-75' "
+        "WHEN users_max <= 100 THEN '76-100' "
+        "ELSE '101+' END"
+    )
+
+    # Explicit cohort keys the UI can request via `peer_group`. Maps a key to the set of
+    # auto-dimensions the cohort is matched on. Unknown keys fall back to the default.
+    _PEER_GROUPS = {
+        "icp+account_type": ("icp", "account_type"),   # default (today's behaviour)
+        "icp": ("icp",),
+        "account_type": ("account_type",),
+        "size": ("size_band",),
+        "all": (),                                       # whole live cohort (no auto-dims)
+    }
+
     def live(self) -> bool:
         return (config.live_enabled() and bool(config.env("REDSHIFT_DATABASE"))
                 and bool(config.env("REDSHIFT_WORKGROUP") or config.env("REDSHIFT_CLUSTER_ID"))
@@ -2784,12 +2834,31 @@ class AccountPerformance:
             "_source": "redshift-live",
         }
 
-    def benchmark(self, account_ref: str, window_months: int | None = None) -> dict:
-        """Peer-cohort benchmark: cohort = accounts with the SAME icp AND SAME account_type
-        over the same window. Per metric returns {rank, peers, percentile, peer_avg} for the
-        account (rank 1 = best; higher is better for all metrics EXCEPT days_to_place /
-        source_efficiency where LOWER is better). Honest None per metric (and cohort<2 ->
-        {} overall) when there isn't a comparable cohort. Returns {} when not live / no data.
+    def benchmark(self, account_ref: str, window_months: int | None = None,
+                  business_type: str | None = None, size_band: str | None = None,
+                  peer_group: str | None = None) -> dict:
+        """Peer-cohort benchmark: by default the cohort = accounts with the SAME icp AND
+        SAME account_type over the same window (identical to the historical behaviour when
+        no override params are passed). Per metric returns {rank, peers, percentile,
+        peer_avg} for the account (rank 1 = best; higher is better for all metrics EXCEPT
+        days_to_place / source_efficiency where LOWER is better). Honest None per metric
+        (and cohort<2 -> {} overall) when there isn't a comparable cohort. Returns {} when
+        not live / no data.
+
+        Optional cohort OVERRIDES (all honest — never fabricate a cohort):
+          business_type  override the account_type the cohort is matched on (instead of the
+                         target's own account_type). Maps directly to dim.account_type.
+          size_band      restrict the cohort to accounts in this seat-size band
+                         (one of _size_band_labels(), computed from the REAL perf-table
+                         column max_daily_users_over_month). Honestly ignored (no-op, flagged
+                         in the returned `applied_filters`) if the band is unrecognised.
+          peer_group     an explicit cohort key (one of _PEER_GROUPS) selecting WHICH auto
+                         dimensions the cohort is keyed on (e.g. 'icp' only, 'account_type'
+                         only, 'size', or 'all'). Unknown keys fall back to the default
+                         'icp+account_type'. business_type/size_band still apply on top.
+
+        The returned dict carries `applied_filters` describing exactly what shaped the
+        cohort (so the UI can show the active filter state and any honestly-ignored input).
         """
         if not self.live():
             return {}
@@ -2803,13 +2872,49 @@ class AccountPerformance:
         client = ch._client()
         ref = identity.normalise(account_ref).upper()
         cur_pred, _ = self._window_predicates(n)
+
+        # --- resolve cohort shaping (honest; records what actually applied) --------------
+        # peer_group selects which auto dimensions the cohort is keyed on; default keeps
+        # today's (icp, account_type) behaviour exactly.
+        pg_key = peer_group if peer_group in self._PEER_GROUPS else "icp+account_type"
+        pg_dims = self._PEER_GROUPS[pg_key]
+        bt = (business_type or None)
+        # size_band override is only honoured when it's a recognised band; otherwise it is a
+        # no-op (recorded as ignored) — never fabricated.
+        requested_size = size_band or None
+        sb = size_band if size_band in self._size_band_labels() else None
+        # The 'size' peer_group means "match my own size band": only meaningful if we don't
+        # already have an explicit size_band filter.
+        match_target_size = ("size_band" in pg_dims) and sb is None
+
+        params = [{"name": "ref", "value": ref}]
+        where = []
+        # Auto dimensions from the chosen peer_group (matched against the target's own row).
+        if "icp" in pg_dims:
+            where.append("j.icp = t.icp")
+        if "account_type" in pg_dims and bt is None:
+            where.append("j.account_type = t.account_type")
+        if match_target_size:
+            where.append("j.size_band = t.size_band")
+        # Explicit overrides (take precedence over the matching auto dimension).
+        if bt is not None:
+            where.append("j.account_type = :bt")
+            params.append({"name": "bt", "value": bt})
+        if sb is not None:
+            where.append("j.size_band = :sb")
+            params.append({"name": "sb", "value": sb})
+        # 'all' peer_group with no overrides => whole live cohort (always-true predicate).
+        where_sql = " AND ".join(where) if where else "TRUE"
+
         # Per-account windowed aggregate joined to its latest dim snapshot (for account_type),
-        # restricted to the target's (icp, account_type) cohort. One pass, computes each
-        # metric's value per account; Python then ranks the target within the cohort.
+        # restricted to the resolved cohort. One pass, computes each metric's value per
+        # account; Python then ranks the target within the cohort. The size band is derived
+        # from the REAL perf column max_daily_users_over_month (per-account MAX over window).
         sql = f"""
         WITH perf AS (
           SELECT ja_account,
                  MAX(icp) AS icp,
+                 MAX(max_daily_users_over_month) AS users_max,
                  SUM(created_jobs_total)    AS jobs_created,
                  SUM(posted_ads_total)      AS ads_posted,
                  SUM(posted_boards)         AS board_usage,
@@ -2827,16 +2932,17 @@ class AccountPerformance:
           FROM {self.DIM_TABLE} WHERE dbt_valid_to IS NULL
         ),
         joined AS (
-          SELECT p.*, d.account_type FROM perf p JOIN dim d USING (ja_account)
+          SELECT p.*, d.account_type, ({self._SIZE_BAND_CASE}) AS size_band
+          FROM perf p JOIN dim d USING (ja_account)
         ),
-        target AS (SELECT icp, account_type FROM joined WHERE ja_account = :ref)
+        target AS (SELECT icp, account_type, size_band FROM joined WHERE ja_account = :ref)
         SELECT j.ja_account, j.jobs_created, j.ads_posted, j.board_usage, j.applications,
                j.placements, j.jobs_closed, j.opportunities_created, j.days_sum
         FROM joined j, target t
-        WHERE j.icp = t.icp AND j.account_type = t.account_type
+        WHERE {where_sql}
         """
         try:
-            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+            cols, rows = self._run(client, ch, sql, params)
         except Exception as exc:  # noqa: BLE001
             if config.env("CS_LOG_SOURCE_ERRORS"):
                 import sys as _s
@@ -2909,7 +3015,58 @@ class AccountPerformance:
             }
         out["_source"] = "redshift-live"
         out["cohort"] = {"peers": peers}
+        # Honest record of exactly what shaped this cohort, including any input that was
+        # recognised but not a valid value (so the UI never mis-reports an active filter).
+        out["applied_filters"] = {
+            "peer_group": pg_key,
+            "business_type": bt,
+            "size_band": sb,
+            "size_band_ignored": (requested_size if (requested_size and sb is None) else None),
+            "matched_dimensions": list(pg_dims),
+        }
         return out
+
+    def benchmark_filter_options(self) -> dict:
+        """Enumerate the filter options the UI renders for the benchmark cohort controls:
+          { business_types: [distinct dim account_type ...],
+            size_bands:     [ _size_band_labels() ],   # fixed, derived ranges
+            peer_groups:    [ keys of _PEER_GROUPS ] }
+        business_types come from a BOUNDED distinct query over the live dim; size_bands and
+        peer_groups are the fixed vocabularies above. Honest {} when not live / query fails
+        (never fabricates options). size_bands/peer_groups are always safe to render because
+        they are static vocabularies, but they are only returned once we know the source is
+        live so the UI shows controls only when the warehouse is connected."""
+        if not self.live():
+            return {}
+        ch = self._c()
+        try:
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        sql = f"""
+        SELECT DISTINCT account_type
+        FROM {self.DIM_TABLE}
+        WHERE dbt_valid_to IS NULL AND account_type IS NOT NULL AND account_type <> ''
+        ORDER BY account_type
+        LIMIT 200
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, None)
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None:
+            return {}
+        business_types = [r[0] for r in rows if r and r[0] not in (None, "")]
+        return {
+            "business_types": business_types,
+            "size_bands": self._size_band_labels(),
+            "peer_groups": list(self._PEER_GROUPS.keys()),
+            "_source": "redshift-live",
+        }
 
     def dimension(self, account_ref: str) -> dict:
         """Latest-snapshot account dimension fields from snp_jobadder_all_accounts. Returns {}

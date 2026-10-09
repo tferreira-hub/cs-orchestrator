@@ -1031,6 +1031,38 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .acct-sched-note{font-size:.82em;color:var(--muted);margin-top:8px}
 .acct-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
 .acct-nc-chip{display:inline-flex;align-items:center;gap:6px;font-size:.8em;background:#fff;border:1px dashed var(--muted);border-radius:999px;padding:4px 12px;color:var(--muted)}
+/* ── Benchmark filter bar ───────────────────────────────────────── */
+.acct-filterbar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.acct-filter{display:flex;flex-direction:column;gap:5px}
+.acct-filter > label{font-size:.72em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ink2)}
+.acct-filter select{appearance:none;-webkit-appearance:none;background:var(--surface) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'><path d='M1 1l4 4 4-4' stroke='%2398a2b3' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 12px center;border:1px solid var(--line);border-radius:9px;padding:8px 32px 8px 12px;font-size:.9em;font-weight:600;color:var(--ink);min-width:190px;cursor:pointer}
+.acct-filter select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
+.acct-filter select:disabled{color:var(--muted);cursor:not-allowed;background-color:#fafbfc}
+.acct-filter-reset{margin-left:auto;align-self:flex-end}
+.acct-filter-reset button{background:transparent;border:1px solid var(--line);border-radius:9px;padding:8px 13px;font-size:.84em;font-weight:600;color:var(--ink2);cursor:pointer}
+.acct-filter-reset button:hover{border-color:var(--brand);color:var(--brand)}
+.acct-filter-hint{width:100%;font-size:.78em;color:var(--muted);margin-top:2px}
+/* ── Charts ─────────────────────────────────────────────────────── */
+.acct-chart-row{display:flex;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid var(--line)}
+.acct-chart-row:last-child{border-bottom:0}
+.acct-chart-row .cl{flex:0 0 150px;font-size:.84em;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px}
+.acct-chart-row .cl .lb-tag{font-size:.64em;font-weight:700;color:var(--brand);background:var(--brandsoft);border-radius:4px;padding:1px 5px;letter-spacing:.02em}
+.acct-chart-row .cbar{flex:1 1 auto;min-width:0}
+.acct-chart-row .cnum{flex:0 0 118px;text-align:right;font-size:.82em;font-variant-numeric:tabular-nums;color:var(--ink2)}
+.acct-chart-row .cnum b{color:var(--ink)}
+.acct-cmp-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:.78em;color:var(--ink2);margin-bottom:12px}
+.acct-cmp-legend .k{display:inline-flex;align-items:center;gap:7px}
+.acct-cmp-legend .k i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.acct-pctrow{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--line)}
+.acct-pctrow:last-child{border-bottom:0}
+.acct-pctrow .pl{flex:0 0 150px;font-size:.84em;font-weight:700;color:var(--ink)}
+.acct-pctrow .pg{flex:1 1 auto;min-width:0}
+.acct-pctrow .pv{flex:0 0 150px;text-align:right;font-size:.82em;font-variant-numeric:tabular-nums;color:var(--ink2)}
+.acct-pctrow .pv b{color:var(--ink);font-size:1.08em}
+.acct-trend{display:inline-flex;align-items:center;gap:5px;font-size:.78em;font-weight:700;font-variant-numeric:tabular-nums}
+.acct-trend.up{color:var(--green)}.acct-trend.down{color:var(--red)}.acct-trend.flat{color:var(--muted)}
+.acct-trend.inv-up{color:var(--red)}.acct-trend.inv-down{color:var(--green)}
+.acct-chart-empty{display:flex;align-items:center;gap:8px;font-size:.84em;color:var(--muted);padding:18px 2px}
 @media print{
   body *{visibility:hidden!important}
   #acct-scorecard, #acct-scorecard *{visibility:visible!important}
@@ -2345,6 +2377,8 @@ function _renderRhythm(d){
 let _acctList=null;        // cached picker roster [{account_id,name}]
 let _acctData=null;        // last loaded scorecard payload (for CSV export)
 let _acctSchedPosted=false;
+let _acctSelectedId=null;  // currently loaded account (for filter re-fetches)
+let _acctFilters={peer_group:'',business_type:'',size_band:''}; // active benchmark cohort filters
 
 // Ordered metric spec driving the Performance grid, benchmark rows and CSV.
 const ACCT_METRICS=[
@@ -2444,17 +2478,46 @@ function _acctFilter(q){
 
 function _acctSelect(id){
   const box=document.getElementById('acct-res'); if(box) box.style.display='none';
+  // A fresh account selection clears any previously applied benchmark filters.
+  _acctFilters={peer_group:'',business_type:'',size_band:''};
+  _acctSelectedId=id;
+  _acctFetchScorecard();
+}
+
+// Shared fetch path used by both the account picker and the filter controls. Builds
+// the query from the current account + the active benchmark filters, re-fetches the
+// scorecard and re-renders. Honest on every failure state.
+function _acctFetchScorecard(){
+  const id=_acctSelectedId; if(!id) return;
   const q=document.getElementById('acct-q');
   const card=document.getElementById('acct-scorecard');
   if(card) card.innerHTML='<div class="panel"><div class="body pad" style="text-align:center;padding:36px">'+
     '<div class="warming-spin" style="margin:0 auto 14px"></div><div class="muted">Loading live scorecard for '+escapeHtml(id)+'...</div></div></div>';
-  api('/api/account-performance?account_id='+encodeURIComponent(id)).then(r=>{
+  const f=_acctFilters||{};
+  let url='/api/account-performance?account_id='+encodeURIComponent(id);
+  if(f.business_type) url+='&business_type='+encodeURIComponent(f.business_type);
+  if(f.size_band)     url+='&size_band='+encodeURIComponent(f.size_band);
+  if(f.peer_group)    url+='&peer_group='+encodeURIComponent(f.peer_group);
+  api(url).then(r=>{
     if(r.status===403) throw {code:403};
     if(r.status===404) throw {code:404};
     if(!r.ok) throw {code:r.status};
     return r.json();
   }).then(d=>{
     _acctData=d;
+    // Reconcile local filter state with what the backend actually applied (keeps the
+    // dropdowns truthful even if the server coerced or ignored a value). The backend
+    // contract carries this under benchmark_filters.applied; legacy aliases kept as a
+    // fallback so the bar stays correct across backend versions.
+    const _af=(d&&d.benchmark_filters&&d.benchmark_filters.applied)
+      ||(d&&d.benchmark&&d.benchmark.applied_filters)||(d&&d.applied_filters)||null;
+    if(_af){
+      _acctFilters={
+        peer_group:_af.peer_group||'',
+        business_type:_af.business_type||'',
+        size_band:_af.size_band||''
+      };
+    }
     if(q){ const nm=(d.identity&&d.identity.name)||id; q.value=nm; }
     _acctRenderScorecard(d);
   }).catch(err=>{
@@ -2465,6 +2528,17 @@ function _acctSelect(id){
       card.innerHTML='<div class="panel"><div class="body pad"><div class="empty">'+escapeHtml(msg)+'</div></div></div>';
     }
   });
+}
+
+// Called from the filter dropdowns. Records the change and re-fetches via the shared path.
+function _acctOnFilter(kind,value){
+  if(!_acctFilters) _acctFilters={peer_group:'',business_type:'',size_band:''};
+  _acctFilters[kind]=value||'';
+  _acctFetchScorecard();
+}
+function _acctResetFilters(){
+  _acctFilters={peer_group:'',business_type:'',size_band:''};
+  _acctFetchScorecard();
 }
 
 function _acctDeltaHtml(delta,lowerIsBetter){
@@ -2494,6 +2568,190 @@ function _acctBenchHtml(b){
     '</div>'+
     '<div class="acct-bench peeravg" style="border:0;padding:0;margin-top:4px">Peer avg '+peerAvg+'</div>'+
     bar;
+}
+
+// ── Benchmark filter bar ──────────────────────────────────────────────────
+// Builds the Benchmark Peer Group / Business Type / Size controls under the identity
+// header. Options come from the scorecard payload's benchmark_filters.options (the
+// documented backend contract) with legacy aliases and a graceful fallback that keeps
+// the account's current cohort honest.
+function _acctFilterBar(d){
+  const f=_acctFilters||{peer_group:'',business_type:'',size_band:''};
+  // Backend contract: benchmark_filters.options = {business_types, size_bands,
+  // peer_groups, _source}. Accept a couple of key aliases so the bar renders whether or
+  // not a given backend stage has landed; {} when the warehouse is not connected.
+  const av=(d.benchmark_filters&&d.benchmark_filters.options)
+    ||d.available_filters||d.filter_options||d.filters||{};
+  const bizOpts=Array.isArray(av.business_types)?av.business_types:[];
+  const sizeOpts=Array.isArray(av.size_bands)?av.size_bands:[];
+  // peer_groups arrive as backend cohort keys (icp+account_type / icp / account_type /
+  // size / all). Map each key to a friendly label for display while keeping the raw key
+  // as the option VALUE so the round-trip (?peer_group=key) matches the backend exactly.
+  const PEER_LABELS={'icp+account_type':'Same ICP & type','icp':'Same ICP',
+    'account_type':'Same business type','size':'Same size band','all':'All accounts'};
+  const peerOpts=(Array.isArray(av.peer_groups)&&av.peer_groups.length)
+    ? av.peer_groups.map(k=>({value:k,label:(PEER_LABELS[k]||k)}))
+    : [];
+  const esc=escapeHtml;
+  // Build a <select>; when there are no options from the backend yet, keep the control
+  // present but reflect only the applied value (never fabricate a cohort list).
+  const sel=(id,kind,label,opts,cur,allLabel)=>{
+    const seen={}; const uniq=[];
+    opts.forEach(o=>{ const v=(o&&o.value!==undefined)?o.value:o; const t=(o&&o.label!==undefined)?o.label:o;
+      if(v===null||v===undefined) return; const key=String(v); if(seen[key]) return; seen[key]=1; uniq.push({v:String(v),t:String(t)}); });
+    // Always include the current applied value even if the option list is empty/stale.
+    if(cur&&!seen[String(cur)]) uniq.unshift({v:String(cur),t:String(cur)});
+    const disabled=uniq.length?'':' disabled';
+    const o1='<option value="">'+esc(allLabel)+'</option>';
+    const rest=uniq.map(u=>'<option value="'+esc(u.v)+'"'+(String(cur)===u.v?' selected':'')+'>'+esc(u.t)+'</option>').join('');
+    return '<div class="acct-filter"><label for="'+id+'">'+esc(label)+'</label>'+
+      '<select id="'+id+'"'+disabled+' onchange="_acctOnFilter(\''+kind+'\',this.value)">'+o1+rest+'</select></div>';
+  };
+  const anyActive=!!(f.peer_group||f.business_type||f.size_band);
+  const peerCount=(d.benchmark&&d.benchmark.cohort&&d.benchmark.cohort.peers)||0;
+  const hint=peerCount
+    ? ('Benchmark cohort: '+peerCount.toLocaleString()+' peer'+(peerCount===1?'':'s')+' match the current filters.')
+    : 'No comparable peer cohort for the current filters — benchmarks show as not connected.';
+  return '<div class="acct-filterbar acct-no-print">'+
+      sel('acct-f-peer','peer_group','Benchmark Peer Group',peerOpts,f.peer_group,'Default (ICP & type)')+
+      sel('acct-f-biz','business_type','Business Type',bizOpts,f.business_type,'All business types')+
+      sel('acct-f-size','size_band','Size',sizeOpts,f.size_band,'All sizes')+
+      (anyActive?'<div class="acct-filter-reset"><button onclick="_acctResetFilters()">↺ Reset filters</button></div>':'')+
+      '<div class="acct-filter-hint">'+escapeHtml(hint)+'</div>'+
+    '</div>';
+}
+
+// ── Chart builders (inline SVG, no external libraries) ─────────────────────
+// Honest by construction: a null value renders no bar; an absent benchmark renders an
+// explicit empty state rather than a fabricated zero.
+function _acctCharts(d){
+  const perf=d.performance||{};
+  const metrics=perf.metrics||{};
+  const deltas=perf.deltas||{};
+  const bench=d.benchmark||{};
+  const peers=(bench.cohort&&bench.cohort.peers)||0;
+  const brand=getComputedStyle(document.documentElement).getPropertyValue('--brand').trim()||'#5b5bf0';
+  const line=getComputedStyle(document.documentElement).getPropertyValue('--line').trim()||'#eaeef4';
+  const muted='#98a2b3';
+  const fmt=(v,fl)=>_acctFmt(v,fl);
+
+  // (a) Account vs peer-average horizontal bars ------------------------------
+  let cmpInner;
+  if(!perf.connected){
+    cmpInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● warehouse not connected</span></div>';
+  }else{
+    const rows=ACCT_METRICS.map(m=>{
+      const you=metrics[m.key];
+      const b=bench[m.key]||null;
+      const peerAvg=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg:null;
+      if(you===null||you===undefined){
+        return '<div class="acct-chart-row"><div class="cl">'+escapeHtml(m.label)+
+          (m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
+          '<div class="cbar"><div class="acct-chart-empty" style="padding:4px 0">not connected</div></div>'+
+          '<div class="cnum">—</div></div>';
+      }
+      const max=Math.max(you||0, peerAvg||0, 0.0001);
+      const w=400; // viewBox width for bar track
+      const youW=Math.max(1,(you/max)*w);
+      const peerW=peerAvg===null?null:Math.max(0,(peerAvg/max)*w);
+      const svg='<svg viewBox="0 0 '+w+' 34" width="100%" height="34" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' account versus peer average">'+
+        '<rect x="0" y="4" width="'+w+'" height="11" rx="3" fill="'+line+'"></rect>'+
+        '<rect x="0" y="4" width="'+youW.toFixed(1)+'" height="11" rx="3" fill="'+brand+'"></rect>'+
+        '<rect x="0" y="19" width="'+w+'" height="11" rx="3" fill="'+line+'"></rect>'+
+        (peerW===null?'':'<rect x="0" y="19" width="'+peerW.toFixed(1)+'" height="11" rx="3" fill="'+muted+'"></rect>')+
+        '</svg>';
+      const peerTxt=peerAvg===null?'<span style="color:'+muted+'">peer n/a</span>':('peer <b>'+escapeHtml(fmt(peerAvg,m.float))+'</b>');
+      return '<div class="acct-chart-row">'+
+        '<div class="cl">'+escapeHtml(m.label)+(m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
+        '<div class="cbar">'+svg+'</div>'+
+        '<div class="cnum">you <b>'+escapeHtml(fmt(you,m.float))+'</b><br>'+peerTxt+'</div>'+
+      '</div>';
+    }).join('');
+    const legend='<div class="acct-cmp-legend">'+
+      '<span class="k"><i style="background:'+brand+'"></i>This account</span>'+
+      '<span class="k"><i style="background:'+muted+'"></i>Peer average</span>'+
+      (peers?'<span class="k" style="margin-left:auto">'+peers.toLocaleString()+' peers in cohort</span>':'')+
+    '</div>';
+    cmpInner=legend+rows;
+  }
+  const cmpPanel='<div class="panel"><div class="head"><h2>Account vs Peer Average</h2>'+
+    '<span class="note">Each metric compared against the current benchmark cohort</span></div>'+
+    '<div class="body pad">'+cmpInner+'</div></div>';
+
+  // (b) Percentile gauges per metric -----------------------------------------
+  let pctInner;
+  if(!peers){
+    pctInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● no comparable peer cohort</span></div>';
+  }else{
+    const grad=(p)=>p>=66?'#0ca678':(p>=33?'#d98b0b':'#e5484d');
+    const rows=ACCT_METRICS.map(m=>{
+      const b=bench[m.key]||null;
+      const pct=(b&&b.percentile!==null&&b.percentile!==undefined)?Math.max(0,Math.min(100,b.percentile)):null;
+      if(pct===null){
+        return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
+          '<div class="pg"><div class="acct-chart-empty" style="padding:3px 0">not ranked</div></div>'+
+          '<div class="pv">—</div></div>';
+      }
+      const col=grad(pct);
+      const w=400;
+      const fillW=Math.max(2,(pct/100)*w);
+      const svg='<svg viewBox="0 0 '+w+' 14" width="100%" height="14" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' percentile '+pct+'">'+
+        '<rect x="0" y="3" width="'+w+'" height="8" rx="4" fill="'+line+'"></rect>'+
+        '<rect x="0" y="3" width="'+fillW.toFixed(1)+'" height="8" rx="4" fill="'+col+'"></rect>'+
+        '<rect x="'+((w/2)-0.5).toFixed(1)+'" y="1" width="1" height="12" fill="'+muted+'" opacity="0.5"></rect>'+
+        '</svg>';
+      const rankTxt=(b&&b.rank)?('rank '+b.rank+'/'+b.peers):'';
+      return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
+        '<div class="pg">'+svg+'</div>'+
+        '<div class="pv"><b>'+pct+'th</b> pct'+(rankTxt?'<br><span style="color:'+muted+'">'+escapeHtml(rankTxt)+'</span>':'')+'</div></div>';
+    }).join('');
+    pctInner='<div class="acct-cmp-legend"><span class="k">0th (lowest) &nbsp;→&nbsp; 50th (median, dashed) &nbsp;→&nbsp; 100th (top) in cohort</span></div>'+rows;
+  }
+  const pctPanel='<div class="panel"><div class="head"><h2>Percentile Ranking</h2>'+
+    '<span class="note">Where this account sits within its benchmark cohort</span></div>'+
+    '<div class="body pad">'+pctInner+'</div></div>';
+
+  // (c) Vs-previous trend sparkline strip ------------------------------------
+  let trendInner;
+  if(!perf.connected){
+    trendInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● warehouse not connected</span></div>';
+  }else{
+    const rows=ACCT_METRICS.map(m=>{
+      const dl=deltas[m.key]||null;
+      const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
+      if(!dl||dl.value===null||dl.value===undefined||dl.previous===null||dl.previous===undefined){
+        return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
+          '<div class="pg"><div class="acct-chart-empty" style="padding:3px 0">no prior period</div></div>'+
+          '<div class="pv">—</div></div>';
+      }
+      const dv=dl.delta;
+      let dir=dv>0?'up':(dv<0?'down':'flat');
+      let cls=dir; if(lowerBetter&&dir==='up')cls='inv-up'; else if(lowerBetter&&dir==='down')cls='inv-down';
+      const arrow=dv>0?'↑':(dv<0?'↓':'→');
+      const prev=dl.previous, cur=dl.value;
+      const mx=Math.max(prev||0,cur||0,0.0001);
+      // two-point sparkline (previous → current)
+      const w=120,h=26;
+      const y=(v)=>h-3-((v/mx)*(h-6));
+      const stroke=(cls==='up'||cls==='inv-down')?'#0ca678':(cls==='down'||cls==='inv-up')?'#e5484d':muted;
+      const svg='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" role="img" aria-label="'+escapeHtml(m.label)+' trend">'+
+        '<polyline points="4,'+y(prev).toFixed(1)+' '+(w-4)+','+y(cur).toFixed(1)+'" fill="none" stroke="'+stroke+'" stroke-width="2" stroke-linecap="round"></polyline>'+
+        '<circle cx="4" cy="'+y(prev).toFixed(1)+'" r="2.4" fill="'+muted+'"></circle>'+
+        '<circle cx="'+(w-4)+'" cy="'+y(cur).toFixed(1)+'" r="2.8" fill="'+stroke+'"></circle>'+
+        '</svg>';
+      const pct=(dl.pct_change===null||dl.pct_change===undefined)?'':(' ('+(dl.pct_change>0?'+':'')+dl.pct_change.toFixed(1)+'%)');
+      return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
+        '<div class="pg" style="display:flex;align-items:center;gap:12px">'+svg+
+          '<span class="acct-trend '+cls+'">'+arrow+' '+(dv>0?'+':'')+escapeHtml(fmt(dv,m.float))+escapeHtml(pct)+'</span></div>'+
+        '<div class="pv">prev <b>'+escapeHtml(fmt(prev,m.float))+'</b></div></div>';
+    }).join('');
+    trendInner=rows;
+  }
+  const trendPanel='<div class="panel"><div class="head"><h2>Trend vs Previous Period</h2>'+
+    '<span class="note">Change against the prior equivalent window · lower-is-better metrics are colour-inverted</span></div>'+
+    '<div class="body pad">'+trendInner+'</div></div>';
+
+  return cmpPanel+pctPanel+trendPanel;
 }
 
 function _acctRenderScorecard(d){
@@ -2544,6 +2802,7 @@ function _acctRenderScorecard(d){
           '<div class="muted" style="font-size:.76em;margin-top:8px">Generated '+escapeHtml((d.generated_at||'').slice(0,16).replace('T',' '))+'</div>'+
         '</div>'+
       '</div>'+
+      _acctFilterBar(d)+
     '</div></div>';
 
   // ── Toolbar (export + print), excluded from print output ───────────────────
@@ -2679,8 +2938,9 @@ function _acctRenderScorecard(d){
   const dataNote=(d.data_note)
     ? '<div class="acct-no-print" style="margin:0 0 10px;padding:10px 14px;border:1px solid #f0d58a;background:#fdf6e3;border-radius:10px;font:500 13px Inter,system-ui;color:#8a6d00">'+escapeHtml(d.data_note)+'</div>'
     : '';
+  const chartsPanel=_acctCharts(d);
   card.innerHTML=
-    '<div id="acct-scorecard-print">'+header+dataNote+toolbar+perfPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
+    '<div id="acct-scorecard-print">'+header+dataNote+toolbar+perfPanel+chartsPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
 }
 
 // Print just the scorecard via the @media print stylesheet.

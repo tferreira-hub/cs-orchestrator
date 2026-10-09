@@ -460,3 +460,280 @@ def test_unknown_account_still_404s_when_not_in_roster(monkeypatch):
     engine.set_principal(None)
     with pytest.raises(KeyError):
         engine.account_performance("au9-nope")
+
+
+# --------------------------------------------------------------------------- #
+# (g) benchmark cohort OVERRIDE filters (business_type / size_band / peer_group)
+#
+# The synthetic _FakeClient ignores the SQL text, so to prove an override actually
+# reshapes the cohort WHERE clause we use a capturing client that records the SQL +
+# bound parameters while still returning a fixed cohort. We assert on BOTH the emitted
+# predicate/params AND the honest `applied_filters` the adapter returns.
+# --------------------------------------------------------------------------- #
+class _CapturingClient(_FakeClient):
+    """Fake Data API client that captures the last Sql + Parameters so a test can assert
+    on the cohort predicate / bound params an override produced."""
+    def __init__(self, columns, rows, sink):
+        super().__init__(columns, rows)
+        self._sink = sink
+
+    def execute_statement(self, **k):
+        self._sink["sql"] = k.get("Sql", "")
+        self._sink["params"] = {p["name"]: p["value"] for p in k.get("Parameters", [])}
+        return {"Id": "stmt-1"}
+
+
+def _wire_capturing(monkeypatch, columns, rows, sink):
+    from adapters import sources
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "POLL_INTERVAL_S", 0)
+    monkeypatch.setattr(sources.Churn, "_target_kwargs", lambda self: {})
+    monkeypatch.setattr(sources.Churn, "_identifier",
+                        staticmethod(lambda value, qualified=False: value))
+    monkeypatch.setattr(sources.Churn, "_client",
+                        lambda self: _CapturingClient(columns, rows, sink))
+
+
+_COHORT_ROWS = [
+    ["AU1-TARGET", 100, 200, 40, 800, 10, 10, 12, 200],
+    ["AU1-A",       90, 150, 30, 600,  5,  9,  8, 450],
+    ["AU1-B",       50,  80, 20, 300,  5,  5,  4, 300],
+]
+
+
+def test_benchmark_default_unchanged_and_reports_applied_filters(monkeypatch):
+    """No override params => the cohort is matched on the target's own (icp, account_type)
+    exactly as before, and the honest `applied_filters` records the default peer_group."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET")
+    assert bench["cohort"]["peers"] == 3
+    # Default predicate still joins on the target's own icp AND account_type.
+    assert "j.icp = t.icp" in sink["sql"]
+    assert "j.account_type = t.account_type" in sink["sql"]
+    # No override params bound.
+    assert set(sink["params"].keys()) == {"ref"}
+    af = bench["applied_filters"]
+    assert af["peer_group"] == "icp+account_type"
+    assert af["business_type"] is None
+    assert af["size_band"] is None
+    assert af["size_band_ignored"] is None
+    assert af["matched_dimensions"] == ["icp", "account_type"]
+
+
+def test_benchmark_business_type_override_changes_cohort(monkeypatch):
+    """A business_type override replaces the target's own account_type match with an explicit
+    bound account_type (:bt) — the cohort is reshaped, not the target's auto type."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", business_type="Staffing")
+    # The auto account_type match is gone; an explicit bound :bt predicate is used instead.
+    assert "j.account_type = :bt" in sink["sql"]
+    assert "j.account_type = t.account_type" not in sink["sql"]
+    assert sink["params"]["bt"] == "Staffing"
+    # icp is still matched (business_type only overrides the account_type dimension).
+    assert "j.icp = t.icp" in sink["sql"]
+    assert bench["applied_filters"]["business_type"] == "Staffing"
+
+
+def test_benchmark_size_band_filters_cohort(monkeypatch):
+    """A recognised size_band binds a :sb predicate against the derived size_band column."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", size_band="26-75")
+    assert "j.size_band = :sb" in sink["sql"]
+    assert sink["params"]["sb"] == "26-75"
+    af = bench["applied_filters"]
+    assert af["size_band"] == "26-75"
+    assert af["size_band_ignored"] is None
+
+
+def test_benchmark_unknown_size_band_is_honestly_ignored(monkeypatch):
+    """An unrecognised size_band is a NO-OP (never fabricated): no :sb predicate is bound and
+    the honest `applied_filters` records it under size_band_ignored."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", size_band="900-9000")
+    assert "j.size_band = :sb" not in sink["sql"]
+    assert "sb" not in sink["params"]
+    af = bench["applied_filters"]
+    assert af["size_band"] is None
+    assert af["size_band_ignored"] == "900-9000"
+
+
+def test_benchmark_peer_group_all_uses_whole_cohort(monkeypatch):
+    """peer_group='all' drops the auto (icp, account_type) match => whole live cohort."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", peer_group="all")
+    assert "j.icp = t.icp" not in sink["sql"]
+    assert "j.account_type = t.account_type" not in sink["sql"]
+    assert "WHERE TRUE" in sink["sql"]
+    assert bench["applied_filters"]["peer_group"] == "all"
+    assert bench["applied_filters"]["matched_dimensions"] == []
+
+
+def test_benchmark_peer_group_size_matches_target_band(monkeypatch):
+    """peer_group='size' matches the target's own size band (j.size_band = t.size_band)."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", peer_group="size")
+    assert "j.size_band = t.size_band" in sink["sql"]
+    assert bench["applied_filters"]["matched_dimensions"] == ["size_band"]
+
+
+def test_benchmark_unknown_peer_group_falls_back_to_default(monkeypatch):
+    """An unknown peer_group key honestly falls back to the default icp+account_type."""
+    from adapters import sources
+    sink = {}
+    _wire_capturing(monkeypatch, _BENCH_COLS, _COHORT_ROWS, sink)
+
+    bench = sources.ACCOUNT_PERF.benchmark("AU1-TARGET", peer_group="nonsense")
+    assert bench["applied_filters"]["peer_group"] == "icp+account_type"
+    assert "j.icp = t.icp" in sink["sql"]
+    assert "j.account_type = t.account_type" in sink["sql"]
+
+
+def test_size_band_for_ranges():
+    """The Python size-band mapping buckets by the real user count and honestly returns None
+    for a missing/zero count (never fabricates a band)."""
+    from adapters import sources
+    SB = sources.AccountPerformance._size_band_for
+    assert SB(1) == "1-25"
+    assert SB(25) == "1-25"
+    assert SB(26) == "26-75"
+    assert SB(75) == "26-75"
+    assert SB(76) == "76-100"
+    assert SB(100) == "76-100"
+    assert SB(101) == "101+"
+    assert SB(5000) == "101+"
+    assert SB(0) is None
+    assert SB(None) is None
+    assert SB("") is None
+
+
+# --------------------------------------------------------------------------- #
+# (h) benchmark_filter_options: distinct business types + fixed vocabularies
+# --------------------------------------------------------------------------- #
+def test_benchmark_filter_options_returns_distinct_values(monkeypatch):
+    from adapters import sources
+    # The distinct-account_type query returns one column 'account_type' with rows.
+    rows = [["Staffing"], ["Agency"], ["Corporate"]]
+    _wire_acct_perf(monkeypatch, ["account_type"], rows)
+
+    opts = sources.ACCOUNT_PERF.benchmark_filter_options()
+    assert opts["business_types"] == ["Staffing", "Agency", "Corporate"]
+    # size_bands / peer_groups are the fixed derived vocabularies.
+    assert opts["size_bands"] == ["1-25", "26-75", "76-100", "101+"]
+    assert "icp+account_type" in opts["peer_groups"]
+    assert "all" in opts["peer_groups"]
+    assert opts["_source"] == "redshift-live"
+
+
+def test_benchmark_filter_options_empty_when_not_live(monkeypatch):
+    from adapters import sources
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: False)
+    assert sources.ACCOUNT_PERF.benchmark_filter_options() == {}
+
+
+# --------------------------------------------------------------------------- #
+# (i) engine threads the filters and returns the benchmark_filters contract
+# --------------------------------------------------------------------------- #
+def test_engine_threads_benchmark_filters_and_returns_contract(monkeypatch):
+    """engine.account_performance passes business_type/size_band/peer_group to the adapter
+    and returns a benchmark_filters block with applied/requested/options for the UI."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+
+    captured = {}
+
+    def _fake_benchmark(self, ref, business_type=None, size_band=None, peer_group=None):
+        captured["args"] = (business_type, size_band, peer_group)
+        return {"_source": "redshift-live", "cohort": {"peers": 3},
+                "applied_filters": {"peer_group": peer_group or "icp+account_type",
+                                    "business_type": business_type, "size_band": size_band,
+                                    "size_band_ignored": None,
+                                    "matched_dimensions": ["icp"]}}
+
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "performance", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark", _fake_benchmark)
+    monkeypatch.setattr(sources.AccountPerformance, "feature_usage", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark_filter_options",
+                        lambda self: {"business_types": ["Agency", "Staffing"],
+                                      "size_bands": ["1-25", "26-75", "76-100", "101+"],
+                                      "peer_groups": ["icp+account_type", "all"],
+                                      "_source": "redshift-live"})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": [
+        {"account_id": "au1-1", "name": "Alpha"}]})
+
+    engine.set_principal(None)
+    card = engine.account_performance("au1-1", business_type="Agency",
+                                      size_band="26-75", peer_group="all")
+    # The adapter received exactly the threaded params.
+    assert captured["args"] == ("Agency", "26-75", "all")
+
+    bf = card["benchmark_filters"]
+    assert bf["requested"] == {"business_type": "Agency", "size_band": "26-75", "peer_group": "all"}
+    assert bf["applied"]["business_type"] == "Agency"
+    assert bf["applied"]["size_band"] == "26-75"
+    assert bf["options"]["business_types"] == ["Agency", "Staffing"]
+    assert bf["options"]["size_bands"] == ["1-25", "26-75", "76-100", "101+"]
+
+
+def test_engine_default_call_signature_backward_compatible(monkeypatch):
+    """Calling engine.account_performance(account_id) with no filter kwargs still works and
+    yields an empty applied-filters/options when the warehouse is offline (honest, no crash)."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    _offline_all_sources(monkeypatch)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": [
+        {"account_id": "au1-1", "name": "Alpha"}]})
+
+    engine.set_principal(None)
+    card = engine.account_performance("au1-1")
+    bf = card["benchmark_filters"]
+    assert bf["requested"] == {"business_type": None, "size_band": None, "peer_group": None}
+    assert bf["applied"] == {}
+    assert bf["options"] == {}
+
+
+def test_engine_filter_options_helper_offline_is_empty(monkeypatch):
+    """account_performance_filter_options() is honestly {} when the warehouse is not live."""
+    import engine
+    from adapters import sources
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: False)
+    assert engine.account_performance_filter_options() == {}
+
+
+def test_engine_filter_options_helper_live_returns_options(monkeypatch):
+    import engine
+    from adapters import sources
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark_filter_options",
+                        lambda self: {"business_types": ["Agency"], "size_bands": ["1-25"],
+                                      "peer_groups": ["all"], "_source": "redshift-live"})
+    opts = engine.account_performance_filter_options()
+    assert opts["business_types"] == ["Agency"]
+    assert opts["peer_groups"] == ["all"]

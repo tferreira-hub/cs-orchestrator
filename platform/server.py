@@ -732,14 +732,25 @@ class Handler(BaseHTTPRequestHandler):
                 # Cheap picker list for the Accounts page: [{account_id,name}] across the
                 # principal's whole book (owner-scoped inside the engine).
                 self._json(200, engine.account_performance_accounts()); return
+            if path == "/api/account-performance/filter-options":
+                # Benchmark cohort filter options (business types from the live dim + fixed
+                # size-band / peer-group vocabularies). Honest {} when the warehouse is not
+                # connected (the UI then hides the cohort controls).
+                self._json(200, engine.account_performance_filter_options()); return
             if path == "/api/account-performance":
                 # Per-account performance scorecard (CS Day-to-Day -> Accounts). Owner-scoped:
-                # ForbiddenError -> 403, unknown account -> 404.
+                # ForbiddenError -> 403, unknown account -> 404. Optional benchmark cohort
+                # overrides (business_type/size_band/peer_group) reshape the peer cohort.
                 account_id = (query.get("account_id") or [""])[0].strip()
                 if not account_id:
                     self._json(400, {"error": "account_id is required"}); return
+                business_type = (query.get("business_type") or [""])[0].strip() or None
+                size_band = (query.get("size_band") or [""])[0].strip() or None
+                peer_group = (query.get("peer_group") or [""])[0].strip() or None
                 try:
-                    self._json(200, engine.account_performance(account_id))
+                    self._json(200, engine.account_performance(
+                        account_id, business_type=business_type, size_band=size_band,
+                        peer_group=peer_group))
                 except engine.ForbiddenError:
                     self._json(403, {"error": "forbidden", "account_id": account_id})
                 except KeyError:
