@@ -8,7 +8,7 @@ Each row says what it unblocks and where the platform already meets it.
 
 | # | Item | Owner | Unblocks | Platform side (already done) |
 |---|------|-------|----------|------------------------------|
-| 1 | **HubSpot Service Hub Pro licence** + configure the 5 inbound channels (Zendesk misroute macro, Slack call-log form, `accountmanagement@` mailbox, campaign reply-to, high-intent forms) to post into HubSpot Service, and point them at `POST /api/inbound/hubspot`. | RevOps | 5-channel inbound (#18); UC1 SLA + triage-accuracy KPIs | Intake seam `/api/inbound/hubspot` (5 channels normalised) + triage/round-robin/SLA/dedupe + live CSM availability feed. Decision = Option A (`DECISION-tech-touch-routing.md`). |
+| 1 | **HubSpot Service Hub Pro licence** + configure the 5 inbound channels (Zendesk misroute macro, Slack call-log form, `accountmanagement@` mailbox, campaign reply-to, high-intent forms) to post into HubSpot Service, and point them at `POST /api/inbound/hubspot`. | RevOps | 5-channel inbound (#18); UC1 SLA + triage-accuracy KPIs | Intake seam `/api/inbound/hubspot` (5 channels normalised) + triage/round-robin/SLA/dedupe + live CSM availability feed. Decision = Option A (`INBOUND-OPTIONS-SCENARIOS.md`). |
 | 2 | **HubSpot transactional email template** with the digest merge tokens; set `CS_HS_TRANSACTIONAL_EMAIL_ID` + `CS_EMAIL_PROVIDER=hubspot`; then enable the scheduler (`digest_schedule_enabled=true`, `digest_apply=true`). | RevOps / IT | Live monthly digest send (#21) + strategic dispatch (#22) + report-delivery KPI | `monthly_digest` compile, `send_digest` (honest/gated), `run_monthly_digests` batch, EventBridge scheduler (`infra/scheduler.tf`, off), HubSpot single-send seam. Tokens listed in `infra/variables.tf`. |
 | 3 | **Stripe key rotation** `sk_live_` → restricted `rk_live_` (Customers/Invoices/Subscriptions read-only), then drop `CS_ALLOW_STRIPE_SECRET_KEY`. | IT / Security | Security hygiene | Adapter already refuses `sk_live_` once the override is dropped (test proves it). Steps: `SECURITY-ROTATION-RUNBOOK.md` §1. |
 | 4 | **Tableau connected-app secret rotation** (generate-new-first, no downtime). | IT / Security | Security hygiene | Steps: `SECURITY-ROTATION-RUNBOOK.md` §2. |
@@ -20,7 +20,7 @@ Each row says what it unblocks and where the platform already meets it.
   real signals today; the fuller onboarding-velocity lifecycle view is Phase-2 scope.
 
 ## What is NOT pending
-All application logic for the requirements is built, tested (205 tests), and deployed:
+All application logic for the requirements is built, tested (342 tests), and deployed:
 HubSpot bi-directional + gated writes, Stripe dunning, Zendesk ingest + reply/close,
 telemetry, **live ML churn**, Jiminny, multi-instance suppression, churn→P1/24h, No-Chasing,
 renewal cadence, expansion→CSQL, health scoring, segmentation + **platform-executed

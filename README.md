@@ -142,7 +142,21 @@ Ask for today's actions. Northwind comes back as a Priority-1 churn risk (ML chu
 
 ## Docs
 
-- [Docs/HARNESS.md](Docs/HARNESS.md): end-to-end harness story, feedforward/feedback breakdown, install instructions, live data verification, and remaining production dependencies.
+**Product & features**
 - [Docs/CS-PLATFORM-GUIDE.md](Docs/CS-PLATFORM-GUIDE.md): full CS Platform feature guide.
-- [Docs/DATA-ACCESS.md](Docs/DATA-ACCESS.md): live-only data access policy and adapter contracts.
-- [Docs/CHURN-MODEL-CONTRACT.md](Docs/CHURN-MODEL-CONTRACT.md): churn model interface contract (ML vs computed score).
+- [Docs/CSM-QUICK-OVERVIEW.md](Docs/CSM-QUICK-OVERVIEW.md): day-to-day quick start for CSMs.
+- [Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md](Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md): how pooled round-robin + the daily task queue work, end to end.
+- [Docs/HARNESS.md](Docs/HARNESS.md): the agent-harness story (feedforward/feedback), install, and live-data verification.
+
+**Architecture & integrations**
+- [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md): end-to-end request flow, auth, deploy pipeline, and graceful degradation.
+- [Docs/DATA-ACCESS.md](Docs/DATA-ACCESS.md): live-only data-access policy and adapter contracts.
+- [Docs/CHURN-MODEL-CONTRACT.md](Docs/CHURN-MODEL-CONTRACT.md): churn model interface (ML vs computed score).
+- [Docs/AUTH-SETUP.md](Docs/AUTH-SETUP.md): SSO / Cognito / RBAC setup.
+
+**Requirements & go-live**
+- [Docs/REQUIREMENTS-COVERAGE-SCORECARD.md](Docs/REQUIREMENTS-COVERAGE-SCORECARD.md): requirement-by-requirement coverage vs the V5 spec (source-verified).
+- [Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md](Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md): the only not-live items (all external) and how to switch each on.
+- [Docs/PROVISIONING-CHECKLIST.md](Docs/PROVISIONING-CHECKLIST.md): the go-live provisioning steps and owners.
+- [Docs/INBOUND-OPTIONS-SCENARIOS.md](Docs/INBOUND-OPTIONS-SCENARIOS.md): inbound routing decision (Option A) + worked scenarios.
+- [Docs/SECURITY-ROTATION-RUNBOOK.md](Docs/SECURITY-ROTATION-RUNBOOK.md): Stripe/Tableau key-rotation runbook.

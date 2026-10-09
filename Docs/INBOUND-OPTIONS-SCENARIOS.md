@@ -1,7 +1,15 @@
 # Inbound scenarios — Service Hub Pro (Option A) vs platform-routed (Option B)
 
-**For:** Dan Hill (CS Leadership) · **From:** RevOps / CS Engineering · **Date:** 6 October 2026
-**Decision:** The Tech-Touch V3 paper proposes HubSpot Service Hub Pro as the central Help
+**For:** Dan Hill (CS Leadership) · **From:** RevOps / CS Engineering · **Updated:** 9 October 2026
+
+> **Decision (2 Oct 2026, CS Leadership / RevOps): Option A.** HubSpot Service Hub is the
+> Help Desk; the CS Platform is the surface + act layer. Remaining gate: confirm the
+> Service Hub Pro licence fits the 50–60k budget, then configure channel routing in HubSpot
+> and point the channels at `POST /api/inbound/hubspot`. The deterministic
+> triage/round-robin/SLA engine is already live and tested regardless of option. Both
+> options are kept below for the record; the CSM experience is identical either way.
+
+**Context:** The Tech-Touch V3 paper proposes HubSpot Service Hub Pro as the central Help
 Desk. We don't have that licence yet. The platform now does the triage, round-robin, 24h
 SLA, auto-reassign and technical→Zendesk handoff itself (live + tested). So the choice is:
 
