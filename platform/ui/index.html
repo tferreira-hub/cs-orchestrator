@@ -415,6 +415,17 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 /* Personal Dashboard widgets */
 .md-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 @media(max-width:900px){.md-2col{grid-template-columns:1fr}}
+/* 'This Quarter' KPI scorecard */
+.qsc-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+@media(max-width:1200px){.qsc-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.qsc-grid{grid-template-columns:repeat(2,1fr)}}
+.qsc-card{border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;background:var(--surface);display:flex;flex-direction:column;gap:3px}
+.qsc-card.qsc-na{opacity:.72}
+.qsc-val{font-size:1.5em;font-weight:800;color:var(--ink);letter-spacing:-.02em;line-height:1.1}
+.qsc-unit{font-size:.5em;font-weight:600;color:var(--ink2);letter-spacing:0}
+.qsc-lbl{font-size:.82em;font-weight:650;color:var(--ink2)}
+.qsc-tgt{font-size:.74em;color:var(--brand);font-weight:600}
+.qsc-note{font-size:.72em;color:var(--muted);line-height:1.3;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 /* Compact KPI strip */
 .md-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}
 @media(max-width:1000px){.md-kpis{grid-template-columns:repeat(3,1fr)}}
@@ -1905,6 +1916,7 @@ function renderMyDashboard(){
     kpi('Portfolio ARR',fmt(totalArr))+
   '</div>';
   host.innerHTML=_mdFilterBar()+strip+
+    '<div id="md-quarter"></div>'+
     '<div class="md-2col">'+
       '<div class="panel"><div class="head"><h2>Tasks Due</h2><span class="note">'+tasks.length+' open</span></div><div class="body pad">'+(tasks.length?tasks.slice(0,6).map(t=>'<div class="md-task" onclick="openAccountByName(\''+escapeHtml(t.account)+'\')"><span class="prio prio'+t.priority+'">'+t.priority+'</span><div><strong>'+escapeHtml(t.account)+'</strong><div class="sub">'+escapeHtml((t.trigger||'').slice(0,60))+'</div></div></div>').join(''):'<div class="empty">No open tasks in your book right now.</div>')+'</div></div>'+
       '<div class="panel"><div class="head"><h2>Renewals: overdue &amp; next 90 days</h2><span class="note">'+ren90.length+(_renOverdue?' · '+_renOverdue+' overdue':'')+'</span></div><div class="body pad">'+(ren90.length?ren90.slice(0,6).map(a=>'<div class="md-task" onclick="openAccount(\''+escapeHtml(a.account_id)+'\')"><span class="hcircle '+(a.health&&a.health.computable?hband(a.health.band):'hc-none')+'">'+(a.health&&a.health.computable?a.health.score:'–')+'</span><div><strong>'+escapeHtml(a.name||a.account_id)+'</strong><div class="sub">'+renewalDays(a.renewal_date)+' · '+(a.arr_usd!=null?fmt(a.arr_usd):'-')+'</div></div></div>').join(''):'<div class="empty">No overdue or upcoming (90-day) renewals with a date in this selection.</div>')+'</div></div>'+
@@ -1922,8 +1934,38 @@ function renderMyDashboard(){
       '<div class="panel"><div class="head"><h2>CSAT Distribution</h2><span class="note">Zendesk · NPS not connected</span></div><div class="body pad">'+wCsat+'</div></div>'+
       '<div class="panel"><div class="head"><h2>QBRs Due</h2><span class="note">Strategic · renewal window</span></div><div class="body pad">'+wQbr+'</div></div>'+
     '</div>';
+  _renderQuarterScorecard();
 }
-function renderMyPortfolio(){
+// 'This Quarter' KPI tracker — progress against the CS team's quarterly goals, live-
+// computed and owner-scoped. Honest: shows the real value where computable, and a 'not
+// tracked yet' note (never a fabricated number) where the underlying event isn't captured.
+function _renderQuarterScorecard(){
+  const mount=document.getElementById('md-quarter'); if(!mount)return;
+  if(window._QUARTER_SC){ mount.innerHTML=_quarterPanelHtml(window._QUARTER_SC); return; }
+  mount.innerHTML='<div class="panel"><div class="head"><h2>This Quarter</h2><span class="note">loading…</span></div></div>';
+  api('/api/quarter-scorecard').then(r=>r.json()).then(sc=>{
+    window._QUARTER_SC=sc;
+    const m=document.getElementById('md-quarter'); if(m)m.innerHTML=_quarterPanelHtml(sc);
+  }).catch(()=>{ const m=document.getElementById('md-quarter'); if(m)m.innerHTML=''; });
+}
+function _quarterPanelHtml(sc){
+  if(!sc||!sc.kpis)return '';
+  const cards=sc.kpis.map(k=>{
+    const computable=k.computable && k.value!=null;
+    const val=computable
+      ? (k.unit==='%'? (k.value+'%') : (typeof k.value==='number'? k.value.toLocaleString(): escapeHtml(String(k.value))))
+      : '<span class="muted">not tracked yet</span>';
+    const unit=(computable && k.unit && k.unit!=='%')?('<span class="qsc-unit">'+escapeHtml(k.unit)+'</span>'):'';
+    const tgt=(k.target!=null)?('<div class="qsc-tgt">target '+escapeHtml(String(k.target))+(k.unit==='%'?'%':'')+'</div>'):'';
+    const note=k.note?('<div class="qsc-note" title="'+escapeHtml(k.note)+'">'+escapeHtml(k.note)+'</div>'):'';
+    return '<div class="qsc-card'+(computable?'':' qsc-na')+'">'+
+      '<div class="qsc-val">'+val+' '+unit+'</div>'+
+      '<div class="qsc-lbl">'+escapeHtml(k.label)+'</div>'+tgt+note+'</div>';
+  }).join('');
+  return '<div class="panel"><div class="head"><h2>This Quarter · '+escapeHtml(sc.quarter||'')+'</h2>'+
+    '<span class="note">What I\'m tracking · as of '+escapeHtml(sc.as_of||'')+'</span></div>'+
+    '<div class="body pad"><div class="qsc-grid">'+cards+'</div></div></div>';
+}
   const host=document.getElementById('md-pane-portfolio'); if(!host||!DATA)return;
   const accts=filteredAccounts();
   const body=accts.map(a=>{

@@ -4086,6 +4086,176 @@ def kpis() -> dict:
     }
 
 
+def _quarter_bounds(today: date) -> tuple:
+    """Return (quarter_start_date, quarter_label) for the calendar quarter containing
+    `today`. e.g. 2026-08-14 -> (2026-07-01, 'Q3 2026')."""
+    q = (today.month - 1) // 3            # 0..3
+    start_month = q * 3 + 1
+    start = date(today.year, start_month, 1)
+    return start, f"Q{q + 1} {today.year}"
+
+
+def quarter_scorecard() -> dict:
+    """'This Quarter' KPI tracker for the personal Dashboard: progress against the CS team's
+    quarterly goals, computed from LIVE data and owner-scoped to the current principal.
+
+    Each KPI is returned as {label, value, target, unit, computable, note} so the UI can
+    show progress honestly — and show 'not tracked yet' rather than a fabricated number
+    where the underlying change-event is not captured. Targets come from CS_QUARTER_TARGETS
+    (JSON) when set; otherwise target is None (no fabricated goal).
+
+    KPIs:
+      mrr_growth_pct        - realised MRR/revenue growth (warehouse NDR proxy). Live.
+      churned               - accounts churned this quarter. Live.
+      m2m_to_fixed          - current Month-to-Month vs fixed-term split (subscription_type).
+                              The in-quarter MOVE count needs a contract-change event we do
+                              not capture, so we report the current split + a note.
+      pro_upgrades          - booked upsell/expansion deals closed-won this quarter
+                              (HubSpot Price-Rise pipeline). A 'Pro tier' label specifically
+                              needs a tier field we do not track; reported as booked upsells.
+      portfolio_met_pct     - % of the owned portfolio with a logged executive F2F this
+                              quarter (F2F log). Jiminny calls add to it when present.
+      client_saves          - at-risk accounts (red health earlier this quarter) that are now
+                              not-red and not churned (a recovery), from the health-history
+                              snapshots. Honest None until enough snapshots exist.
+    """
+    today = _f2f_today()
+    q_start, q_label = _quarter_bounds(today)
+    q_start_iso = q_start.isoformat()
+
+    # Owner-scoped account set (admin = whole book; CSM = own).
+    accounts = {aid: _live_account(a) for aid, a in orchestrate.load_accounts().items()}
+
+    # Operator-configured quarter targets (never fabricated).
+    try:
+        targets = json.loads(os.environ.get("CS_QUARTER_TARGETS", "") or "{}")
+        if not isinstance(targets, dict):
+            targets = {}
+    except (ValueError, TypeError):
+        targets = {}
+
+    def _t(key):
+        v = targets.get(key)
+        return v if isinstance(v, (int, float)) else None
+
+    # --- MRR growth (realised retention proxy) ---------------------------------
+    tasks_by_account: dict = {}
+    for tk in orchestrate.orchestrate().get("tasks", []):
+        tasks_by_account.setdefault(tk.get("account_id"), []).append(tk)
+    retention = _retention_metrics(_retention_accounts(), tasks_by_account)
+    ndr = retention.get("ndr_pct")
+    mrr_growth = (round(ndr - 100, 1) if isinstance(ndr, (int, float)) else None)
+
+    # --- # churned this quarter -----------------------------------------------
+    churned_q = 0
+    churned_computable = False
+    for a in accounts.values():
+        hs = a.get("hubspot", {}) or {}
+        churn = a.get("churn", {}) or {}
+        is_churned = (str(churn.get("churn_status") or "").lower() == "churned"
+                      or str(hs.get("lifecycle_stage") or "").lower() in ("churned", "churned customer"))
+        if not is_churned:
+            continue
+        churned_computable = True
+        # Count as this-quarter when a churn/renewal date falls in-quarter; otherwise it is
+        # a prior churn still on the book, not a this-quarter event.
+        rd = str(hs.get("renewal_date") or "")[:10]
+        if rd and rd >= q_start_iso and rd <= today.isoformat():
+            churned_q += 1
+
+    # --- M2M vs fixed-term split (current state) -------------------------------
+    m2m = fixed = 0
+    for a in accounts.values():
+        st = str((a.get("hubspot", {}) or {}).get("subscription_type") or "").lower()
+        if not st:
+            continue
+        if "month to month" in st or st in ("m2m", "monthly"):
+            m2m += 1
+        elif st:
+            fixed += 1
+    m2m_known = m2m + fixed
+
+    # --- Pro upgrades / booked upsell this quarter -----------------------------
+    pro_upgrades = None
+    pro_note = "Booked upsells need HubSpot deal access; not readable here."
+    try:
+        from adapters.sources import HubSpot as _HS
+        hs_adapter = _HS()
+        if hs_adapter.live():
+            booked = hs_adapter.revenue_motion_deals() or {}
+            ups = booked.get("upsell") or {}
+            # Deal objects carry 'closed' (closedate). The 'deals' list is capped at 10 by
+            # the adapter, so count in-quarter from it only when it isn't truncated; else
+            # fall back to the window total with an honest note.
+            deals = ups.get("deals") or []
+            total = ups.get("count")
+            truncated = bool(total is not None and total > len(deals))
+            if deals and not truncated:
+                inq = [d for d in deals if str(d.get("closed") or "")[:10] >= q_start_iso]
+                pro_upgrades = len(inq)
+                pro_note = "Booked upsell/expansion deals closed this quarter (HubSpot Price-Rise pipeline). 'Pro tier' specifically is not a tracked field."
+            elif total is not None:
+                pro_upgrades = None
+                pro_note = f"{total} booked upsells in the rolling window; a clean per-quarter count needs the full deal list (currently capped)."
+    except Exception:  # noqa: BLE001
+        pass
+
+    # --- % portfolio met with (F2F this quarter) -------------------------------
+    total_accts = len(accounts)
+    met = 0
+    for aid in accounts:
+        last = last_f2f(aid)
+        if last and str(last)[:10] >= q_start_iso:
+            met += 1
+    met_pct = round(100 * met / total_accts, 1) if total_accts else None
+
+    # --- # client saves (at-risk -> recovered this quarter) --------------------
+    saves = None
+    saves_note = "A 'save' = an at-risk account that recovered this quarter; needs health-history snapshots across the quarter."
+    try:
+        saves_count = 0
+        saw_history = False
+        for aid, a in accounts.items():
+            hist = _health_history_for(aid) or []
+            inq = [h for h in hist if str(h.get("date") or h.get("at") or "")[:10] >= q_start_iso]
+            if len(inq) >= 2:
+                saw_history = True
+                bands = [str(h.get("band") or "").lower() for h in inq]
+                churn = a.get("churn", {}) or {}
+                now_churned = str(churn.get("churn_status") or "").lower() == "churned"
+                if "red" in bands and bands[-1] != "red" and not now_churned:
+                    saves_count += 1
+        if saw_history:
+            saves = saves_count
+            saves_note = None
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _kpi(label, value, unit, target_key, computable, note=None):
+        return {"label": label, "value": value, "unit": unit,
+                "target": _t(target_key), "computable": bool(computable), "note": note}
+
+    return {
+        "quarter": q_label,
+        "quarter_start": q_start_iso,
+        "as_of": today.isoformat(),
+        "scope": ("all" if (not get_principal() or get_principal().get("role") == "admin") else "csm"),
+        "kpis": [
+            _kpi("MRR growth", mrr_growth, "%", "mrr_growth_pct", mrr_growth is not None,
+                 "Realised net revenue retention vs the prior period (warehouse). Drives the quarterly bonus."
+                 if mrr_growth is not None else "No warehouse revenue series available for the owned book."),
+            _kpi("Churned", churned_q if churned_computable else None, "accounts", "churned", churned_computable,
+                 "Accounts churned this quarter (churn status / lifecycle with an in-quarter date)."),
+            _kpi("M2M → fixed-term", (fixed if m2m_known else None), "fixed of %d known" % m2m_known if m2m_known else "", "m2m_to_fixed", m2m_known > 0,
+                 ("Current split: %d Month-to-Month, %d fixed-term (of %d with a known type). The in-quarter MOVE count needs a contract-change event not yet captured." % (m2m, fixed, m2m_known)) if m2m_known else "subscription_type is not populated on the owned book."),
+            _kpi("Pro upgrades", pro_upgrades, "deals", "pro_upgrades", pro_upgrades is not None, pro_note),
+            _kpi("Portfolio met with", met_pct, "%", "portfolio_met_pct", met_pct is not None,
+                 "%d of %d owned accounts have a logged executive F2F this quarter. Rises as F2F / Jiminny touchpoints are logged." % (met, total_accts) if total_accts else "No accounts in scope."),
+            _kpi("Client saves", saves, "accounts", "client_saves", saves is not None, saves_note),
+        ],
+    }
+
+
 def _csm_targets() -> dict:
     """Per-CSM weekly targets for the leaderboard, as a {csm_name: {outreach, completion_pct}}
     map. Sourced from the CS_CSM_TARGETS env JSON (operator-configured), e.g.

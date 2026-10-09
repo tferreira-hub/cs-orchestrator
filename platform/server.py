@@ -724,6 +724,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
+            if path == "/api/quarter-scorecard":
+                # 'This Quarter' KPI tracker for the personal Dashboard: owner-scoped
+                # progress against the CS team's quarterly goals, live-computed + honest.
+                self._json(200, engine.quarter_scorecard()); return
             if path == "/api/leaderboard":
                 # V5 team performance leaderboard: per-CSM completion/outreach ranking +
                 # weekly target-compliance KPI. Owner-scoped (admin all named; CSM self +
