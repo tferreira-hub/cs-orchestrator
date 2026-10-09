@@ -76,6 +76,7 @@ RULE_CHURNED_RECOVERY = "churned_account_recovery"       # P2 MUST_PROTECT (Stra
 RULE_SCALED_EXCEPTION = "scaled_exception_escalation"    # P2 MUST_PROTECT (Scaled exception)
 RULE_DAY15_PAYMENT = "day15_payment_strategic"           # P2 MUST_PROTECT (Day-15 high-ARR Strategic)
 RULE_OVERDUE_RENEWAL = "overdue_renewal_escalation"      # P2 MUST_PROTECT (renewal past due)
+RULE_RENEWAL_SPONSOR_GAP = "renewal_exec_sponsor_gap"    # P2 MUST_PROTECT (T-90 window, no Exec Sponsor)
 RULE_SEAT_CONTRACTION = "seat_user_contraction"          # P2 MUST_PROTECT (sudden >20% seat/user drop, 14d)
 RULE_SUCCESS_PLAN_AT_RISK = "success_plan_at_risk"       # P2 MUST_PROTECT (committed goal off-track/overdue)
 RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
@@ -96,6 +97,7 @@ RULE_PRIORITY = {
     RULE_SCALED_EXCEPTION: 2,
     RULE_DAY15_PAYMENT: 2,
     RULE_OVERDUE_RENEWAL: 2,
+    RULE_RENEWAL_SPONSOR_GAP: 2,
     RULE_SUCCESS_PLAN_AT_RISK: 2,
     RULE_EXPANSION_UTILIZATION: 3,
     RULE_EXPANSION_API_SURGE: 3,
@@ -509,6 +511,21 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         if milestone and segment == "Strategic" and churn_status != "churned":
             add(RULE_RENEWAL_CADENCE, 4, "MUST_EXPAND", f"Proactive renewal {milestone[0]}",
                 {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"]}, milestone[1])
+            # UC2 edge case: a Strategic account inside the T-90 window (<=90 days to
+            # renewal, including overdue) MUST have an Executive Sponsor tagged. If not,
+            # fire an URGENT (P2 MUST_PROTECT) data-gap task — you cannot run an executive
+            # renewal motion with no economic buyer identified. Fires alongside the cadence
+            # task (different concern: the cadence is the motion, this is the data gap).
+            if dtr <= 90:
+                have_roles = {c.get("role") for c in hs.get("contacts", [])}
+                if "Executive Sponsor" not in have_roles:
+                    add(RULE_RENEWAL_SPONSOR_GAP, 2, "MUST_PROTECT",
+                        "Renewal at T-90 with no Executive Sponsor",
+                        {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"],
+                         "milestone": milestone[0], "missing_role": "Executive Sponsor"},
+                        "Urgent: this Strategic account is within the T-90 renewal window with no "
+                        "Executive Sponsor (economic buyer) tagged. Identify and tag the Executive "
+                        "Sponsor in the CRM now so the renewal motion can run.")
 
     # --- MUST_EXPAND: Executive Sponsor F2F cadence (V5 UC2) ---
     # Tier-1 strategic accounts should have a periodic executive face-to-face. Fire when

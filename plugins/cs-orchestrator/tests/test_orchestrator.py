@@ -800,3 +800,49 @@ def test_daily_focus_keeps_all_protect_and_caps_the_tail(monkeypatch):
         assert f["focus_count"] + f["deferred_count"] == f["total_tasks"]
     finally:
         orch.set_account_provider(prev)
+
+
+# --------------------------------------------------------------------------- #
+# V5 UC2 edge case: missing Executive Sponsor at T-90 -> urgent data-gap task
+# --------------------------------------------------------------------------- #
+def _renewal_account(contacts, renewal="2026-12-12", segment="Strategic"):
+    return {
+        "hubspot": {"name": "Renewing Co", "segment": segment, "arr_usd": 200000,
+                    "renewal_date": renewal, "contacts": contacts},
+        "usage": {}, "churn": {}, "zendesk": {}, "stripe": {}, "onboarding": {},
+    }
+
+
+def test_t90_without_exec_sponsor_fires_urgent_data_gap_task():
+    """A Strategic account inside T-90 (<=90 days) with NO Executive Sponsor tagged must
+    raise an urgent P2 MUST_PROTECT data-gap task (plus the normal P4 cadence task)."""
+    # renewal 2026-12-12 is ~80 days from CS_TODAY=2026-09-23 -> inside T-90.
+    account = _renewal_account(contacts=[{"role": "Finance Contact", "name": "Fin"}])
+    tasks, _ = orchestrate.evaluate("au1-renew", account)
+    gap = [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+    assert gap, "expected a renewal_exec_sponsor_gap task at T-90 with no Exec Sponsor"
+    assert gap[0]["priority"] == 2 and gap[0]["mandate"] == "MUST_PROTECT"
+    assert gap[0]["evidence"]["missing_role"] == "Executive Sponsor"
+    # The normal cadence task still fires alongside it.
+    assert any(t["rule_id"] == orchestrate.RULE_RENEWAL_CADENCE for t in tasks)
+
+
+def test_t90_with_exec_sponsor_does_not_fire_gap():
+    account = _renewal_account(contacts=[{"role": "Executive Sponsor", "name": "Eve"}])
+    tasks, _ = orchestrate.evaluate("au1-renew2", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+
+
+def test_sponsor_gap_only_inside_t90_window():
+    """Outside the T-90 window (e.g. T-120) the urgent gap task must NOT fire yet."""
+    # renewal ~2027-01-15 is ~114 days out -> T-120 band, not yet T-90.
+    account = _renewal_account(contacts=[], renewal="2027-01-15")
+    tasks, _ = orchestrate.evaluate("au1-renew3", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+
+
+def test_sponsor_gap_not_for_scaled():
+    """The urgent sponsor-gap is a Strategic renewal-motion concern; Scaled is exception-based."""
+    account = _renewal_account(contacts=[], segment="Scaled")
+    tasks, _ = orchestrate.evaluate("au1-renew4", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]

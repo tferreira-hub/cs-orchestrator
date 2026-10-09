@@ -471,6 +471,34 @@ def test_retention_metrics_compute_grr_and_expansion_pipeline(monkeypatch):
     assert r["expansion_pipeline_accounts"] == 1
     assert r["target"] == {"grr_pct": 92, "ndr_pct": 100}
 
+def test_test_instances_excluded_from_arr_and_retention(monkeypatch):
+    """UC3 edge case: internal/test instances (sandbox/dev/test id suffix) must NOT be
+    counted in corporate ARR, GRR, or NDR."""
+    import engine
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
+    accounts = {
+        # Real primary account.
+        "au1-100": {"hubspot": {"name": "Real Co", "segment": "Strategic", "arr_usd": 300000,
+                                "account_id": "au1-100"},
+                    "sources": {"hubspot": "live"},
+                    "metrics": {"mrr_usd": 300000, "revenue_prev_year_usd": 250000},
+                    "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+        # Test/sandbox instance — must be EXCLUDED from ARR + NDR.
+        "au1-100-sbx": {"hubspot": {"name": "Real Co Sandbox", "segment": "Strategic", "arr_usd": 999000,
+                                    "account_id": "au1-100-sbx"},
+                        "sources": {"hubspot": "live"},
+                        "metrics": {"mrr_usd": 999000, "revenue_prev_year_usd": 10},
+                        "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+    }
+    r = engine._retention_metrics(accounts, {})
+    # Only the real account's ARR counts; the sandbox's inflated 999k is dropped.
+    assert r["base_arr_usd"] == 300000
+    assert r["excluded_test_instances"] == 1
+    # NDR excludes the sandbox too: 300k / 250k = 120% (NOT inflated by the sbx 999k/10).
+    assert r["ndr_pct"] == 120.0 and r["ndr_accounts"] == 1
+
+
 
 def test_ndr_computed_from_warehouse_monthly_arr(monkeypatch):
     """NDR is dollar-weighted current vs prior-year revenue from rpt_account_ndr_monthly,

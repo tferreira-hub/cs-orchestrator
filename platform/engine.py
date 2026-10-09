@@ -1491,6 +1491,19 @@ def record_f2f(body: dict, principal: dict | None) -> dict:
     F2F_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with F2F_LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, default=str) + "\n")
+    # Bi-directional write-back to HubSpot (V5 UC2: Exec Sponsorship F2F synced to CRM so
+    # Sales/CS share one source of truth). Two-gated at the adapter (apply + CS_ALLOW_WRITE);
+    # best-effort so a CRM hiccup never loses the locally-logged touchpoint. apply mirrors
+    # the request (default dry-run), consistent with every other HubSpot write.
+    apply = bool(body.get("apply"))
+    hubspot_writeback = {"synced": False, "mode": "not-connected"}
+    try:
+        if dataaccess._ADAPTERS and _src.HUBSPOT.live():
+            hubspot_writeback = _src.HUBSPOT.set_exec_f2f(
+                account_id, met_on=entry["met_on"], outcome=entry.get("outcome"), apply=apply)
+    except Exception as exc:  # noqa: BLE001 - CRM write is best-effort; local log is source of record
+        hubspot_writeback = {"synced": False, "mode": "error", "detail": type(exc).__name__}
+    entry["hubspot_writeback"] = hubspot_writeback
     return entry
 
 
@@ -3705,11 +3718,22 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     churned_arr = 0
     expansion_pipeline_arr = 0
     expansion_accounts = 0
+    excluded_test_instances = 0
+    from adapters import identity as _idmod
     for aid, a in accounts.items():
         live = _live_account(a)
         hs = live.get("hubspot", {})
         arr = hs.get("arr_usd") or 0
         if not arr:
+            continue
+        # Exclude internal/test instances from corporate ARR & retention reporting
+        # (UC3 edge case + WoW §5: test/sandbox instances must never inflate the book's
+        # revenue numbers). A test instance is identified from the canonical account id
+        # shape (suffix sbx/sandbox/test/dev/uat/staging/demo). Secondary SHARDS of a real
+        # tenant are kept (they are real revenue); only test/sandbox instances are dropped.
+        ref_for_type = hs.get("account_id") or aid
+        if _idmod.instance_type(str(ref_for_type)) == "test":
+            excluded_test_instances += 1
             continue
         base_arr += arr
         churn = live.get("churn", {})
@@ -3788,12 +3812,18 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
             for ref, m in snapshot.items():
                 if scoped_refs is not None and str(ref).upper() not in scoped_refs:
                     continue
+                # Exclude test/sandbox instances from NDR as well (consistent with GRR).
+                if _id.instance_type(str(ref)) == "test":
+                    continue
                 if not isinstance(m, dict):
                     continue
                 _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
         else:
             # Fallback: no warehouse snapshot, use whatever per-account metrics are present.
             for a in accounts.values():
+                ref = (a.get("hubspot", {}) or {}).get("account_id") or a.get("account_id")
+                if ref and _id.instance_type(str(ref)) == "test":
+                    continue
                 m = a.get("metrics") or {}
                 if isinstance(m, dict) and m:
                     _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
@@ -3807,6 +3837,7 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
                 "ndr_pct": None, "ndr_computable": False, "ndr_accounts": 0,
                 "base_arr_usd": 0, "churned_arr_usd": 0,
                 "expansion_pipeline_arr_usd": 0, "expansion_pipeline_accounts": 0,
+                "excluded_test_instances": excluded_test_instances,
                 "target": {"grr_pct": 92, "ndr_pct": 100},
                 "note": "No live contract ARR available; retention is not computable."}
 
@@ -3825,11 +3856,68 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
         # Expansion PIPELINE (opportunity), reported separately from retention.
         "expansion_pipeline_arr_usd": expansion_pipeline_arr,
         "expansion_pipeline_accounts": expansion_accounts,
+        # Internal/test instances dropped from ARR & retention (UC3 edge case).
+        "excluded_test_instances": excluded_test_instances,
         "target": {"grr_pct": 92, "ndr_pct": 100},
         "method": "live ARR; GRR from Redshift/HubSpot churned status. NDR from the "
                   "rpt_account_ndr_monthly warehouse series (current vs prior-year revenue, "
                   "dollar-weighted). Expansion pipeline = active expansion-trigger accounts "
                   "(opportunity, separate from retention).",
+    }
+
+
+def _sla_compliance() -> dict:
+    """First-response SLA compliance for the pooled inbound queue (UC1 KPI: >=95% within
+    24h). Computed from the live inbound queue: a ticket is SLA-compliant when it is not
+    flagged sla_breached. Honest None (not a fake 100%) when there are no tickets yet.
+    Target 95%."""
+    _load_inbound()
+    rows = list(_INBOUND_QUEUE.values())
+    total = len(rows)
+    breached = sum(1 for r in rows if r.get("sla_breached"))
+    pct = round(100 * (total - breached) / total, 1) if total else None
+    return {
+        "sla_compliance_pct": pct,
+        "target_pct": 95,
+        "meets_target": (pct is not None and pct >= 95),
+        "tickets": total,
+        "breached": breached,
+        "computable": total > 0,
+        "note": None if total else "No inbound tickets yet; SLA compliance is not computable.",
+    }
+
+
+def _report_delivery_compliance() -> dict:
+    """Monthly performance-report delivery compliance (UC1 KPI: >=98% to Primary Admins).
+    Computed from the dry-run digest run across named/active accounts: an account is
+    'deliverable' when the digest compiles with a Primary Admin recipient; the delivery
+    rate is deliverable / eligible. This measures delivery READINESS from live data; the
+    actual send rate is reconciled once the transactional email template is live. Target
+    98%. Honest None when there are no eligible accounts."""
+    try:
+        run = run_monthly_digests(apply=False)
+    except Exception:  # noqa: BLE001 - best-effort; never break the KPI payload
+        return {"report_delivery_pct": None, "target_pct": 98, "meets_target": False,
+                "computable": False, "note": "Digest run unavailable."}
+    summary = run.get("summary", {}) or {}
+    eligible = summary.get("accounts_in_scope", 0) or 0
+    # 'Deliverable' = the digest compiled WITH a Primary Admin recipient (i.e. it would
+    # send once the email template is live). Accounts missing a Primary Admin or that
+    # errored are NOT deliverable. This measures delivery READINESS from live data; the
+    # actual send rate reconciles once the transactional template is configured.
+    missing_admin = summary.get("missing_primary_admin", 0) or 0
+    errors = summary.get("errors", 0) or 0
+    deliverable = max(0, eligible - missing_admin - errors)
+    pct = round(100 * deliverable / eligible, 1) if eligible else None
+    return {
+        "report_delivery_pct": pct,
+        "target_pct": 98,
+        "meets_target": (pct is not None and pct >= 98),
+        "eligible_accounts": eligible,
+        "deliverable_accounts": deliverable,
+        "missing_primary_admin": missing_admin,
+        "computable": eligible > 0,
+        "note": None if eligible else "No eligible accounts for monthly reporting yet.",
     }
 
 
@@ -3881,6 +3969,11 @@ def kpis() -> dict:
         "by_csm": sorted(by_csm.values(), key=lambda r: -r["open_tasks"]),
         "mandate_load": mandate_counts,
         "retention": _retention_metrics(_retention_accounts(), tasks_by_account),
+        # UC1/UC3 operational compliance KPIs vs their targets (first-response SLA >=95%,
+        # monthly report delivery >=98%). Computed from live signals; honest None when not
+        # yet computable (no tickets / no eligible accounts) rather than a fake 100%.
+        "sla": _sla_compliance(),
+        "report_delivery": _report_delivery_compliance(),
         "task_metrics": {key: (sorted(value) if key == "overdue_task_ids" else value)
                  for key, value in task_metrics.items() if key != "status_by_id"},
         "totals": {
@@ -4106,7 +4199,11 @@ def revenue_motion() -> dict:
     paying customers, churn, at-risk, retention, ARR distribution). Live data only; every
     figure traces to HubSpot ARR / lifecycle and Redshift churn status. Nothing invented."""
     accounts = orchestrate.load_accounts()
-    scoped = [_live_account(a) for a in accounts.values()]
+    # Exclude internal/test instances from the executive revenue snapshot (UC3 edge case:
+    # test/sandbox instances must not inflate corporate ARR / churn / at-risk figures).
+    from adapters import identity as _idmod
+    scoped = [_live_account(a) for aid, a in accounts.items()
+              if _idmod.instance_type(str((a.get("hubspot", {}) or {}).get("account_id") or aid)) != "test"]
     tasks_by_account: dict = {}
     for t in orchestrate.orchestrate().get("tasks", []):
         tasks_by_account.setdefault(t.get("account_id"), []).append(t)
@@ -4222,7 +4319,11 @@ def expansion_opportunities() -> dict:
     the caller (admins see all; CSMs see their own book via the scoped account provider).
     Evidence-grounded: only accounts with a computable score and real drivers appear."""
     accounts = orchestrate.load_accounts()
-    scoped = [_live_account(a) for a in accounts.values()]
+    # Exclude internal/test instances from expansion reporting (consistent with revenue
+    # & retention: test/sandbox instances are not real expansion opportunities).
+    from adapters import identity as _idmod
+    scoped = [_live_account(a) for aid, a in accounts.items()
+              if _idmod.instance_type(str((a.get("hubspot", {}) or {}).get("account_id") or aid)) != "test"]
     # Segment median ARR for the headroom driver.
     from statistics import median
     seg_arr: dict[str, list] = {}

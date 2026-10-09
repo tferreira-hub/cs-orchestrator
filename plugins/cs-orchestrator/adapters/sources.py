@@ -2212,6 +2212,47 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 
+    def set_exec_f2f(self, account_ref: str, met_on: str, outcome: str | None = None,
+                     apply: bool = False) -> dict[str, Any]:
+        """Write the latest Executive Sponsor F2F back to the HubSpot company so Sales/CS
+        share one source of truth (V5 UC2: Exec Sponsorship field synced bi-directionally).
+        Writes cs_last_exec_f2f_date (date) and, when provided, cs_last_exec_f2f_outcome
+        (text). Auto-creates the properties if missing. Two-gate (apply + CS_ALLOW_WRITE);
+        dry-run by default; reversible. Owner-scope is enforced at the engine/endpoint."""
+        met_on = (met_on or "").strip()
+        if not met_on:
+            raise ValueError("met_on (ISO date) is required")
+        c = self._find_company(account_ref)  # read-only lookup
+        props: dict[str, Any] = {"cs_last_exec_f2f_date": met_on[:10]}
+        outcome = (outcome or "").strip()
+        if outcome:
+            props["cs_last_exec_f2f_outcome"] = outcome
+        definitions = {
+            "cs_last_exec_f2f_date": {"label": "CS Last Exec F2F Date", "type": "date",
+                                      "fieldType": "date", "groupName": "companyinformation"},
+            "cs_last_exec_f2f_outcome": {"label": "CS Last Exec F2F Outcome", "type": "string",
+                                         "fieldType": "textarea", "groupName": "companyinformation"},
+        }
+        can_apply = apply and config.writes_allowed()
+        if can_apply:
+            for name in props:
+                try:
+                    definition = dict(definitions[name]); definition["name"] = name
+                    config.http_post("https://api.hubapi.com/crm/v3/properties/companies",
+                                     self._headers(), definition)
+                except Exception:  # noqa: BLE001 - property likely already exists
+                    pass
+            config.http_patch(
+                f"https://api.hubapi.com/crm/v3/objects/companies/{c['id']}",
+                self._headers(), {"properties": props})
+            return {"synced": True, "mode": "applied", "target": "hubspot.crm.companies",
+                    "company_id": c["id"], "written_fields": props,
+                    "_source": "hubspot-live-write"}
+        return {"synced": False, "mode": "dry-run", "target": "hubspot.crm.companies",
+                "company_id": c["id"], "would_write": props,
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
     def inbound_tickets(self, window_days: int | None = None, limit: int | None = None) -> list[dict]:
         """Read recent Service Hub tickets and normalise them to the inbound-intake shape.
 

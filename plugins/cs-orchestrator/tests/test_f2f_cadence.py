@@ -105,3 +105,66 @@ def test_cadence_kpi(f2f_env, monkeypatch):
     assert k["tier1_exec_touchpoint_pct"] == 50
     assert k["target_pct"] == 100
     assert {r["account_id"] for r in k["overdue_accounts"]} == {"au1-a"}
+
+
+# --------------------------------------------------------------------------- #
+# V5 UC2: Exec Sponsor F2F bi-directional write-back to HubSpot
+# --------------------------------------------------------------------------- #
+def test_record_f2f_calls_hubspot_writeback(f2f_env, monkeypatch):
+    """record_f2f must push the F2F back to HubSpot (two-gated at the adapter) and attach
+    the result, not just log locally — closing the UC2 bi-directional sync gap."""
+    engine, _ = f2f_env
+    import dataaccess
+    calls = {}
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def set_exec_f2f(self, account_ref, met_on, outcome=None, apply=False):
+            calls["args"] = {"ref": account_ref, "met_on": met_on, "outcome": outcome, "apply": apply}
+            return {"synced": bool(apply), "mode": "applied" if apply else "dry-run",
+                    "would_write": {"cs_last_exec_f2f_date": met_on}}
+
+    monkeypatch.setattr(dataaccess, "_ADAPTERS", True, raising=False)
+    monkeypatch.setattr(engine._src, "HUBSPOT", _FakeHS())
+
+    e = engine.record_f2f({"account_id": "au1-big", "met_on": "2026-10-01",
+                           "outcome": "Renewal aligned", "apply": True}, {"email": "me@x.com"})
+    # Adapter was called with the logged date + outcome, honouring apply.
+    assert calls["args"] == {"ref": "au1-big", "met_on": "2026-10-01",
+                             "outcome": "Renewal aligned", "apply": True}
+    # The write-back result is attached to the entry for the UI/audit trail.
+    assert e["hubspot_writeback"]["synced"] is True
+    # Local log is still the source of record.
+    assert engine.last_f2f("au1-big") == "2026-10-01"
+
+
+def test_record_f2f_survives_hubspot_failure(f2f_env, monkeypatch):
+    """A CRM write failure must never lose the locally-logged touchpoint."""
+    engine, _ = f2f_env
+    import dataaccess
+
+    class _BoomHS:
+        def live(self):
+            return True
+
+        def set_exec_f2f(self, *a, **k):
+            raise RuntimeError("hubspot 500")
+
+    monkeypatch.setattr(dataaccess, "_ADAPTERS", True, raising=False)
+    monkeypatch.setattr(engine._src, "HUBSPOT", _BoomHS())
+    e = engine.record_f2f({"account_id": "au1-big", "met_on": "2026-10-02"}, None)
+    assert e["hubspot_writeback"]["mode"] == "error"
+    assert engine.last_f2f("au1-big") == "2026-10-02"   # local log intact
+
+
+def test_set_exec_f2f_dry_run_payload():
+    """The adapter builds the right company payload and stays dry-run without the gates."""
+    from adapters import sources
+    hs = sources.HubSpot()
+    hs._find_company = lambda ref: {"id": "C1"}      # stub the read-only lookup
+    out = hs.set_exec_f2f("au1-big", met_on="2026-10-01", outcome="Great QBR", apply=False)
+    assert out["mode"] == "dry-run" and out["synced"] is False
+    assert out["would_write"]["cs_last_exec_f2f_date"] == "2026-10-01"
+    assert out["would_write"]["cs_last_exec_f2f_outcome"] == "Great QBR"
