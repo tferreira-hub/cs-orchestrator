@@ -377,3 +377,54 @@ def test_users_block_none_when_metrics_offline(monkeypatch):
     engine.set_principal(None)
     card = engine.account_performance("au1-1")
     assert card["identity"]["users"] is None
+
+
+# --------------------------------------------------------------------------- #
+# (f) roster fallback: a selectable account absent from the warehouse must not 404
+# --------------------------------------------------------------------------- #
+def test_roster_only_account_renders_identity_not_404(monkeypatch):
+    """An account the user can pick (in the whole-book roster) but with NO warehouse dim
+    and NO per-account HubSpot row must render an identity-only scorecard with an honest
+    data_note — never a bare 404/KeyError."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    # Warehouse 'live' but returns nothing for this id; per-account HubSpot also empty.
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "performance", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "feature_usage", lambda self, ref: {})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+    # The whole-book roster DOES contain the account (what the picker lists).
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": [
+        {"account_id": "au9-1", "name": "1300 Hired", "arr_usd": 42000, "country": "AU"},
+    ]})
+
+    engine.set_principal(None)
+    card = engine.account_performance("au9-1")   # must NOT raise KeyError
+    assert card["account_id"] == "au9-1"
+    assert card["identity"]["name"] == "1300 Hired"
+    assert card["identity"]["arr_usd"] == 42000
+    assert card["roster_only"] is True
+    assert card["data_note"]
+    # Honest gaps for the missing warehouse data.
+    assert card["connected"]["warehouse_performance"] is False
+
+
+def test_unknown_account_still_404s_when_not_in_roster(monkeypatch):
+    """An id in NO source and NOT in the roster is genuinely unknown -> KeyError (404)."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": []})
+    engine.set_principal(None)
+    with pytest.raises(KeyError):
+        engine.account_performance("au9-nope")

@@ -2670,8 +2670,11 @@ function _acctRenderScorecard(d){
         '<div id="acct-sched-note" class="acct-sched-note"></div>'+
       '</div></div>';
 
+  const dataNote=(d.roster_only&&d.data_note)
+    ? '<div class="acct-no-print" style="margin:0 0 10px;padding:10px 14px;border:1px solid #f0d58a;background:#fdf6e3;border-radius:10px;font:500 13px Inter,system-ui;color:#8a6d00">'+escapeHtml(d.data_note)+'</div>'
+    : '';
   card.innerHTML=
-    '<div id="acct-scorecard-print">'+header+toolbar+perfPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
+    '<div id="acct-scorecard-print">'+header+dataNote+toolbar+perfPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
 }
 
 // Print just the scorecard via the @media print stylesheet.

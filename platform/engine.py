@@ -2416,17 +2416,36 @@ def account_performance(account_id: str) -> dict:
     except Exception:  # noqa: BLE001
         hubspot = {}
 
-    # Honest 404: the account must resolve in at least ONE live system (warehouse dim or
-    # HubSpot). An id that matches nothing anywhere is genuinely unknown.
+    # Honest resolution: prefer the warehouse dim / per-account HubSpot. If BOTH miss, the
+    # account may still be a real one that's simply absent from the warehouse (e.g. not yet
+    # provisioned) but present in the whole-book roster the picker is built from. In that
+    # case fall back to the roster row so an account the user can SELECT never dead-ends on
+    # a bare 404 — we render the identity header + an honest 'no warehouse performance data'
+    # note instead. Only a genuinely unknown id (not in any source and not in the roster)
+    # is a 404.
+    roster_only = False
     if not dim and not hubspot:
-        # When no source is live at all we cannot assert the account is unknown — surface an
-        # honest 'not_connected' scorecard rather than a misleading 404.
         any_live = False
         try:
             any_live = bool(_src.ACCOUNT_PERF.live() or (_ADAPTERS and _src.HUBSPOT.live()))
         except Exception:  # noqa: BLE001
             any_live = False
-        if any_live:
+        row = None
+        try:
+            from adapters import identity as _id
+            norm = _id.normalise(ref)
+            for r in full_roster().get("companies", []):
+                if r.get("account_id") in (ref, norm):
+                    row = r
+                    break
+        except Exception:  # noqa: BLE001
+            row = None
+        if row:
+            # Synthesize a minimal identity from the roster row (name/ARR/segment/type).
+            hubspot = {"name": row.get("name"), "arr_usd": row.get("arr_usd"),
+                       "country": row.get("country")}
+            roster_only = True
+        elif any_live:
             raise KeyError(account_id)
 
     # --- performance + previous window + deltas -------------------------------
@@ -2557,6 +2576,12 @@ def account_performance(account_id: str) -> dict:
             "hubspot": bool(hubspot),
             "zendesk": tickets.get("status") != "not_connected",
         },
+        # Honest provenance note for an account that's in the book but has no warehouse row
+        # yet (so the scorecard shows identity only). None when the warehouse resolved.
+        "roster_only": roster_only,
+        "data_note": ("This account is in your book but has no live warehouse performance "
+                      "data yet (not provisioned in the data warehouse). Showing account "
+                      "details only." if roster_only else None),
     }
 
 
