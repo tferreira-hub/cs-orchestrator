@@ -712,6 +712,23 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/f2f-cadence":
                 # V5 Executive Sponsor F2F cadence KPI (tier-1 strategic touchpoints).
                 self._json(200, engine.f2f_cadence()); return
+            if path == "/api/account-performance/accounts":
+                # Cheap picker list for the Accounts page: [{account_id,name}] across the
+                # principal's whole book (owner-scoped inside the engine).
+                self._json(200, engine.account_performance_accounts()); return
+            if path == "/api/account-performance":
+                # Per-account performance scorecard (CS Day-to-Day -> Accounts). Owner-scoped:
+                # ForbiddenError -> 403, unknown account -> 404.
+                account_id = (query.get("account_id") or [""])[0].strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                try:
+                    self._json(200, engine.account_performance(account_id))
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "forbidden", "account_id": account_id})
+                except KeyError:
+                    self._json(404, {"error": "account not found", "account_id": account_id})
+                return
             if path == "/api/f2f-log":
                 account_id = (query.get("account_id") or [""])[0].strip()
                 if not account_id:

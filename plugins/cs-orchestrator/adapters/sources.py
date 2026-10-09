@@ -2454,6 +2454,462 @@ class HubSpot:
         return items
 
 
+# ----------------------------------------------------- Account Performance ---
+class AccountPerformance:
+    """Per-account recruiting performance scorecard from the Data Platform warehouse,
+    replicating & improving JobAdder's native 'Account' dashboard. Read-only via the same
+    cross-account Redshift Data API path as Churn/AccountMetrics (no persistent DB / VPC
+    connection). NEVER fabricates: returns {} / None / 'not_connected' when a table/field
+    is absent.
+
+    Live data model (verified against prod `dwh`):
+      rpt.rpt_account_performance_monthly   one row per account per calendar month, keyed on
+        `ja_account` (AUx-yyyy). `is_completed_month` flags a full month. Monthly COUNTS
+        (created_jobs_total, posted_ads_total, posted_boards, applications_total,
+        placements_total, closed_jobs_total, created_opportunities) are SUMmed over a window.
+        Days-to-Place = SUM(days_to_close_total) / SUM(closed_jobs_total) (guarded). Also
+        carries `icp`, `tier`, `max_daily_users_over_month`.
+      marts.snp_jobadder_all_accounts       account dimension (SCD2). The latest snapshot is
+        `dbt_valid_to IS NULL`. Keyed on (pk_instance, client_id); the AUx-yyyy join key is
+        UPPER(pk_instance) || '-' || client_id. Carries account_name, account_status,
+        account_type, account_kind, tier_name, country, is_ai_matching_enabled (=> 'Adder
+        Intelligence Match'), is_floats_enabled (=> 'AI Float'), stripe_customer_id,
+        global_customer_id.
+      rpt.rpt_job_automation_usage_monthly  per-account automation usage, keyed on `ja_account`,
+        grouped by automation_template_name.
+
+    Window is the trailing N COMPLETED months (default 12, override CS_ACCT_PERF_WINDOW_MONTHS),
+    plus the equal PRIOR window for Vs.-Prev deltas. Peer benchmark cohort = accounts sharing
+    the SAME icp AND SAME account_type over the same window.
+    """
+
+    POLL_INTERVAL_S = 1.0
+    POLL_TIMEOUT_S = int(config.env("CS_REDSHIFT_POLL_TIMEOUT_S") or 45)
+
+    PERF_TABLE = "rpt.rpt_account_performance_monthly"
+    DIM_TABLE = "marts.snp_jobadder_all_accounts"
+    AUTOMATION_TABLE = "rpt.rpt_job_automation_usage_monthly"
+
+    # The dim keys on (pk_instance, client_id); the AUx-yyyy ref is the two joined. Kept as a
+    # SQL expression so dimension()/benchmark() reuse the identical join everywhere.
+    _DIM_KEY_EXPR = "UPPER(pk_instance) || '-' || client_id"
+
+    # Metric name -> the SUMmable monthly column in the perf table. Days-to-Place and
+    # Source-Efficiency are DERIVED (not direct SUMs) and handled separately.
+    _COUNT_METRICS = {
+        "jobs_created": "created_jobs_total",
+        "ads_posted": "posted_ads_total",
+        "board_usage": "posted_boards",
+        "applications": "applications_total",
+        "placements": "placements_total",
+        "jobs_closed": "closed_jobs_total",
+        "opportunities_created": "created_opportunities",
+    }
+
+    def live(self) -> bool:
+        return (config.live_enabled() and bool(config.env("REDSHIFT_DATABASE"))
+                and bool(config.env("REDSHIFT_WORKGROUP") or config.env("REDSHIFT_CLUSTER_ID"))
+                and ((config.env("CS_ACCT_PERF_ENABLED") or "1") not in ("0", "false")))
+
+    # Reuse the churn adapter's cross-account connection helpers (client/target/cell/identifier)
+    # exactly as AccountMetrics does, so there is one place that knows how to reach Redshift.
+    _churn = None
+
+    def _c(self):
+        if AccountPerformance._churn is None:
+            AccountPerformance._churn = Churn()
+        return AccountPerformance._churn
+
+    @staticmethod
+    def window_months() -> int:
+        try:
+            n = int(config.env("CS_ACCT_PERF_WINDOW_MONTHS") or 12)
+        except (TypeError, ValueError):
+            n = 12
+        return n if n > 0 else 12
+
+    def _run(self, client, ch, sql: str, params: list | None = None):
+        """Execute a Data API statement, poll to completion, return (ColumnMetadata-names,
+        [ [cell,...], ... ]). Returns (None, None) on timeout/failure (never raises for a
+        data gap)."""
+        import time
+        kw = {"Sql": sql, **ch._target_kwargs()}
+        if params:
+            kw["Parameters"] = params
+        resp = client.execute_statement(**kw)
+        sid = resp["Id"]
+        deadline = time.monotonic() + self.POLL_TIMEOUT_S
+        status = "SUBMITTED"
+        desc = {}
+        while status not in ("FINISHED", "FAILED", "ABORTED"):
+            if time.monotonic() > deadline:
+                return (None, None)
+            time.sleep(self.POLL_INTERVAL_S)
+            desc = client.describe_statement(Id=sid)
+            status = desc["Status"]
+        if status != "FINISHED":
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] query failed: {desc.get('Error')}", file=_s.stderr)
+            return (None, None)
+        rows = []
+        cols = None
+        token = None
+        while True:
+            gkw = {"Id": sid}
+            if token:
+                gkw["NextToken"] = token
+            res = client.get_statement_result(**gkw)
+            if cols is None:
+                cols = [c["name"] for c in res.get("ColumnMetadata", [])]
+            for rec in res.get("Records", []):
+                rows.append([ch._cell(f) for f in rec])
+            token = res.get("NextToken")
+            if not token:
+                break
+        return (cols, rows)
+
+    @staticmethod
+    def _num(v):
+        """Coerce a Data API cell (which may be str/int/float/None) to float, else None."""
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    # -- window SQL fragments --------------------------------------------------
+    # Trailing N COMPLETED months ending at the start of the current month, and the equal
+    # PRIOR window immediately before it. Expressed relative to DATE_TRUNC('month', CURRENT_DATE)
+    # so the window always covers whole, already-closed months.
+    def _window_predicates(self, n: int):
+        cur = f"""(date_reporting_month >= DATEADD(month, -{n}, DATE_TRUNC('month', CURRENT_DATE))
+                   AND date_reporting_month < DATE_TRUNC('month', CURRENT_DATE))"""
+        prev = f"""(date_reporting_month >= DATEADD(month, -{2*n}, DATE_TRUNC('month', CURRENT_DATE))
+                    AND date_reporting_month < DATEADD(month, -{n}, DATE_TRUNC('month', CURRENT_DATE)))"""
+        return cur, prev
+
+    def _agg_select(self):
+        """SELECT list of SUMmed count metrics + the days/closed/apps components used for the
+        two DERIVED metrics. Order is fixed so callers can index the result deterministically."""
+        parts = [f"SUM({col}) AS {name}" for name, col in self._COUNT_METRICS.items()]
+        parts.append("SUM(days_to_close_total) AS _days_to_close_sum")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _derive(row: dict):
+        """Add the two DERIVED metrics to a metrics dict in-place and return it. Guards all
+        divide-by-zero to None (honest 'not computable')."""
+        placements = row.get("placements")
+        applications = row.get("applications")
+        closed = row.get("jobs_closed")
+        days_sum = row.pop("_days_to_close_sum", None)
+        # Days-to-Place = total days-to-close / closed jobs (guard /0).
+        row["days_to_place"] = (round(days_sum / closed, 1)
+                                if (days_sum is not None and closed) else None)
+        # Source Efficiency (DERIVED) = applications per placement.
+        row["source_efficiency"] = (round(applications / placements, 1)
+                                     if (applications is not None and placements) else None)
+        return row
+
+    def _metrics_from_row(self, cols, row):
+        if not row:
+            return None
+        idx = {c: i for i, c in enumerate(cols)}
+        out = {}
+        for name in self._COUNT_METRICS:
+            # Counts are whole numbers; keep ints where possible, else None.
+            v = self._num(row[idx[name]]) if name in idx else None
+            out[name] = int(v) if v is not None else None
+        ds = self._num(row[idx["_days_to_close_sum"]]) if "_days_to_close_sum" in idx else None
+        out["_days_to_close_sum"] = ds
+        return self._derive(out)
+
+    def performance(self, account_ref: str, window_months: int | None = None) -> dict:
+        """SUMmed metrics for the account over the trailing `window_months` COMPLETED months
+        AND the equal prior window (for Vs.-Prev deltas). Returns
+        {metrics:{...}, previous:{...}, window:{months,start,end}, _source} or {} when not
+        live / no data (never fabricates)."""
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.PERF_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, prev_pred = self._window_predicates(n)
+        sel = self._agg_select()
+        sql = (
+            f"SELECT 'cur' AS period, {sel} FROM {self.PERF_TABLE} "
+            f"WHERE ja_account = :ref AND is_completed_month = TRUE AND {cur_pred} "
+            f"UNION ALL "
+            f"SELECT 'prev' AS period, {sel} FROM {self.PERF_TABLE} "
+            f"WHERE ja_account = :ref AND is_completed_month = TRUE AND {prev_pred}"
+        )
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None:
+            return {}
+        pidx = cols.index("period")
+        metrics = previous = None
+        for r in rows:
+            m = self._metrics_from_row(cols, r)
+            if r[pidx] == "cur":
+                metrics = m
+            elif r[pidx] == "prev":
+                previous = m
+        if metrics is None and previous is None:
+            return {}
+        # Window bounds (ISO) for display, derived the same way as the SQL predicate.
+        from datetime import date
+        today = date.today()
+        start_month = date(today.year, today.month, 1)
+
+        def _shift(d, months):
+            y = d.year + (d.month - 1 - months) // 12
+            mo = (d.month - 1 - months) % 12 + 1
+            return date(y, mo, 1)
+
+        win_end = start_month  # exclusive
+        win_start = _shift(start_month, n)
+        return {
+            "metrics": metrics or {},
+            "previous": previous or {},
+            "window": {"months": n, "start": win_start.isoformat(), "end": win_end.isoformat()},
+            "_source": "redshift-live",
+        }
+
+    def benchmark(self, account_ref: str, window_months: int | None = None) -> dict:
+        """Peer-cohort benchmark: cohort = accounts with the SAME icp AND SAME account_type
+        over the same window. Per metric returns {rank, peers, percentile, peer_avg} for the
+        account (rank 1 = best; higher is better for all metrics EXCEPT days_to_place /
+        source_efficiency where LOWER is better). Honest None per metric (and cohort<2 ->
+        {} overall) when there isn't a comparable cohort. Returns {} when not live / no data.
+        """
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.PERF_TABLE, qualified=True)
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, _ = self._window_predicates(n)
+        # Per-account windowed aggregate joined to its latest dim snapshot (for account_type),
+        # restricted to the target's (icp, account_type) cohort. One pass, computes each
+        # metric's value per account; Python then ranks the target within the cohort.
+        sql = f"""
+        WITH perf AS (
+          SELECT ja_account,
+                 MAX(icp) AS icp,
+                 SUM(created_jobs_total)    AS jobs_created,
+                 SUM(posted_ads_total)      AS ads_posted,
+                 SUM(posted_boards)         AS board_usage,
+                 SUM(applications_total)    AS applications,
+                 SUM(placements_total)      AS placements,
+                 SUM(closed_jobs_total)     AS jobs_closed,
+                 SUM(created_opportunities) AS opportunities_created,
+                 SUM(days_to_close_total)   AS days_sum
+          FROM {self.PERF_TABLE}
+          WHERE is_completed_month = TRUE AND {cur_pred}
+          GROUP BY ja_account
+        ),
+        dim AS (
+          SELECT {self._DIM_KEY_EXPR} AS ja_account, account_type
+          FROM {self.DIM_TABLE} WHERE dbt_valid_to IS NULL
+        ),
+        joined AS (
+          SELECT p.*, d.account_type FROM perf p JOIN dim d USING (ja_account)
+        ),
+        target AS (SELECT icp, account_type FROM joined WHERE ja_account = :ref)
+        SELECT j.ja_account, j.jobs_created, j.ads_posted, j.board_usage, j.applications,
+               j.placements, j.jobs_closed, j.opportunities_created, j.days_sum
+        FROM joined j, target t
+        WHERE j.icp = t.icp AND j.account_type = t.account_type
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+
+        # Build per-account metric values (incl. the two derived metrics) for the whole cohort.
+        def _derived_for(r):
+            applications = self._num(r[idx["applications"]])
+            placements = self._num(r[idx["placements"]])
+            closed = self._num(r[idx["jobs_closed"]])
+            days_sum = self._num(r[idx["days_sum"]])
+            dtp = (days_sum / closed) if (days_sum is not None and closed) else None
+            se = (applications / placements) if (applications is not None and placements) else None
+            return dtp, se
+
+        # Metrics to rank: name -> (higher_is_better)
+        metric_dirs = {
+            "jobs_created": True, "ads_posted": True, "board_usage": True,
+            "applications": True, "placements": True, "jobs_closed": True,
+            "opportunities_created": True, "days_to_place": False, "source_efficiency": False,
+        }
+        cohort = []
+        target_vals = None
+        for r in rows:
+            acc = r[idx["ja_account"]]
+            dtp, se = _derived_for(r)
+            vals = {name: self._num(r[idx[name]]) for name in self._COUNT_METRICS if name in idx}
+            vals["days_to_place"] = dtp
+            vals["source_efficiency"] = se
+            cohort.append((acc, vals))
+            if acc == ref:
+                target_vals = vals
+
+        peers = len(cohort)
+        if peers < 2 or target_vals is None:
+            return {}  # not a comparable cohort — honest empty
+
+        out = {}
+        for name, higher_better in metric_dirs.items():
+            tv = target_vals.get(name)
+            # Values present across the cohort for this metric.
+            present = [v[name] for (_a, v) in cohort if v.get(name) is not None]
+            if tv is None or len(present) < 2:
+                out[name] = None
+                continue
+            # Rank: 1 = best. Count strictly-better peers, +1.
+            if higher_better:
+                better = sum(1 for v in present if v > tv)
+            else:
+                better = sum(1 for v in present if v < tv)
+            rank = better + 1
+            cohort_n = len(present)
+            # Percentile: fraction of cohort this account is at-or-better-than (0..100).
+            if higher_better:
+                at_or_below = sum(1 for v in present if v <= tv)
+            else:
+                at_or_below = sum(1 for v in present if v >= tv)
+            percentile = round(100.0 * at_or_below / cohort_n)
+            peer_avg = round(sum(present) / cohort_n, 1)
+            out[name] = {
+                "rank": rank,
+                "peers": cohort_n,
+                "percentile": percentile,
+                "peer_avg": peer_avg,
+                "higher_is_better": higher_better,
+            }
+        out["_source"] = "redshift-live"
+        out["cohort"] = {"peers": peers}
+        return out
+
+    def dimension(self, account_ref: str) -> dict:
+        """Latest-snapshot account dimension fields from snp_jobadder_all_accounts. Returns {}
+        when not live / no matching row (never fabricates)."""
+        if not self.live():
+            return {}
+        ch = self._c()
+        try:
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        sql = f"""
+        SELECT account_name, account_status, account_type, account_kind, tier_name, country,
+               is_ai_matching_enabled, is_floats_enabled, stripe_customer_id, global_customer_id
+        FROM {self.DIM_TABLE}
+        WHERE {self._DIM_KEY_EXPR} = :ref AND dbt_valid_to IS NULL
+        LIMIT 1
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+        r = rows[0]
+        return {
+            "account_name": r[idx["account_name"]],
+            "account_status": r[idx["account_status"]],
+            "account_type": r[idx["account_type"]],
+            "account_kind": r[idx["account_kind"]],
+            "tier_name": r[idx["tier_name"]],
+            "country": r[idx["country"]],
+            "is_ai_matching_enabled": r[idx["is_ai_matching_enabled"]],
+            "is_floats_enabled": r[idx["is_floats_enabled"]],
+            "stripe_customer_id": r[idx["stripe_customer_id"]],
+            "global_customer_id": r[idx["global_customer_id"]],
+            "_source": "redshift-live",
+        }
+
+    def feature_usage(self, account_ref: str, window_months: int | None = None) -> dict:
+        """Best-effort automation/feature usage from rpt_job_automation_usage_monthly, grouped
+        by automation_template_name over the trailing window. Returns
+        {templates:{name:{total,successful,failed}}, _source} or {} when none/absent (never
+        fabricates)."""
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.AUTOMATION_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, _ = self._window_predicates(n)
+        sql = f"""
+        SELECT automation_template_name,
+               SUM(total_usage) AS total, SUM(successful_usage) AS successful,
+               SUM(failed_usage) AS failed
+        FROM {self.AUTOMATION_TABLE}
+        WHERE ja_account = :ref AND {cur_pred}
+        GROUP BY automation_template_name
+        ORDER BY total DESC
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+        templates = {}
+        for r in rows:
+            name = r[idx["automation_template_name"]]
+            if not name:
+                continue
+            templates[str(name)] = {
+                "total": int(self._num(r[idx["total"]]) or 0),
+                "successful": int(self._num(r[idx["successful"]]) or 0),
+                "failed": int(self._num(r[idx["failed"]]) or 0),
+            }
+        if not templates:
+            return {}
+        return {"templates": templates, "_source": "redshift-live"}
+
+
 # Singletons the router uses.
-ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (
-    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements(), AccountMetrics())
+ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS, ACCOUNT_PERF = (
+    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements(),
+    AccountMetrics(), AccountPerformance())

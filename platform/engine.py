@@ -322,6 +322,14 @@ def warm_reports():
         warm_batch_churn()
     except Exception:  # noqa: BLE001
         pass
+    # Prime the portfolio cache SYNCHRONOUSLY (the ~80s whole-book health build) on this
+    # boot thread, so the first /api/portfolio request after deploy is a warm, instant hit
+    # instead of an 85s cold build on the request path (which the edge times out → the
+    # dashboard was stuck on 'Checking sources').
+    try:
+        warm_portfolio()
+    except Exception:  # noqa: BLE001
+        pass
     for name, build in [("onboarding_governance", _onboarding_governance_build),
                         ("payment_risk_report", _payment_risk_report_build)]:
         try:
@@ -1696,9 +1704,91 @@ def roi_ai_for(account_id: str) -> dict:
     return best or {}
 
 
+_PORTFOLIO_CACHE: dict = {}
+_PORTFOLIO_REFRESHING: set = set()
+
+
 def portfolio() -> dict:
+    """Non-blocking single-pane-of-glass payload.
+
+    The full whole-book build (_portfolio_build) scores health across ~4,300 accounts and
+    can take 60-90s on a COLD container — far longer than the Cloudflare/ALB edge timeout,
+    which left the dashboard stuck on 'Checking sources' for the first user after a deploy.
+    So portfolio() is served from a per-scope cache with background refresh and a cold
+    placeholder, exactly like _cached_report:
+      - FRESH: return instantly.
+      - STALE: return stale instantly + refresh in the background.
+      - COLD: return a tiny {warming:true} payload instantly + build in the background; the
+        UI shows a warming state and re-polls. No request ever blocks on the 80s build.
+    The boot warm (warm_reports) primes this cache so the first real user usually gets a
+    warm hit. CS_REPORT_CACHE_TTL<=0 (tests) bypasses the cache for determinism.
+    """
+    import time as _t
+    import threading as _th
+    ttl = _report_cache_ttl()
+    if ttl <= 0:
+        return _portfolio_build()
+    key = _scope_key()
+    now = _t.time()
+    hit = _PORTFOLIO_CACHE.get(key)
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+
+    def _start_bg():
+        if key in _PORTFOLIO_REFRESHING:
+            return
+        _PORTFOLIO_REFRESHING.add(key)
+        principal = get_principal()
+        def _bg():
+            try:
+                set_principal(principal)
+                built = _portfolio_build()
+                if isinstance(built, dict):
+                    _PORTFOLIO_CACHE[key] = (_t.time(), built)
+            finally:
+                _PORTFOLIO_REFRESHING.discard(key)
+                set_principal(None)
+        _th.Thread(target=_bg, daemon=True).start()
+
+    if hit and hit[1] is not None:
+        _start_bg()
+        return hit[1]
+
+    # Cold: kick off the build and return an instant warming placeholder so the dashboard
+    # paints immediately instead of hanging ~85s (which the edge kills).
+    _start_bg()
+    return {
+        "warming": True,
+        "summary": {"accounts": 0, "warming": True,
+                    "data_mode": "live" if dataaccess.any_live() else "sample",
+                    "live_sources": dataaccess.live_sources(),
+                    "account_scope": ("all" if (not get_principal() or get_principal().get("role") == "admin") else "csm"),
+                    "judge": {"verdict": "UNKNOWN", "violations": []}},
+        "accounts": [], "tasks": [], "suppressed": [], "automations": [],
+        "health_history": [],
+    }
+
+
+def warm_portfolio() -> int:
+    """SYNCHRONOUSLY build + cache the portfolio for the admin scope on the boot warm thread,
+    so the first dashboard request after deploy is a warm hit (not an 85s cold build on the
+    request path). Returns the account count (0 on error). Never raises."""
+    import time as _t
+    try:
+        built = _portfolio_build()
+        if isinstance(built, dict):
+            _PORTFOLIO_CACHE[_scope_key()] = (_t.time(), built)
+            return len(built.get("accounts", []))
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
+
+def _portfolio_build() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
-    renewal, plus the prioritised task queue and suppressed signals across the book."""
+    renewal, plus the prioritised task queue and suppressed signals across the book.
+    HEAVY (whole-book health scoring) — never call from a request path directly; go through
+    portfolio() which serves it non-blocking."""
     accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
 
@@ -2235,6 +2325,223 @@ def account_detail(account_id: str) -> dict:
         "tasks": tasks,
         "suppressed": suppressed,
         "hubspot_writeback": _writeback_payload(live, h, tasks) if _is_live(a.get("sources", {}), "hubspot") else None,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Account Performance scorecard (CS Day-to-Day -> Accounts)
+#
+# Replicates & improves JobAdder's native 'Account' dashboard: a per-account recruiting
+# performance scorecard driven ONLY by live warehouse + connected systems. Honest about
+# gaps: any signal whose source is not connected is surfaced as not_connected / None rather
+# than fabricated. Assembles:
+#   identity           name/ARR (HubSpot preferred) + warehouse dim (status/type/plan/AI flags)
+#   performance        SUMmed metrics over the trailing window + the prior window + Vs-Prev deltas
+#   benchmark          peer cohort (same icp AND account_type): rank / percentile / peer_avg per metric
+#   feature_usage      best-effort automation usage (AI Generated Ads, Smart Sync, ...)
+#   tickets            Zendesk support signal when connected for the account, else not_connected
+#   signals            new signals: Adder Intelligence Match, AI Float, Enhanced Profile (not_connected),
+#                      event availability for corporates (not_connected)
+# Owner-scoped: raises ForbiddenError when the principal may not view the account.
+# --------------------------------------------------------------------------- #
+
+# New signals whose upstream source is not yet wired. Surfaced honestly rather than faked.
+_ACCT_PERF_UNCONNECTED_NOTE = "Source not found in the warehouse / connected systems."
+
+
+def _acct_perf_deltas(metrics: dict, previous: dict) -> dict:
+    """Per-metric Vs.-Prev delta: {value, previous, delta, pct_change} (pct None when the
+    prior value is absent or zero, to avoid a fabricated/undefined percentage)."""
+    out = {}
+    keys = set(metrics or {}) | set(previous or {})
+    keys.discard("_days_to_close_sum")
+    for k in keys:
+        cur = (metrics or {}).get(k)
+        prv = (previous or {}).get(k)
+        delta = None
+        pct = None
+        if isinstance(cur, (int, float)) and isinstance(prv, (int, float)):
+            delta = round(cur - prv, 2)
+            if prv:
+                try:
+                    pct = round(100.0 * (cur - prv) / abs(prv), 1)
+                except ZeroDivisionError:
+                    pct = None
+        out[k] = {"value": cur, "previous": prv, "delta": delta, "pct_change": pct}
+    return out
+
+
+def account_performance(account_id: str) -> dict:
+    """Assemble the per-account performance scorecard. Owner-scoped (ForbiddenError when the
+    principal may not view the account); KeyError when the account id resolves to nothing in
+    any live system. Never fabricates — missing signals are not_connected / None / {}."""
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
+
+    ref = account_id
+
+    # --- warehouse dimension (status / type / plan / AI flags) ---------------
+    dim = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            dim = _src.ACCOUNT_PERF.dimension(ref) or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        dim = {}
+
+    # --- HubSpot identity (preferred name/ARR), best-effort --------------------
+    hubspot = {}
+    try:
+        if _ADAPTERS and _src.HUBSPOT.live():
+            hubspot = _src.HUBSPOT.account(ref) or {}
+    except Exception:  # noqa: BLE001
+        hubspot = {}
+
+    # Honest 404: the account must resolve in at least ONE live system (warehouse dim or
+    # HubSpot). An id that matches nothing anywhere is genuinely unknown.
+    if not dim and not hubspot:
+        # When no source is live at all we cannot assert the account is unknown — surface an
+        # honest 'not_connected' scorecard rather than a misleading 404.
+        any_live = False
+        try:
+            any_live = bool(_src.ACCOUNT_PERF.live() or (_ADAPTERS and _src.HUBSPOT.live()))
+        except Exception:  # noqa: BLE001
+            any_live = False
+        if any_live:
+            raise KeyError(account_id)
+
+    # --- performance + previous window + deltas -------------------------------
+    perf = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            perf = _src.ACCOUNT_PERF.performance(ref) or {}
+    except Exception:  # noqa: BLE001
+        perf = {}
+    metrics = perf.get("metrics", {}) or {}
+    previous = perf.get("previous", {}) or {}
+    # Drop the internal derivation helper before it reaches the API surface.
+    metrics.pop("_days_to_close_sum", None)
+    previous.pop("_days_to_close_sum", None)
+    deltas = _acct_perf_deltas(metrics, previous) if (metrics or previous) else {}
+
+    # --- peer benchmark -------------------------------------------------------
+    benchmark = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            benchmark = _src.ACCOUNT_PERF.benchmark(ref) or {}
+    except Exception:  # noqa: BLE001
+        benchmark = {}
+
+    # --- feature / automation usage ------------------------------------------
+    feature_usage = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            feature_usage = _src.ACCOUNT_PERF.feature_usage(ref) or {}
+    except Exception:  # noqa: BLE001
+        feature_usage = {}
+
+    # --- Zendesk tickets (reuse the existing support signal) ------------------
+    tickets = {"status": "not_connected", "note": "Zendesk is not connected for this account."}
+    try:
+        if _ADAPTERS and _src.ZENDESK.live():
+            t = _src.ZENDESK.tickets(ref) or {}
+            if t:
+                tickets = t
+    except Exception:  # noqa: BLE001 - a missing Zendesk org is a data gap, not a crash
+        tickets = {"status": "not_connected",
+                   "note": "Zendesk connected but no organisation matched this account."}
+
+    # --- identity header ------------------------------------------------------
+    name = (hubspot.get("name") or dim.get("account_name") or account_id)
+    arr_usd = hubspot.get("arr_usd")
+    identity_block = {
+        "account_id": account_id,
+        "name": name,
+        "arr_usd": arr_usd,                              # None when HubSpot not connected
+        "account_status": dim.get("account_status"),
+        "account_type": dim.get("account_type"),
+        "account_kind": dim.get("account_kind"),
+        "plan": dim.get("tier_name"),
+        "tier": dim.get("tier_name"),
+        "country": dim.get("country") or hubspot.get("country"),
+        "stripe_customer_id": dim.get("stripe_customer_id"),
+        "global_customer_id": dim.get("global_customer_id"),
+        "hubspot_connected": bool(hubspot),
+        "warehouse_connected": bool(dim),
+    }
+
+    # --- new signals ----------------------------------------------------------
+    # Adder Intelligence Match + AI Float come from the warehouse dim booleans; when the dim
+    # is not connected they are honestly not_connected (not assumed off).
+    def _bool_signal(key: str, label: str):
+        if not dim:
+            return {"label": label, "status": "not_connected",
+                    "note": "Warehouse account dimension not connected."}
+        val = dim.get(key)
+        if val is None:
+            return {"label": label, "enabled": None, "status": "unknown"}
+        return {"label": label, "enabled": bool(val),
+                "status": ("enabled" if val else "disabled")}
+
+    signals = {
+        "adder_intelligence_match": _bool_signal("is_ai_matching_enabled", "Adder Intelligence Match"),
+        "ai_float": _bool_signal("is_floats_enabled", "AI Float"),
+        # Enhanced Profile and corporate event availability have no identified upstream source
+        # yet — surfaced honestly as not_connected rather than fabricated.
+        "enhanced_profile": {"label": "Enhanced Profile", "status": "not_connected",
+                             "note": _ACCT_PERF_UNCONNECTED_NOTE},
+        "event_availability": {"label": "Event Availability (Corporates)", "status": "not_connected",
+                               "note": _ACCT_PERF_UNCONNECTED_NOTE},
+    }
+
+    return {
+        "account_id": account_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "identity": identity_block,
+        "performance": {
+            "metrics": metrics,
+            "previous": previous,
+            "deltas": deltas,
+            "window": perf.get("window", {}),
+            "source_efficiency_derived": True,     # label: Source Efficiency is a DERIVED metric
+            "connected": bool(perf),
+        },
+        "benchmark": benchmark,                      # {} when no comparable cohort / not live
+        "feature_usage": feature_usage,              # {} when none / not connected
+        "tickets": tickets,                          # Zendesk signal or {status:not_connected}
+        "signals": signals,
+        "dimension": dim,                            # raw dim fields (connected => has _source)
+        "connected": {
+            "warehouse_performance": bool(perf),
+            "warehouse_dimension": bool(dim),
+            "benchmark": bool(benchmark),
+            "feature_usage": bool(feature_usage),
+            "hubspot": bool(hubspot),
+            "zendesk": tickets.get("status") != "not_connected",
+        },
+    }
+
+
+def account_performance_accounts() -> dict:
+    """Cheap picker list for the Accounts page: [{account_id, name}] across the current
+    principal's whole book (owner-scoped). Reuses the lightweight whole-book roster so it
+    does NOT fan out per account. Returns {accounts:[...], count, scope}."""
+    try:
+        roster = full_roster()  # owner-scoped inside
+    except Exception:  # noqa: BLE001
+        roster = {"companies": [], "summary": {"account_scope": "csm"}}
+    seen = set()
+    accounts = []
+    for r in roster.get("companies", []):
+        aid = r.get("account_id")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        accounts.append({"account_id": aid, "name": r.get("name") or aid})
+    accounts.sort(key=lambda a: (a.get("name") or "").lower())
+    return {
+        "accounts": accounts,
+        "count": len(accounts),
+        "scope": roster.get("summary", {}).get("account_scope", "csm"),
     }
 
 

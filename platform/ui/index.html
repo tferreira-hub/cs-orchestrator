@@ -973,6 +973,71 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .ad-fb button{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:.95em;cursor:pointer;color:var(--ink2)}
 .ad-fb button:hover{border-color:var(--brand);color:var(--brand)}
 .ad-fb.done{color:var(--green);border-top:1px dashed var(--line);padding-top:9px;font-weight:500}
+/* ── Accounts: per-account performance scorecard ────────────────────────────── */
+.acct-pick{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.acct-search{position:relative;flex:1;min-width:260px;max-width:460px}
+.acct-search input{width:100%;padding:9px 14px;border:1px solid var(--line);border-radius:10px;font-size:.92em;color:var(--ink);background:var(--surface)}
+.acct-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
+.acct-results{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadowmd);max-height:320px;overflow:auto;z-index:20}
+.acct-results button{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:9px 14px;font-size:.9em;color:var(--ink);cursor:pointer}
+.acct-results button:last-child{border-bottom:0}
+.acct-results button:hover{background:var(--brandsoft)}
+.acct-results .acct-rid{color:var(--muted);font-size:.86em;font-variant-numeric:tabular-nums}
+.acct-id-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.acct-id-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.acct-id-name{font-size:1.5em;font-weight:800;color:var(--ink);line-height:1.15}
+.acct-id-sub{color:var(--ink2);font-size:.9em;margin-top:3px}
+.acct-window{display:inline-flex;align-items:center;gap:7px;background:var(--brandsoft);color:var(--brand);border-radius:999px;padding:5px 13px;font-size:.82em;font-weight:600}
+.acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.acct-card{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--surface);box-shadow:var(--shadow)}
+.acct-card .lbl{font-size:.78em;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--ink2)}
+.acct-card .val{font-size:1.7em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:4px;line-height:1}
+.acct-card .val.na{font-size:1em;font-weight:600;color:var(--muted)}
+.acct-card .derived{font-size:.68em;font-weight:700;color:var(--brand);background:var(--brandsoft);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:middle;letter-spacing:.03em}
+.acct-delta{display:inline-flex;align-items:center;gap:4px;font-size:.82em;font-weight:700;margin-top:9px;font-variant-numeric:tabular-nums}
+.acct-delta.up{color:var(--green)}.acct-delta.down{color:var(--red)}.acct-delta.flat{color:var(--muted)}
+.acct-delta.inv-up{color:var(--red)}.acct-delta.inv-down{color:var(--green)}
+.acct-bench{margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;font-size:.8em}
+.acct-bench .rk{font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.acct-bench .pct{color:var(--ink2)}
+.acct-bench .peeravg{color:var(--muted);font-size:.92em}
+.acct-bench.na{color:var(--muted);justify-content:flex-start}
+.acct-pctbar{height:5px;border-radius:3px;background:var(--line);margin-top:7px;overflow:hidden}
+.acct-pctbar > i{display:block;height:100%;background:var(--brand);border-radius:3px}
+.acct-sig{display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:var(--surface)}
+.acct-sig .lbl{font-size:.8em;font-weight:700;color:var(--ink2)}
+.acct-sig .st{font-size:1.02em;font-weight:800;display:inline-flex;align-items:center;gap:7px}
+.acct-sig .st.on{color:var(--green)}.acct-sig .st.off{color:var(--ink2)}.acct-sig .st.nc{color:var(--muted)}
+.acct-sig .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.acct-sig .dot.on{background:var(--green)}.acct-sig .dot.off{background:var(--muted)}.acct-sig .dot.nc{background:var(--line);border:1px solid var(--muted)}
+.acct-sig .note{font-size:.8em;color:var(--muted)}
+.acct-tick{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.acct-tick .t{text-align:center;border:1px solid var(--line);border-radius:10px;padding:12px}
+.acct-tick .t .v{font-size:1.4em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.acct-tick .t .l{font-size:.76em;text-transform:uppercase;letter-spacing:.03em;color:var(--ink2);margin-top:3px}
+.acct-peeravg{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.acct-peeravg .pa{border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+.acct-peeravg .pa .l{font-size:.76em;color:var(--ink2);text-transform:uppercase;letter-spacing:.02em}
+.acct-peeravg .pa .v{font-size:1.15em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:3px}
+.acct-sched{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.acct-sched input{padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:.9em;min-width:230px}
+.acct-sched input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brandsoft)}
+.acct-btn{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 15px;font-size:.88em;font-weight:600;color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.acct-btn:hover{border-color:var(--brand);color:var(--brand)}
+.acct-btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+.acct-btn.pri:hover{opacity:.92;color:#fff}
+.acct-sched-note{font-size:.82em;color:var(--muted);margin-top:8px}
+.acct-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.acct-nc-chip{display:inline-flex;align-items:center;gap:6px;font-size:.8em;background:#fff;border:1px dashed var(--muted);border-radius:999px;padding:4px 12px;color:var(--muted)}
+@media print{
+  body *{visibility:hidden!important}
+  #acct-scorecard, #acct-scorecard *{visibility:visible!important}
+  #acct-scorecard{position:absolute;left:0;top:0;width:100%;padding:0;margin:0}
+  .sidebar,.topbar,.acct-pick,.acct-toolbar,.acct-sched-wrap,#globalFilterMount,.agent-dock,.acct-no-print{display:none!important}
+  .acct-card,.acct-sig,.acct-tick .t,.acct-peeravg .pa,.panel{box-shadow:none!important;break-inside:avoid}
+  .acct-grid{grid-template-columns:repeat(4,1fr)}
+  @page{margin:14mm}
+}
 </style>
 </head>
 <body>
@@ -995,6 +1060,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
         <button data-v="mydash" onclick="go('mydash')" title="Dashboard"><span class="ico">◱</span> <span class="label">Dashboard</span></button>
         <button class="active" data-v="dash" onclick="go('dash')" title="Command Center"><span class="ico">▚</span> <span class="label">Command Center</span></button>
         <button data-v="rhythm" onclick="go('rhythm')" title="Operating Rhythm"><span class="ico">◴</span> <span class="label">Operating Rhythm</span></button>
+        <button data-v="acctperf" onclick="go('acctperf')" title="Accounts"><span class="ico">◫</span> <span class="label">Accounts</span></button>
       </div>
     </div>
 
@@ -1135,6 +1201,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
       <section class="view" id="v-f2f"><div id="f2f-body"></div></section>
       <section class="view" id="v-calendar"><div id="calendar-body"></div></section>
       <section class="view" id="v-rhythm"><div id="rhythm-body"></div></section>
+      <section class="view" id="v-acctperf"><div id="acctperf-body"></div></section>
       <section class="view" id="v-notifications"><div id="notifications-body"></div></section>
       <section class="view" id="v-datamodel"><div id="datamodel-body"></div></section>
       <section class="view" id="v-dataexplorer"><div id="dataexplorer-body"></div></section>
@@ -1223,6 +1290,7 @@ const meta={
   scaled:['Scaled Customer Success','Pooled and low-touch customers'],
   mydash:['Dashboard','Your personal CS dashboard'],
   rhythm:['Operating Rhythm','Your week, time-blocked by Ways of Working'],
+  acctperf:['Accounts','Per-account performance scorecard & benchmarking'],
   leading:['Leading Indicators','Forward-looking portfolio signals'],
   lagging:['Lagging Indicators','Realised retention and revenue outcomes'],
   reviews:['Portfolio Reviews','Structured account review cadence'],
@@ -2225,6 +2293,420 @@ function _renderRhythm(d){
       (taskRows(bl.tasks)||'<tr><td colspan="4" class="empty" style="padding:18px">Nothing in this block right now.</td></tr>')+'</tbody></table></div></div>';
   };
   i.parentElement.innerHTML=strip+block('monday_review')+block('daily_p1_risk')+block('weekly_renewals_expansion')+block('weekly_adoption_qbr');
+}
+
+// ===== Accounts: per-account performance scorecard & benchmarking =====
+// Mirrors Dan's JobAdder Account dashboard. Binds strictly to the live
+// /api/account-performance payload; shows an honest 'not connected' / '-' wherever a
+// signal or benchmark is genuinely absent. Never fabricates a value.
+let _acctList=null;        // cached picker roster [{account_id,name}]
+let _acctData=null;        // last loaded scorecard payload (for CSV export)
+let _acctSchedPosted=false;
+
+// Ordered metric spec driving the Performance grid, benchmark rows and CSV.
+const ACCT_METRICS=[
+  {key:'jobs_created',    label:'Jobs Created'},
+  {key:'ads_posted',      label:'Ads Posted'},
+  {key:'board_usage',     label:'Board Usage'},
+  {key:'applications',    label:'Applications'},
+  {key:'placements',      label:'Placements'},
+  {key:'source_efficiency',label:'Source Efficiency', derived:true, float:true},
+  {key:'days_to_place',   label:'Days to Place',       float:true}
+];
+// Usage-grid rows: match a human label to the automation template substrings the
+// warehouse groups usage under. Shows 0 (never blank) when the account is connected
+// but has no usage; shows 'not connected' only when feature_usage is absent entirely.
+const ACCT_USAGE=[
+  {label:'AI Float',          match:['float']},
+  {label:'AI Generated Ads',  match:['ad','advert','job ad']},
+  {label:'Smart Summary',     match:['summary','smart summary']},
+  {label:'Smart Sync',        match:['sync','smart sync']},
+  {label:'Lead Feed Clicks',  match:['lead','feed']}
+];
+
+function _acctFmt(v,isFloat){
+  if(v===null||v===undefined) return null;
+  if(typeof v!=='number') return String(v);
+  if(isFloat) return v.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1});
+  return v.toLocaleString();
+}
+function _acctMonthLabel(iso){
+  if(!iso) return '';
+  const d=new Date(iso+(iso.length<=10?'T00:00:00':''));
+  if(isNaN(d)) return String(iso);
+  return d.toLocaleDateString(undefined,{month:'long',year:'numeric'});
+}
+
+function renderAccounts(){
+  const host=document.getElementById('acctperf-body'); if(!host) return;
+  host.innerHTML=
+    '<div class="panel"><div class="head"><h2>Account scorecard</h2>'+
+      '<span class="note">Search an account to load its live performance scorecard</span></div>'+
+      '<div class="body pad">'+
+        '<div class="acct-pick">'+
+          '<div class="acct-search">'+
+            '<input id="acct-q" type="text" autocomplete="off" placeholder="Search by account name or Master ID..." '+
+              'oninput="_acctFilter(this.value)" onfocus="_acctFilter(this.value)">'+
+            '<div id="acct-res" class="acct-results" style="display:none"></div>'+
+          '</div>'+
+        '</div>'+
+        '<div id="acct-pick-note" class="muted" style="margin-top:10px;font-size:.86em">Loading account roster...</div>'+
+      '</div>'+
+    '</div>'+
+    '<div id="acct-scorecard"></div>';
+  // Load the owner-scoped picker roster once.
+  if(_acctList){ _acctPickReady(); return; }
+  api('/api/account-performance/accounts').then(r=>r.json()).then(d=>{
+    _acctList=(d&&d.accounts)||[];
+    const note=document.getElementById('acct-pick-note');
+    if(note) note.textContent=_acctList.length
+      ? ('Roster: '+_acctList.length.toLocaleString()+' accounts in scope ('+escapeHtml(d.scope||'all')+')')
+      : 'No accounts in scope. This view shows only live data from connected systems.';
+  }).catch(()=>{
+    const note=document.getElementById('acct-pick-note');
+    if(note) note.textContent='Account roster not available (live sources not connected).';
+    _acctList=[];
+  });
+}
+
+function _acctPickReady(){
+  const note=document.getElementById('acct-pick-note');
+  if(note&&_acctList) note.textContent='Roster: '+_acctList.length.toLocaleString()+' accounts in scope';
+}
+
+function _acctFilter(q){
+  const box=document.getElementById('acct-res'); if(!box) return;
+  if(!_acctList||!_acctList.length){ box.style.display='none'; return; }
+  q=(q||'').trim().toLowerCase();
+  if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  const hits=_acctList.filter(a=>
+    String(a.name||'').toLowerCase().includes(q) ||
+    String(a.account_id||'').toLowerCase().includes(q)
+  ).slice(0,40);
+  if(!hits.length){ box.style.display='block'; box.innerHTML='<button disabled style="color:var(--muted);cursor:default">No matches</button>'; return; }
+  box.innerHTML=hits.map(a=>
+    '<button onclick="_acctSelect(\''+escapeHtml(String(a.account_id)).replace(/'/g,"\\'")+'\')">'+
+      '<strong>'+escapeHtml(a.name||'(unnamed)')+'</strong> '+
+      '<span class="acct-rid">'+escapeHtml(String(a.account_id))+'</span>'+
+    '</button>'
+  ).join('');
+  box.style.display='block';
+}
+
+function _acctSelect(id){
+  const box=document.getElementById('acct-res'); if(box) box.style.display='none';
+  const q=document.getElementById('acct-q');
+  const card=document.getElementById('acct-scorecard');
+  if(card) card.innerHTML='<div class="panel"><div class="body pad" style="text-align:center;padding:36px">'+
+    '<div class="warming-spin" style="margin:0 auto 14px"></div><div class="muted">Loading live scorecard for '+escapeHtml(id)+'...</div></div></div>';
+  api('/api/account-performance?account_id='+encodeURIComponent(id)).then(r=>{
+    if(r.status===403) throw {code:403};
+    if(r.status===404) throw {code:404};
+    if(!r.ok) throw {code:r.status};
+    return r.json();
+  }).then(d=>{
+    _acctData=d;
+    if(q){ const nm=(d.identity&&d.identity.name)||id; q.value=nm; }
+    _acctRenderScorecard(d);
+  }).catch(err=>{
+    if(card){
+      const msg = err&&err.code===403 ? 'You do not have access to this account.'
+        : err&&err.code===404 ? 'Account not found in the live warehouse.'
+        : 'Could not load this account (live sources not connected).';
+      card.innerHTML='<div class="panel"><div class="body pad"><div class="empty">'+escapeHtml(msg)+'</div></div></div>';
+    }
+  });
+}
+
+function _acctDeltaHtml(delta,lowerIsBetter){
+  if(!delta||delta.value===null||delta.value===undefined||delta.previous===null||delta.previous===undefined)
+    return '<div class="acct-delta flat">Vs. Prev —</div>';
+  const dv=delta.delta;
+  const pct=(delta.pct_change===null||delta.pct_change===undefined)?null:delta.pct_change;
+  let dir='flat', arrow='→';
+  if(dv>0){ dir='up'; arrow='↑'; }
+  else if(dv<0){ dir='down'; arrow='↓'; }
+  // For lower-is-better metrics, invert the colour semantics (a drop is good).
+  let cls=dir;
+  if(lowerIsBetter&&dir==='up') cls='inv-up';
+  else if(lowerIsBetter&&dir==='down') cls='inv-down';
+  const pctTxt=(pct===null)?'' : ' ('+(pct>0?'+':'')+pct.toFixed(1)+'%)';
+  return '<div class="acct-delta '+cls+'">'+arrow+' Vs. Prev '+(dv>0?'+':'')+_acctFmt(dv,delta._float)+pctTxt+'</div>';
+}
+
+function _acctBenchHtml(b){
+  if(!b) return '<div class="acct-bench na">Benchmark —</div>';
+  const peerAvg=(b.peer_avg===null||b.peer_avg===undefined)?'—':b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1});
+  const pct=(b.percentile===null||b.percentile===undefined)?null:b.percentile;
+  const bar=pct===null?'' : '<div class="acct-pctbar"><i style="width:'+Math.max(2,Math.min(100,pct))+'%"></i></div>';
+  return '<div class="acct-bench">'+
+      '<span class="rk">Rank '+b.rank+' / '+b.peers+'</span>'+
+      (pct===null?'' : '<span class="pct">'+pct+'th pct</span>')+
+    '</div>'+
+    '<div class="acct-bench peeravg" style="border:0;padding:0;margin-top:4px">Peer avg '+peerAvg+'</div>'+
+    bar;
+}
+
+function _acctRenderScorecard(d){
+  const card=document.getElementById('acct-scorecard'); if(!card) return;
+  const id=d.identity||{};
+  const perf=d.performance||{};
+  const metrics=perf.metrics||{};
+  const deltas=perf.deltas||{};
+  const bench=d.benchmark||{};
+  const win=perf.window||{};
+  const conn=d.connected||{};
+  const peers=(bench.cohort&&bench.cohort.peers)||0;
+
+  // ── Identity header ────────────────────────────────────────────────────────
+  const arr=(id.arr_usd===null||id.arr_usd===undefined)?null:id.arr_usd;
+  const arrTxt=arr===null?'not connected':'$'+Number(arr).toLocaleString();
+  const windowTxt=win.end?('Trailing '+(win.months||12)+' months to '+_acctMonthLabel(win.end)):'Reporting window not available';
+  const metaChip=(label,val)=>'<span class="mp-chip">'+label+': <strong>'+escapeHtml(val)+'</strong></span>';
+  const header=
+    '<div class="panel"><div class="body pad">'+
+      '<div class="acct-id-head">'+
+        '<div>'+
+          '<div class="acct-id-name">'+escapeHtml(id.name||d.account_id||'Unknown account')+'</div>'+
+          '<div class="acct-id-sub">Master ID '+escapeHtml(String(id.account_id||d.account_id||'—'))+'</div>'+
+          '<div class="acct-id-meta">'+
+            metaChip('Status', id.account_status||'—')+
+            metaChip('Type', id.account_type||'—')+
+            metaChip('Plan', id.plan||id.tier||'—')+
+            metaChip('ARR', arrTxt)+
+            metaChip('Country', id.country||'—')+
+            metaChip('Peer group', peers?('Agency · '+peers+' peers'):'not connected')+
+          '</div>'+
+        '</div>'+
+        '<div style="text-align:right">'+
+          '<span class="acct-window">◴ '+escapeHtml(windowTxt)+'</span>'+
+          '<div class="muted" style="font-size:.76em;margin-top:8px">Generated '+escapeHtml((d.generated_at||'').slice(0,16).replace('T',' '))+'</div>'+
+        '</div>'+
+      '</div>'+
+    '</div></div>';
+
+  // ── Toolbar (export + print), excluded from print output ───────────────────
+  const toolbar=
+    '<div class="acct-toolbar acct-no-print" style="margin:0 0 4px">'+
+      '<button class="acct-btn pri" onclick="_acctPrint()">⎙ Download PDF</button>'+
+      '<button class="acct-btn" onclick="_acctExportCsv()">⤓ Export CSV (Sheets)</button>'+
+    '</div>';
+
+  // ── Performance Data grid ──────────────────────────────────────────────────
+  const perfCards=ACCT_METRICS.map(m=>{
+    const raw=metrics[m.key];
+    const val=_acctFmt(raw,m.float);
+    const dl=deltas[m.key]?Object.assign({},deltas[m.key],{_float:m.float}):null;
+    const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
+    const b=bench[m.key];
+    return '<div class="acct-card">'+
+      '<div class="lbl">'+escapeHtml(m.label)+(m.derived?'<span class="derived">DERIVED</span>':'')+'</div>'+
+      (val===null?'<div class="val na">not connected</div>':'<div class="val">'+val+'</div>')+
+      _acctDeltaHtml(dl,lowerBetter)+
+      _acctBenchHtml(b)+
+    '</div>';
+  }).join('');
+  const perfPanel=
+    '<div class="panel"><div class="head"><h2>Performance Data</h2>'+
+      '<span class="note">'+(perf.connected?'Live from the warehouse':'warehouse not connected')+
+      ' · Source Efficiency and Days to Place are lower-is-better</span></div>'+
+      '<div class="body pad"><div class="acct-grid">'+perfCards+'</div></div></div>';
+
+  // ── Usage Data grid ────────────────────────────────────────────────────────
+  const fu=d.feature_usage||{};
+  const templates=fu.templates||null;
+  let usageInner;
+  if(!templates){
+    usageInner='<div class="acct-nc-chip">● feature usage not connected</div>';
+  }else{
+    const names=Object.keys(templates);
+    usageInner='<div class="acct-grid">'+ACCT_USAGE.map(u=>{
+      // Sum totals across any template whose name matches one of the row's keywords.
+      let total=0, matched=false;
+      names.forEach(n=>{
+        const low=n.toLowerCase();
+        if(u.match.some(k=>low.includes(k))){ total+=(templates[n].total||0); matched=true; }
+      });
+      // Connected but no matching usage => honest 0 (never fabricated).
+      return '<div class="acct-card"><div class="lbl">'+escapeHtml(u.label)+'</div>'+
+        '<div class="val">'+total.toLocaleString()+'</div>'+
+        '<div class="muted" style="font-size:.76em;margin-top:7px">'+(matched?'from automation usage':'no usage in window')+'</div></div>';
+    }).join('')+'</div>';
+  }
+  const usagePanel=
+    '<div class="panel"><div class="head"><h2>Usage Data</h2>'+
+      '<span class="note">Automation &amp; AI feature usage over the window</span></div>'+
+      '<div class="body pad">'+usageInner+'</div></div>';
+
+  // ── New signals row ────────────────────────────────────────────────────────
+  const sig=d.signals||{};
+  const sigCard=(s)=>{
+    if(!s) return '';
+    const label=s.label||'';
+    if(s.status==='not_connected'||s.enabled===null||s.enabled===undefined){
+      const note=s.note||'not connected';
+      return '<div class="acct-sig"><span class="lbl">'+escapeHtml(label)+'</span>'+
+        '<span class="st nc"><span class="dot nc"></span>Not connected</span>'+
+        '<span class="note">'+escapeHtml(note)+'</span></div>';
+    }
+    const on=!!s.enabled;
+    return '<div class="acct-sig"><span class="lbl">'+escapeHtml(label)+'</span>'+
+      '<span class="st '+(on?'on':'off')+'"><span class="dot '+(on?'on':'off')+'"></span>'+(on?'Enabled':'Disabled')+'</span></div>';
+  };
+  const signalsPanel=
+    '<div class="panel"><div class="head"><h2>Intelligence &amp; Product Signals</h2>'+
+      '<span class="note">Adder Intelligence Match, AI Float, Enhanced Profile &amp; event availability</span></div>'+
+      '<div class="body pad"><div class="acct-grid">'+
+        sigCard(sig.adder_intelligence_match)+
+        sigCard(sig.ai_float)+
+        sigCard(sig.enhanced_profile)+
+        sigCard(sig.event_availability)+
+      '</div></div></div>';
+
+  // ── Peer averages panel ────────────────────────────────────────────────────
+  let peerInner;
+  if(!peers){
+    peerInner='<div class="acct-nc-chip">● no comparable peer cohort</div>';
+  }else{
+    peerInner='<div class="acct-peeravg">'+ACCT_METRICS.map(m=>{
+      const b=bench[m.key];
+      const pa=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1}):'—';
+      return '<div class="pa"><div class="l">'+escapeHtml(m.label)+'</div><div class="v">'+pa+'</div></div>';
+    }).join('')+'</div>';
+  }
+  const peerPanel=
+    '<div class="panel"><div class="head"><h2>Peer Benchmarking</h2>'+
+      '<span class="note">'+(peers?('Benchmarking against '+peers+' peers'):'benchmark not available')+'</span></div>'+
+      '<div class="body pad">'+peerInner+'</div></div>';
+
+  // ── Tickets ────────────────────────────────────────────────────────────────
+  const t=d.tickets||{};
+  let ticketInner;
+  if(t.status==='not_connected'||!t||Object.keys(t).length===0){
+    ticketInner='<div class="acct-nc-chip">● '+escapeHtml((t&&t.note)||'tickets not connected (Zendesk)')+'</div>';
+  }else{
+    const pick=(keys)=>{ for(const k of keys){ if(t[k]!==undefined&&t[k]!==null) return t[k]; } return null; };
+    const tot=pick(['total','total_tickets','tickets_total','count']);
+    const solved=pick(['solved','solved_tickets','resolved','closed']);
+    const open=pick(['open','open_tickets','unsolved']);
+    const resDays=pick(['resolution_days','res_days','avg_resolution_days','mean_resolution_days']);
+    const cell=(v,l)=>'<div class="t"><div class="v">'+(v===null?'—':(typeof v==='number'?v.toLocaleString(undefined,{maximumFractionDigits:1}):escapeHtml(String(v))))+'</div><div class="l">'+l+'</div></div>';
+    ticketInner='<div class="acct-tick">'+cell(tot,'Total')+cell(solved,'Solved')+cell(open,'Open')+cell(resDays,'Res Days')+'</div>';
+  }
+  const ticketPanel=
+    '<div class="panel"><div class="head"><h2>Support Tickets</h2>'+
+      '<span class="note">From Zendesk over the window</span></div>'+
+      '<div class="body pad">'+ticketInner+'</div></div>';
+
+  // ── Schedule quarterly (unobtrusive) ───────────────────────────────────────
+  const schedPanel=
+    '<div class="panel acct-sched-wrap acct-no-print"><div class="head"><h2>Schedule quarterly report</h2>'+
+      '<span class="note">Email this scorecard every quarter</span></div>'+
+      '<div class="body pad">'+
+        '<div class="acct-sched">'+
+          '<input id="acct-sched-email" type="email" placeholder="recipient@company.com">'+
+          '<button class="acct-btn" onclick="_acctSchedule()">Save schedule</button>'+
+        '</div>'+
+        '<div id="acct-sched-note" class="acct-sched-note"></div>'+
+      '</div></div>';
+
+  card.innerHTML=
+    '<div id="acct-scorecard-print">'+header+toolbar+perfPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
+}
+
+// Print just the scorecard via the @media print stylesheet.
+function _acctPrint(){ window.print(); }
+
+// Build an import-ready CSV of the metric rows client-side and download it (Blob).
+function _acctExportCsv(){
+  const d=_acctData; if(!d){ return; }
+  const id=d.identity||{};
+  const perf=d.performance||{};
+  const metrics=perf.metrics||{};
+  const prev=perf.previous||{};
+  const deltas=perf.deltas||{};
+  const bench=d.benchmark||{};
+  const win=perf.window||{};
+  const esc=(v)=>{
+    if(v===null||v===undefined) return '';
+    const s=String(v);
+    return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s;
+  };
+  const rows=[];
+  rows.push(['CS Orchestrator — Account Performance Scorecard']);
+  rows.push(['Account', id.name||d.account_id]);
+  rows.push(['Master ID', id.account_id||d.account_id]);
+  rows.push(['Window', win.end?('Trailing '+(win.months||12)+' months to '+win.end):'']);
+  rows.push(['Generated', d.generated_at||'']);
+  rows.push([]);
+  rows.push(['Metric','Value','Previous','Delta','Pct Change','Rank','Peers','Percentile','Peer Avg','Derived']);
+  ACCT_METRICS.forEach(m=>{
+    const dl=deltas[m.key]||{};
+    const b=bench[m.key]||null;
+    rows.push([
+      m.label,
+      metrics[m.key]!==undefined&&metrics[m.key]!==null?metrics[m.key]:'',
+      prev[m.key]!==undefined&&prev[m.key]!==null?prev[m.key]:'',
+      dl.delta!==undefined&&dl.delta!==null?dl.delta:'',
+      dl.pct_change!==undefined&&dl.pct_change!==null?dl.pct_change:'',
+      b?b.rank:'',
+      b?b.peers:'',
+      b?b.percentile:'',
+      b?b.peer_avg:'',
+      m.derived?'yes':'no'
+    ]);
+  });
+  // Signals section.
+  rows.push([]);
+  rows.push(['Signal','Status']);
+  const sig=d.signals||{};
+  Object.keys(sig).forEach(k=>{
+    const s=sig[k]||{};
+    const status=(s.status==='not_connected'||s.enabled===null||s.enabled===undefined)
+      ? 'not connected' : (s.enabled?'enabled':'disabled');
+    rows.push([s.label||k, status]);
+  });
+  const csv=rows.map(r=>r.map(esc).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const fn=('account-performance-'+(id.account_id||d.account_id||'export')).replace(/[^a-z0-9\-]/gi,'_')+'.csv';
+  a.href=url; a.download=fn; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// Quarterly schedule: POST to the backend endpoint if it exists; otherwise show an
+// honest note that scheduling is pending an email provider. Never fabricates a send.
+function _acctSchedule(){
+  const emailEl=document.getElementById('acct-sched-email');
+  const note=document.getElementById('acct-sched-note');
+  const email=(emailEl&&emailEl.value||'').trim();
+  if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    if(note){ note.style.color='var(--red)'; note.textContent='Enter a valid recipient email.'; }
+    return;
+  }
+  const aid=_acctData&&_acctData.account_id;
+  if(note){ note.style.color='var(--muted)'; note.textContent='Saving...'; }
+  api('/api/account-performance/schedule',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({account_id:aid,email:email,cadence:'quarterly'})
+  }).then(r=>{
+    if(r.status===404||r.status===405){
+      // Endpoint not implemented yet — be honest, do not pretend a send happened.
+      if(note){ note.style.color='var(--muted)';
+        note.textContent='Scheduling will be enabled once the email provider is connected. Nothing was sent.'; }
+      return null;
+    }
+    if(!r.ok) throw new Error('schedule failed');
+    return r.json().catch(()=>({}));
+  }).then(res=>{
+    if(res===null) return;
+    if(note){ note.style.color='var(--green)';
+      note.textContent='Quarterly schedule saved for '+email+'.'; }
+  }).catch(()=>{
+    if(note){ note.style.color='var(--muted)';
+      note.textContent='Scheduling will be enabled once the email provider is connected. Nothing was sent.'; }
+  });
 }
 
 // ===== Calendar: weekly task/meeting view =====
@@ -3451,6 +3933,15 @@ async function boot(){
     document.getElementById('stats').innerHTML='<div class="empty">Could not reach the API. Is the server running?</div>';
     return;
   }
+  // Cold container: the whole-book build runs in the background and the API returns a
+  // {warming:true} placeholder instantly. Show a warming badge and re-poll until the full
+  // payload is ready, rather than painting an empty dashboard.
+  if(DATA&&DATA.summary&&DATA.summary.warming){
+    const badge=document.getElementById('dataMode');
+    if(badge){badge.textContent='Warming data (first load after deploy)…';badge.className='modebadge sample';}
+    setTimeout(boot, 4000);
+    return;
+  }
   document.getElementById('asof').textContent=new Date().toLocaleDateString();
   const sm=DATA.summary;
   renderAgentRail(sm);
@@ -4217,6 +4708,7 @@ function render(v){
   if(v==='reviews') renderReviews();
   if(v==='calendar') renderCalendar();
   if(v==='rhythm') renderOperatingRhythm();
+  if(v==='acctperf') renderAccounts();
   if(v==='notifications') renderNotifications();
   if(v==='datamodel') renderDataModel();
   if(v==='dataexplorer') renderDataExplorer();
