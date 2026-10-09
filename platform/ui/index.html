@@ -2466,6 +2466,10 @@ function renderAccounts(){
     if(note) note.textContent=_acctList.length
       ? ('Roster: '+_acctList.length.toLocaleString()+' accounts in scope ('+escapeHtml(d.scope||'all')+')')
       : 'No accounts in scope. This view shows only live data from connected systems.';
+    // Open the page already populated: auto-load the first account so the user sees a full
+    // scorecard immediately rather than an empty "search an account" prompt. They can still
+    // search to switch. Only auto-load when nothing is shown yet.
+    if(_acctList.length && !_acctData){ _acctSelect(_acctList[0].account_id); }
   }).catch(err=>{
     const note=document.getElementById('acct-pick-note');
     _acctList=[];
@@ -2482,6 +2486,8 @@ function renderAccounts(){
 function _acctPickReady(){
   const note=document.getElementById('acct-pick-note');
   if(note&&_acctList) note.textContent='Roster: '+_acctList.length.toLocaleString()+' accounts in scope';
+  // Cached-roster path: still open populated if nothing is shown yet.
+  if(_acctList&&_acctList.length&&!_acctData){ _acctSelect(_acctList[0].account_id); }
 }
 
 function _acctFilter(q){
@@ -2570,7 +2576,7 @@ function _acctResetFilters(){
 
 function _acctDeltaHtml(delta,lowerIsBetter){
   if(!delta||delta.value===null||delta.value===undefined||delta.previous===null||delta.previous===undefined)
-    return '<div class="acct-delta flat"><span class="vp">Vs. Prev</span> —</div>';
+    return '<div class="acct-delta flat"><span class="vp">Vs. previous period</span> No prior data</div>';
   const dv=delta.delta;
   const pct=(delta.pct_change===null||delta.pct_change===undefined)?null:delta.pct_change;
   let dir='flat', arrow='→';
@@ -2591,7 +2597,7 @@ function _acctPctColor(p){ return p>=66?'#0ca678':(p>=33?'#d98b0b':'#e5484d'); }
 // state (dashed skeleton) when the metric is not ranked in the cohort.
 function _acctPctBlock(b){
   if(!b||b.percentile===null||b.percentile===undefined){
-    return '<div class="acct-pct"><div class="pct-na">Percentile not ranked</div><div class="acct-skel"></div></div>';
+    return '<div class="acct-pct"><div class="pct-na">Not ranked yet</div><div class="acct-skel"></div></div>';
   }
   const pct=Math.max(0,Math.min(100,b.percentile));
   const col=_acctPctColor(pct);
@@ -2604,8 +2610,8 @@ function _acctPctBlock(b){
 }
 
 function _acctBenchHtml(b){
-  if(!b) return '<div class="acct-bench na">Benchmark —</div>';
-  const peerAvg=(b.peer_avg===null||b.peer_avg===undefined)?'—':b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1});
+  if(!b) return '<div class="acct-bench na">No benchmark</div>';
+  const peerAvg=(b.peer_avg===null||b.peer_avg===undefined)?'No peer data':b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1});
   const pct=(b.percentile===null||b.percentile===undefined)?null:b.percentile;
   const bar=pct===null?'' : '<div class="acct-pctbar"><i style="width:'+Math.max(2,Math.min(100,pct))+'%"></i></div>';
   return '<div class="acct-bench">'+
@@ -2711,7 +2717,7 @@ function _acctCharts(d){
   //     per metric so each row is readable on its own scale.
   let cmpInner;
   if(!perf.connected){
-    cmpInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● warehouse not connected</span></div>';
+    cmpInner='<div class="acct-chart-empty"><span class="acct-nc-chip">Performance data not available for this account</span></div>';
   }else{
     const legend='<div class="acct-cmp-legend">'+
       '<span class="k"><i style="background:'+brand+'"></i>This account</span>'+
@@ -2726,27 +2732,36 @@ function _acctCharts(d){
         return '<div class="acct-cmprow"><div class="cl">'+escapeHtml(m.label)+
           (m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
           '<div class="cbar"><div class="acct-skel" style="height:10px"></div></div>'+
-          '<div class="cnum" style="color:'+muted+'">not connected</div></div>';
+          '<div class="cnum" style="color:'+muted+'">No data</div></div>';
       }
       const max=Math.max(you||0, peerAvg||0, 0.0001);
-      const W=460, H=38, trackX=2, trackW=W-4;
-      const youW=Math.max(2,(you/max)*trackW);
-      const peerW=peerAvg===null?null:Math.max(0,(peerAvg/max)*trackW);
-      let grid='';
-      [0.25,0.5,0.75].forEach(g=>{
-        const x=(trackX+g*trackW).toFixed(1);
-        grid+='<line x1="'+x+'" y1="2" x2="'+x+'" y2="'+(H-2)+'" stroke="'+line+'" stroke-width="1"></line>';
-      });
-      const svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' account versus peer average">'+
-        grid+
-        '<rect x="'+trackX+'" y="6" width="'+youW.toFixed(1)+'" height="11" rx="3" fill="'+brand+'"></rect>'+
-        (peerW===null?'':'<rect x="'+trackX+'" y="21" width="'+peerW.toFixed(1)+'" height="11" rx="3" fill="'+muted+'"></rect>')+
+      const W=520, rowH=20, barH=13, trackX=1, trackW=W-2;
+      const youW=Math.max(3,(you/max)*trackW);
+      const peerW=peerAvg===null?null:Math.max(3,(peerAvg/max)*trackW);
+      // Value labels sit just inside the bar end when there's room, else just outside.
+      const youLbl=escapeHtml(fmt(you,m.float));
+      const peerLbl=peerAvg===null?null:escapeHtml(fmt(peerAvg,m.float));
+      function barRow(y,w,fill,label,outside){
+        const inside=w>70;
+        const tx=inside?(w-6):(w+6);
+        const anchor=inside?'end':'start';
+        const tcol=inside?'#fff':'var(--ink2)';
+        return '<rect x="'+trackX+'" y="'+y+'" width="'+trackW+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+line+'" opacity="0.5"></rect>'+
+          '<rect x="'+trackX+'" y="'+y+'" width="'+w.toFixed(1)+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+fill+'"></rect>'+
+          '<text x="'+tx.toFixed(1)+'" y="'+(y+barH-3)+'" text-anchor="'+anchor+'" font-size="10.5" font-weight="700" fill="'+tcol+'" style="font-variant-numeric:tabular-nums">'+label+'</text>';
+      }
+      const H=peerW===null?(rowH):(rowH*2+3);
+      const svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="'+escapeHtml(m.label)+' this account versus peer average">'+
+        barRow(2,youW,brand,'you · '+youLbl)+
+        (peerW===null?'':barRow(rowH+3,peerW,muted,'peers · '+peerLbl))+
         '</svg>';
-      const peerTxt=peerAvg===null?'<span style="color:'+muted+'">peer n/a</span>':('peer <b>'+escapeHtml(fmt(peerAvg,m.float))+'</b>');
+      const sideTxt=peerAvg===null
+        ? '<span style="color:'+muted+'">No peer cohort</span>'
+        : ('<span class="p-you">You '+youLbl+'</span><br><span style="color:'+muted+'">Peers '+peerLbl+'</span>');
       return '<div class="acct-cmprow">'+
         '<div class="cl">'+escapeHtml(m.label)+(m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
         '<div class="cbar">'+svg+'</div>'+
-        '<div class="cnum"><span class="p-you">you <b>'+escapeHtml(fmt(you,m.float))+'</b></span><br>'+peerTxt+'</div>'+
+        '<div class="cnum">'+sideTxt+'</div>'+
       '</div>';
     }).join('');
     cmpInner=legend+rows;
@@ -2781,9 +2796,9 @@ function _acctRenderScorecard(d){
           '<div class="acct-id-name">'+escapeHtml(id.name||d.account_id||'Unknown account')+'</div>'+
           '<div class="acct-id-sub">Master ID '+escapeHtml(String(id.account_id||d.account_id||'—'))+'</div>'+
           '<div class="acct-id-meta">'+
-            metaChip('Status', id.account_status||'—')+
-            metaChip('Type', id.account_type||'—')+
-            metaChip('Plan', id.plan||id.tier||'—')+
+            metaChip('Status', id.account_status||'Not available')+
+            metaChip('Type', id.account_type||'Not available')+
+            metaChip('Plan', id.plan||id.tier||'Not available')+
             (function(){
               // Users: 'active (±change)' — native-dashboard parity. Honest when absent.
               var u=id.users;
@@ -2797,7 +2812,7 @@ function _acctRenderScorecard(d){
               return metaChip('Users', txt);
             })()+
             metaChip('ARR', arrTxt)+
-            metaChip('Country', id.country||'—')+
+            metaChip('Country', id.country||'Not available')+
             metaChip('Peer group', peers?('Agency · '+peers+' peers'):'not connected')+
           '</div>'+
         '</div>'+
@@ -2906,7 +2921,7 @@ function _acctRenderScorecard(d){
   }else{
     peerInner='<div class="acct-peeravg">'+ACCT_METRICS.map(m=>{
       const b=bench[m.key];
-      const pa=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1}):'—';
+      const pa=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1}):'No peer data';
       return '<div class="pa"><div class="l">'+escapeHtml(m.label)+'</div><div class="v">'+pa+'</div></div>';
     }).join('')+'</div>';
   }
@@ -3069,17 +3084,17 @@ function _acctExportSlides(){
   const chip=(l,v)=>'<span style="display:inline-block;margin:0 14px 10px 0;font:600 15px Inter,system-ui"><span style="color:#64748b">'+l+':</span> '+_esc(v)+'</span>';
   const metricCard=(m)=>{ const b=bench[m.key]||{}, v=metrics[m.key];
     return '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;min-width:150px">'+
-      '<div style="font:700 24px Inter,system-ui">'+_esc(v!=null?v.toLocaleString():'—')+'</div>'+
+      '<div style="font:700 24px Inter,system-ui">'+_esc(v!=null?v.toLocaleString():'No data')+'</div>'+
       '<div style="color:#475569;font:600 13px Inter,system-ui;margin-top:3px">'+_esc(m.label)+'</div>'+
       (b.rank?'<div style="color:#64748b;font:500 12px Inter,system-ui;margin-top:4px">Rank '+b.rank+'/'+b.peers+(b.percentile!=null?' · '+b.percentile+'th pct':'')+'</div>':'')+
       '</div>'; };
-  const usersTxt=(u.active!=null?Number(u.active).toLocaleString():'—')+(u.change!=null&&u.change!==0?(' ('+(u.change>0?'+':'')+u.change+')'):'');
+  const usersTxt=(u.active!=null?Number(u.active).toLocaleString():'Not available')+(u.change!=null&&u.change!==0?(' ('+(u.change>0?'+':'')+u.change+')'):'');
   const slide='<div style="width:1280px;height:720px;box-sizing:border-box;padding:52px 60px;font-family:Inter,system-ui;color:#0f172a">'+
     '<div style="font:800 34px Inter,system-ui;letter-spacing:-.02em">'+_esc(id.name||d.account_id||'Account')+'</div>'+
     '<div style="color:#64748b;font:500 15px Inter;margin:4px 0 20px">Account Performance Scorecard · Master ID '+_esc(id.account_id||d.account_id||'')+'</div>'+
-    '<div style="margin-bottom:18px">'+chip('Status',id.account_status||'—')+chip('Plan',id.plan||id.tier||'—')+chip('Users',usersTxt)+chip('ARR',id.arr_usd!=null?('$'+Number(id.arr_usd).toLocaleString()):'—')+chip('Peer group',(bench.cohort&&bench.cohort.peers)?((id.account_type||'')+' · '+bench.cohort.peers+' peers'):'—')+'</div>'+
+    '<div style="margin-bottom:18px">'+chip('Status',id.account_status||'Not available')+chip('Plan',id.plan||id.tier||'Not available')+chip('Users',usersTxt)+chip('ARR',id.arr_usd!=null?('$'+Number(id.arr_usd).toLocaleString()):'Not available')+chip('Peer group',(bench.cohort&&bench.cohort.peers)?((id.account_type||'')+' · '+bench.cohort.peers+' peers'):'No peer cohort')+'</div>'+
     '<div style="display:flex;flex-wrap:wrap;gap:14px">'+(typeof ACCT_METRICS!=='undefined'?ACCT_METRICS:[]).map(metricCard).join('')+'</div>'+
-    '<div style="position:absolute;bottom:36px;color:#94a3b8;font:500 12px Inter">Generated '+_esc((d.generated_at||'').slice(0,16).replace("T"," "))+' · The CIA — Customer Intelligence Agent</div>'+
+    '<div style="position:absolute;bottom:36px;color:#94a3b8;font:500 12px Inter">Generated '+_esc((d.generated_at||'').slice(0,16).replace("T"," "))+' · The CIA, Customer Intelligence Agent</div>'+
   '</div>';
   const w=window.open('','_blank'); if(!w){ _acctToast('Pop-up blocked — allow pop-ups to export the slide.'); return; }
   w.document.write('<!doctype html><html><head><title>'+_esc(id.name||'Scorecard')+' — Slide</title>'+
