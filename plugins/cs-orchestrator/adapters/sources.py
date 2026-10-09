@@ -1260,6 +1260,30 @@ class HubSpot:
             return str(owner), "record_owner"
         return None, None
 
+    @staticmethod
+    def _looks_like_owner_id(value) -> bool:
+        """A HubSpot owner id is all-digits. A custom CSM field that holds a person's NAME
+        (text) is not — so we can tell an owner-field value from a text-name value and scope
+        / display each correctly."""
+        s = str(value or "").strip()
+        return bool(s) and s.isdigit()
+
+    @classmethod
+    def _resolve_csm_identity(cls, props: dict) -> tuple:
+        """Resolve the designated CSM as (owner_id, csm_name, source).
+
+        - If the configured field holds a HubSpot owner id (digits), owner_id is set and the
+          name is resolved downstream from the owner record (existing behaviour).
+        - If it holds a TEXT NAME (a custom text field), csm_name is set directly and
+          owner_id is left None so a bad /owners/{name} lookup is never attempted; scoping
+          can then match on the name. Never fabricates."""
+        value, source = cls._resolve_csm(props)
+        if value is None:
+            return None, None, None
+        if cls._looks_like_owner_id(value):
+            return value, None, source
+        return None, value, source
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
 
@@ -1397,6 +1421,38 @@ class HubSpot:
         import time as _t2
         HubSpot._rm_cache = (_t2.time(), result)
         return result
+
+    def upsell_count_since(self, since_iso: str) -> int | None:
+        """Exact count of closed-won upsell/expansion deals (Price-Rise pipeline) with a
+        closedate on/after `since_iso` (YYYY-MM-DD). Reads HubSpot's authoritative `total`
+        from a single search (count only — no deal list), so the quarterly 'Pro upgrades'
+        KPI is precise rather than inferred from a capped top-10 list. Returns None when
+        not live / unreadable (honest data-gap, never a fabricated 0)."""
+        if not self.live():
+            return None
+        from datetime import datetime, timezone
+        try:
+            since_ms = int(datetime.fromisoformat(since_iso[:10]).replace(
+                tzinfo=timezone.utc).timestamp() * 1000)
+        except (ValueError, TypeError):
+            return None
+        upsell_pipe = config.env("HUBSPOT_UPSELL_PIPELINE_ID") or "10754643"
+        body = {
+            "filterGroups": [{"filters": [
+                {"propertyName": "pipeline", "operator": "EQ", "value": upsell_pipe},
+                {"propertyName": "hs_is_closed_won", "operator": "EQ", "value": "true"},
+                {"propertyName": "closedate", "operator": "GTE", "value": since_ms},
+            ]}],
+            "properties": ["dealname"],
+            "limit": 1,
+        }
+        try:
+            res = config.http_post_readonly(
+                "https://api.hubapi.com/crm/v3/objects/deals/search", self._headers(), body)
+        except Exception:  # noqa: BLE001
+            return None
+        total = res.get("total")
+        return int(total) if isinstance(total, int) else None
 
     def roster(self, limit: int | None = None) -> list[str]:
         """Live account roster: companies that carry an `account_id` (AUx-yyyyy).
@@ -1540,11 +1596,13 @@ class HubSpot:
                 "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
                                     .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
                 # The CSM that drives owner-scoping + the CSM filter: resolved from the
-                # ordered CSM-field list, else the record owner. Both are user ids resolved
-                # to a name downstream (engine _owner_name). csm_source records which field.
-                "owner_id": self._resolve_csm(p)[0],
+                # ordered CSM-field list, else the record owner. An owner-id field resolves
+                # to a name downstream (engine _owner_name); a TEXT-name field populates
+                # csm_name directly. csm_source records which field drove it.
+                "owner_id": self._resolve_csm_identity(p)[0],
+                "csm_name": self._resolve_csm_identity(p)[1],
                 "record_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
-                "csm_source": self._resolve_csm(p)[1],
+                "csm_source": self._resolve_csm_identity(p)[2],
                 "renewal_date": (p.get("hs_next_renewal_date") or p.get("renewal_date")
                                  or p.get("contract_renewal_date") or None),
                 "renewal_source": ("company" if (p.get("hs_next_renewal_date") or p.get("renewal_date")

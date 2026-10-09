@@ -118,3 +118,34 @@ def test_revert_to_record_owner_only(monkeypatch):
     ])
     assert rows["au1-5"]["owner_id"] == "999"
     assert rows["au1-5"]["csm_source"] == "hubspot_owner_id"
+
+
+# --------------------------------------------------------------------------- #
+# Owner-id vs text-name custom field (identity resolver)
+# --------------------------------------------------------------------------- #
+def test_owner_id_field_populates_owner_id_not_name(monkeypatch):
+    """A numeric (owner-id) CSM field populates owner_id and leaves csm_name None, so the
+    name resolves downstream from the owner record (unchanged behaviour)."""
+    monkeypatch.setenv("CS_CSM_FIELD", "customer_success_manager")
+    rows = _run_roster(monkeypatch, [
+        _company("10", "AU1-10", owner="999",
+                 props_extra={"customer_success_manager": "12345"}),
+    ])
+    r = rows["au1-10"]
+    assert r["owner_id"] == "12345"
+    assert r["csm_name"] is None
+    assert r["csm_source"] == "customer_success_manager"
+
+
+def test_text_name_field_populates_csm_name(monkeypatch):
+    """A custom TEXT CSM field (holds a person's name, not an owner id) populates csm_name
+    directly and leaves owner_id None, so no bad /owners/{name} lookup is attempted."""
+    monkeypatch.setenv("CS_CSM_FIELD", "csm_text_field")
+    rows = _run_roster(monkeypatch, [
+        _company("11", "AU1-11", owner="999",
+                 props_extra={"csm_text_field": "Faizaa Khan"}),
+    ])
+    r = rows["au1-11"]
+    assert r["owner_id"] is None
+    assert r["csm_name"] == "Faizaa Khan"
+    assert r["csm_source"] == "csm_text_field"

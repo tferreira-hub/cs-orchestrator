@@ -426,6 +426,7 @@ table.acct-list td.cp-news,table.acct-list td.cp-summary{max-width:220px;overflo
 .qsc-lbl{font-size:.82em;font-weight:650;color:var(--ink2)}
 .qsc-tgt{font-size:.74em;color:var(--brand);font-weight:600}
 .qsc-note{font-size:.72em;color:var(--muted);line-height:1.3;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.qsc-bd{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 2px}.qsc-chip{font-size:.7em;font-weight:600;color:var(--ink2);background:var(--panel2,#f3f5fb);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
 /* Compact KPI strip */
 .md-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}
 @media(max-width:1000px){.md-kpis{grid-template-columns:repeat(3,1fr)}}
@@ -2053,9 +2054,22 @@ function _quarterPanelHtml(sc){
     const unit=(computable && k.unit && k.unit!=='%')?('<span class="qsc-unit">'+escapeHtml(k.unit)+'</span>'):'';
     const tgt=(k.target!=null)?('<div class="qsc-tgt">target '+escapeHtml(String(k.target))+(k.unit==='%'?'%':'')+'</div>'):'';
     const note=k.note?('<div class="qsc-note" title="'+escapeHtml(k.note)+'">'+escapeHtml(k.note)+'</div>'):'';
+    // Component breakdown chips (e.g. meetings/calls/JBRs, or the M2M/fixed split).
+    let bd='';
+    if(k.breakdown){
+      const b=k.breakdown, parts=[];
+      if(b.meetings!=null||b.calls!=null||b.jbrs!=null){
+        parts.push((b.meetings||0)+' meetings', (b.calls||0)+' calls', (b.jbrs||0)+' JBRs');
+      } else if(b.m2m!=null||b.fixed!=null){
+        parts.push((b.m2m||0)+' M2M', (b.fixed||0)+' fixed-term');
+      }
+      if(parts.length){
+        bd='<div class="qsc-bd">'+parts.map(p=>'<span class="qsc-chip">'+escapeHtml(p)+'</span>').join('')+'</div>';
+      }
+    }
     return '<div class="qsc-card'+(computable?'':' qsc-na')+'">'+
       '<div class="qsc-val">'+val+' '+unit+'</div>'+
-      '<div class="qsc-lbl">'+escapeHtml(k.label)+'</div>'+tgt+note+'</div>';
+      '<div class="qsc-lbl">'+escapeHtml(k.label)+'</div>'+bd+tgt+note+'</div>';
   }).join('');
   return '<div class="panel"><div class="head"><h2>This Quarter · '+escapeHtml(sc.quarter||'')+'</h2>'+
     '<span class="note">What I\'m tracking · as of '+escapeHtml(sc.as_of||'')+'</span></div>'+
@@ -6094,6 +6108,7 @@ function _f2fPanel(id,d){
   const i=escapeHtml(id);
   const form='<div class="writeback" style="background:#fff;margin-top:10px">Log an executive face-to-face:'+
     '<div style="display:grid;grid-template-columns:140px 1fr;gap:8px;margin-top:10px;align-items:center">'+
+      '<label class="cp-km-l">Type</label><select id="f2f-type-'+i+'" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px"><option value="meeting">Meeting</option><option value="call">Call</option><option value="jbr">JBR / Review</option></select>'+
       '<label class="cp-km-l">Date</label><input id="f2f-date-'+i+'" type="date" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
       '<label class="cp-km-l">CS leadership</label><input id="f2f-lead-'+i+'" type="text" placeholder="e.g. Daniel Hill, Justin Brown" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
       '<label class="cp-km-l">Attendees</label><input id="f2f-att-'+i+'" type="text" placeholder="Customer attendees" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px">'+
@@ -6112,11 +6127,12 @@ async function applyLogF2F(id,btn){
   const g=s=>document.getElementById(s+'-'+id);
   const status=g('f2f-status');
   const met_on=(g('f2f-date')&&g('f2f-date').value||'').trim();
+  const itype=(g('f2f-type')&&g('f2f-type').value||'meeting').trim();
   const lead=(g('f2f-lead')&&g('f2f-lead').value||'').trim();
   const att=(g('f2f-att')&&g('f2f-att').value||'').trim();
   const outcome=(g('f2f-out')&&g('f2f-out').value||'').trim();
   const notes=(g('f2f-notes')&&g('f2f-notes').value||'').trim();
-  const body={account_id:id,met_on:met_on||undefined,
+  const body={account_id:id,met_on:met_on||undefined,interaction_type:itype,
     cs_leadership:lead?lead.split(',').map(s=>s.trim()).filter(Boolean):[],
     attendees:att?att.split(',').map(s=>s.trim()).filter(Boolean):[],
     outcome:outcome||undefined, notes:notes||undefined};

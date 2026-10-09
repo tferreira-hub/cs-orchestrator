@@ -109,9 +109,43 @@ def test_m2m_fixed_split(monkeypatch):
     engine = _setup(monkeypatch, accts)
     sc = engine.quarter_scorecard()
     m = _kpi(sc, "M2M → fixed-term")
+    # Headline value is now the in-quarter MOVE count. With no subscription_type history
+    # (health history is empty in _setup), the move count is an honest None.
+    assert m["value"] is None
+    assert m["computable"] is False
+    # The current book split is carried in the breakdown: 1 M2M, 2 fixed-term.
+    bd = m["breakdown"]
+    assert bd["m2m"] == 1
+    assert bd["fixed"] == 2
+    assert bd["known"] == 3
+    assert bd["moved_this_quarter"] is None
+
+
+def test_m2m_move_counted_from_subscription_history(monkeypatch):
+    """A true in-quarter M2M -> fixed-term MOVE is counted when the subscription_type
+    history shows M2M earlier in the quarter and fixed-term later (evidence-based, like
+    client_saves)."""
+    accts = {}
+    accts.update(_acct("au1-moved", subscription_type="Annual Upfront"))
+    accts.update(_acct("au1-stayed", subscription_type="Month to Month"))
+    engine = _setup(monkeypatch, accts)
+    # In-quarter history: au1-moved went M2M -> Annual; au1-stayed stayed M2M.
+    hist = {
+        "au1-moved": [
+            {"date": "2026-10-02", "subscription_type": "Month to Month"},
+            {"date": "2026-10-08", "subscription_type": "Annual Upfront"},
+        ],
+        "au1-stayed": [
+            {"date": "2026-10-02", "subscription_type": "Month to Month"},
+            {"date": "2026-10-08", "subscription_type": "Month to Month"},
+        ],
+    }
+    monkeypatch.setattr(engine, "_health_history_for", lambda aid: hist.get(aid, []))
+    sc = engine.quarter_scorecard()
+    m = _kpi(sc, "M2M → fixed-term")
+    assert m["value"] == 1
     assert m["computable"] is True
-    assert m["value"] == 2               # 2 fixed-term (Annual Upfront + Annual Monthly)
-    assert "7" not in str(m["value"])    # sanity
+    assert m["breakdown"]["moved_this_quarter"] == 1
 
 
 def test_pro_upgrades_honest_none_when_hubspot_offline(monkeypatch):
@@ -120,6 +154,53 @@ def test_pro_upgrades_honest_none_when_hubspot_offline(monkeypatch):
     pro = _kpi(sc, "Pro upgrades")
     assert pro["computable"] is False and pro["value"] is None
     assert pro["note"]
+
+
+def test_pro_upgrades_precise_count_when_hubspot_live(monkeypatch):
+    """When HubSpot is live, Pro upgrades uses the exact in-quarter closed-won count from
+    upsell_count_since() rather than inferring from a capped deal list."""
+    engine = _setup(monkeypatch, _acct("au1-1"))
+
+    class _HSLive:
+        def live(self):
+            return True
+        def upsell_count_since(self, since_iso):
+            assert since_iso == "2026-10-01"   # quarter start
+            return 7
+    monkeypatch.setattr(engine._src, "HUBSPOT", _HSLive())
+    sc = engine.quarter_scorecard()
+    pro = _kpi(sc, "Pro upgrades")
+    assert pro["computable"] is True
+    assert pro["value"] == 7
+
+
+def test_portfolio_met_breakdown(monkeypatch):
+    """'Portfolio met with' carries a meetings/calls/JBRs breakdown counted from in-quarter
+    F2F log entries by interaction_type."""
+    accts = {}
+    accts.update(_acct("au1-a"))
+    accts.update(_acct("au1-b"))
+    engine = _setup(monkeypatch, accts)
+    f2f = {
+        "au1-a": [
+            {"met_on": "2026-10-03", "interaction_type": "meeting"},
+            {"met_on": "2026-10-05", "interaction_type": "jbr"},
+        ],
+        "au1-b": [
+            {"met_on": "2026-10-04", "interaction_type": "call"},
+            {"met_on": "2025-09-01", "interaction_type": "meeting"},  # prior quarter, ignored
+        ],
+    }
+    monkeypatch.setattr(engine, "f2f_log_for", lambda aid: f2f.get(aid, []))
+    sc = engine.quarter_scorecard()
+    m = _kpi(sc, "Portfolio met with")
+    bd = m["breakdown"]
+    assert bd["meetings"] == 1
+    assert bd["calls"] == 1
+    assert bd["jbrs"] == 1
+    assert bd["touchpoints"] == 3
+    assert bd["accounts_met"] == 2       # both accounts met in-quarter
+    assert m["value"] == 100.0           # 2 of 2 accounts
 
 
 def test_targets_from_env(monkeypatch):

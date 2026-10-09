@@ -80,6 +80,7 @@ def record_portfolio(accounts: dict, health_fn, on_day: str | None = None) -> in
                 continue
             usage = acct.get("usage", {}) if isinstance(acct, dict) else {}
             ent = acct.get("entitlements", {}) if isinstance(acct, dict) else {}
+            hs = acct.get("hubspot", {}) if isinstance(acct, dict) else {}
             snap = {
                 "health": h.get("score"),
                 "band": h.get("band"),
@@ -90,6 +91,10 @@ def record_portfolio(accounts: dict, health_fn, on_day: str | None = None) -> in
                 # connected or has no record — never fabricated). Powers the seat side of
                 # the sudden-contraction rule.
                 "seats": (ent.get("active_seats") if isinstance(ent, dict) else None),
+                # Subscription type over time so an in-quarter Month-to-Month -> fixed-term
+                # MOVE is detectable (a true move count, not just the current split). None
+                # when not populated; never fabricated.
+                "subscription_type": (hs.get("subscription_type") if isinstance(hs, dict) else None),
             }
             before = _has_snapshot(aid, day)
             record_snapshot(aid, snap, on_day=day)

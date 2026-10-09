@@ -1516,6 +1516,10 @@ def record_f2f(body: dict, principal: dict | None) -> dict:
         "f2f_id": body.get("f2f_id") or uuid.uuid4().hex[:12],
         "account_id": account_id,
         "met_on": met_on[:10],
+        # Touchpoint type so the quarterly scorecard can split '# meetings / # calls /
+        # # JBRs'. Defaults to 'meeting' (original F2F semantics) when not provided.
+        "interaction_type": (lambda v: v if v in ("meeting", "call", "jbr") else "meeting")(
+            str(body.get("interaction_type") or "meeting").strip().lower()),
         "attendees": body.get("attendees") if isinstance(body.get("attendees"), list) else [],
         "cs_leadership": body.get("cs_leadership") if isinstance(body.get("cs_leadership"), list) else [],
         "notes": str(body.get("notes") or "").strip() or None,
@@ -4505,51 +4509,101 @@ def quarter_scorecard() -> dict:
         if rd and rd >= q_start_iso and rd <= today.isoformat():
             churned_q += 1
 
-    # --- M2M vs fixed-term split (current state) -------------------------------
+    # --- M2M vs fixed-term split (current state) + in-quarter MOVE count -------
+    def _is_m2m(st: str) -> bool:
+        st = (st or "").lower()
+        return "month to month" in st or st in ("m2m", "monthly")
+
     m2m = fixed = 0
     for a in accounts.values():
         st = str((a.get("hubspot", {}) or {}).get("subscription_type") or "").lower()
         if not st:
             continue
-        if "month to month" in st or st in ("m2m", "monthly"):
+        if _is_m2m(st):
             m2m += 1
         elif st:
             fixed += 1
     m2m_known = m2m + fixed
 
+    # True in-quarter MOVE count: an account whose subscription_type history shows M2M in
+    # an in-quarter snapshot and fixed-term in a later one (same evidence-based pattern as
+    # client_saves). Honest None until subscription_type snapshots accrue across the quarter.
+    m2m_moves = None
+    try:
+        moves = 0
+        saw_sub_history = False
+        for aid in accounts:
+            hist = _health_history_for(aid) or []
+            inq = [h for h in hist
+                   if str(h.get("date") or h.get("at") or "")[:10] >= q_start_iso
+                   and h.get("subscription_type")]
+            if len(inq) >= 2:
+                saw_sub_history = True
+                seq = [str(h.get("subscription_type")) for h in inq]
+                if _is_m2m(seq[0]) and not _is_m2m(seq[-1]):
+                    moves += 1
+        if saw_sub_history:
+            m2m_moves = moves
+    except Exception:  # noqa: BLE001
+        pass
+
     # --- Pro upgrades / booked upsell this quarter -----------------------------
     pro_upgrades = None
     pro_note = "Booked upsells need HubSpot deal access; not readable here."
     try:
-        from adapters.sources import HubSpot as _HS
-        hs_adapter = _HS()
+        hs_adapter = _src.HUBSPOT
         if hs_adapter.live():
-            booked = hs_adapter.revenue_motion_deals() or {}
-            ups = booked.get("upsell") or {}
-            # Deal objects carry 'closed' (closedate). The 'deals' list is capped at 10 by
-            # the adapter, so count in-quarter from it only when it isn't truncated; else
-            # fall back to the window total with an honest note.
-            deals = ups.get("deals") or []
-            total = ups.get("count")
-            truncated = bool(total is not None and total > len(deals))
-            if deals and not truncated:
-                inq = [d for d in deals if str(d.get("closed") or "")[:10] >= q_start_iso]
-                pro_upgrades = len(inq)
-                pro_note = "Booked upsell/expansion deals closed this quarter (HubSpot Price-Rise pipeline). 'Pro tier' specifically is not a tracked field."
-            elif total is not None:
-                pro_upgrades = None
-                pro_note = f"{total} booked upsells in the rolling window; a clean per-quarter count needs the full deal list (currently capped)."
+            # Precise in-quarter count: HubSpot's authoritative total for closed-won
+            # upsell deals with closedate >= quarter start (no capped-list inference).
+            exact = hs_adapter.upsell_count_since(q_start_iso)
+            if exact is not None:
+                pro_upgrades = exact
+                pro_note = ("%d upsell/expansion deals closed-won this quarter (HubSpot "
+                            "Price-Rise pipeline). A 'Pro tier'-specific split needs a deal "
+                            "tier field we don't track; this counts all booked expansions." % exact)
+            else:
+                # Fallback: the capped top-10 list (older behaviour) with an honest note.
+                booked = hs_adapter.revenue_motion_deals() or {}
+                ups = booked.get("upsell") or {}
+                deals = ups.get("deals") or []
+                total = ups.get("count")
+                truncated = bool(total is not None and total > len(deals))
+                if deals and not truncated:
+                    inq = [d for d in deals if str(d.get("closed") or "")[:10] >= q_start_iso]
+                    pro_upgrades = len(inq)
+                    pro_note = "Booked upsell/expansion deals closed this quarter (HubSpot Price-Rise pipeline)."
+                elif total is not None:
+                    pro_upgrades = None
+                    pro_note = f"{total} booked upsells in the rolling window; a clean per-quarter count was not readable."
     except Exception:  # noqa: BLE001
         pass
 
-    # --- % portfolio met with (F2F this quarter) -------------------------------
+    # --- % portfolio met with + touchpoint-type breakdown (F2F this quarter) ---
+    # Count in-quarter touchpoints from the F2F log, split by interaction_type so the
+    # scorecard shows '# meetings / # calls / # JBRs' (the components of 'met with'), not
+    # just a single %. Entries logged before the type field existed default to 'meeting'
+    # (the original F2F semantics). accounts_met + met_pct are preserved for back-compat.
     total_accts = len(accounts)
     met = 0
+    tp_meetings = tp_calls = tp_jbrs = 0
     for aid in accounts:
-        last = last_f2f(aid)
-        if last and str(last)[:10] >= q_start_iso:
+        account_met_in_q = False
+        for e in f2f_log_for(aid):
+            if str(e.get("met_on") or "")[:10] < q_start_iso:
+                continue
+            account_met_in_q = True
+            kind = str(e.get("interaction_type") or "meeting").strip().lower()
+            if kind in ("jbr", "qbr", "review", "business_review"):
+                tp_jbrs += 1
+            elif kind in ("call", "phone", "video_call"):
+                tp_calls += 1
+            else:
+                tp_meetings += 1
+        if account_met_in_q:
             met += 1
     met_pct = round(100 * met / total_accts, 1) if total_accts else None
+    met_breakdown = {"meetings": tp_meetings, "calls": tp_calls, "jbrs": tp_jbrs,
+                     "touchpoints": tp_meetings + tp_calls + tp_jbrs, "accounts_met": met}
 
     # --- # client saves (at-risk -> recovered this quarter) --------------------
     saves = None
@@ -4573,9 +4627,12 @@ def quarter_scorecard() -> dict:
     except Exception:  # noqa: BLE001
         pass
 
-    def _kpi(label, value, unit, target_key, computable, note=None):
-        return {"label": label, "value": value, "unit": unit,
-                "target": _t(target_key), "computable": bool(computable), "note": note}
+    def _kpi(label, value, unit, target_key, computable, note=None, breakdown=None):
+        k = {"label": label, "value": value, "unit": unit,
+             "target": _t(target_key), "computable": bool(computable), "note": note}
+        if breakdown is not None:
+            k["breakdown"] = breakdown
+        return k
 
     return {
         "quarter": q_label,
@@ -4588,11 +4645,14 @@ def quarter_scorecard() -> dict:
                  if mrr_growth is not None else "No warehouse revenue series available for the owned book."),
             _kpi("Churned", churned_q if churned_computable else None, "accounts", "churned", churned_computable,
                  "Accounts churned this quarter (churn status / lifecycle with an in-quarter date)."),
-            _kpi("M2M → fixed-term", (fixed if m2m_known else None), "fixed of %d known" % m2m_known if m2m_known else "", "m2m_to_fixed", m2m_known > 0,
-                 ("Current split: %d Month-to-Month, %d fixed-term (of %d with a known type). The in-quarter MOVE count needs a contract-change event not yet captured." % (m2m, fixed, m2m_known)) if m2m_known else "subscription_type is not populated on the owned book."),
+            _kpi("M2M → fixed-term", m2m_moves, "moved this quarter", "m2m_to_fixed", m2m_moves is not None,
+                 (("%d account(s) moved Month-to-Month → fixed-term this quarter. Current book split: %d M2M, %d fixed-term (of %d with a known type)." % (m2m_moves, m2m, fixed, m2m_known)) if m2m_moves is not None
+                  else ("No in-quarter move detected yet — needs subscription_type history across the quarter (now being captured). Current split: %d M2M, %d fixed-term (of %d known)." % (m2m, fixed, m2m_known) if m2m_known else "subscription_type is not populated on the owned book.")),
+                 breakdown={"m2m": m2m, "fixed": fixed, "known": m2m_known, "moved_this_quarter": m2m_moves}),
             _kpi("Pro upgrades", pro_upgrades, "deals", "pro_upgrades", pro_upgrades is not None, pro_note),
             _kpi("Portfolio met with", met_pct, "%", "portfolio_met_pct", met_pct is not None,
-                 "%d of %d owned accounts have a logged executive F2F this quarter. Rises as F2F / Jiminny touchpoints are logged." % (met, total_accts) if total_accts else "No accounts in scope."),
+                 ("%d of %d owned accounts met this quarter · %d meetings, %d calls, %d JBRs logged. Log a touchpoint's interaction_type (meeting/call/jbr) to split it here." % (met, total_accts, tp_meetings, tp_calls, tp_jbrs)) if total_accts else "No accounts in scope.",
+                 breakdown=met_breakdown),
             _kpi("Client saves", saves, "accounts", "client_saves", saves is not None, saves_note),
         ],
     }
