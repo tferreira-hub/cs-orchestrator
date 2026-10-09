@@ -2404,10 +2404,16 @@ function renderAccounts(){
     if(note) note.textContent=_acctList.length
       ? ('Roster: '+_acctList.length.toLocaleString()+' accounts in scope ('+escapeHtml(d.scope||'all')+')')
       : 'No accounts in scope. This view shows only live data from connected systems.';
-  }).catch(()=>{
+  }).catch(err=>{
     const note=document.getElementById('acct-pick-note');
-    if(note) note.textContent='Account roster not available (live sources not connected).';
     _acctList=[];
+    if(err&&err.message==='unauthenticated'){
+      // Session expired: api() already surfaced the re-auth bar. Say so clearly rather
+      // than the misleading 'sources not connected'.
+      if(note) note.innerHTML='Your session has expired. <a href="/login">Sign in again</a> to load the roster.';
+    } else {
+      if(note) note.textContent='Account roster not available (live sources not connected).';
+    }
   });
 }
 
@@ -2541,7 +2547,9 @@ function _acctRenderScorecard(d){
   const toolbar=
     '<div class="acct-toolbar acct-no-print" style="margin:0 0 4px">'+
       '<button class="acct-btn pri" onclick="_acctPrint()">⎙ Download PDF</button>'+
-      '<button class="acct-btn" onclick="_acctExportCsv()">⤓ Export CSV (Sheets)</button>'+
+      '<button class="acct-btn" onclick="_acctExportCsv()">⤓ Download CSV</button>'+
+      '<button class="acct-btn" onclick="_acctExportSheets()">◧ Open in Google Sheets</button>'+
+      '<button class="acct-btn" onclick="_acctExportSlides()">▭ Export to Slides</button>'+
     '</div>';
 
   // ── Performance Data grid ──────────────────────────────────────────────────
@@ -2725,6 +2733,93 @@ function _acctExportCsv(){
   const fn=('account-performance-'+(id.account_id||d.account_id||'export')).replace(/[^a-z0-9\-]/gi,'_')+'.csv';
   a.href=url; a.download=fn; document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// Build the scorecard as a 2-column [label, value] matrix once, reused by Sheets + Slides.
+function _acctRowsForExport(){
+  const d=_acctData||{}; const id=d.identity||{}; const perf=d.performance||{};
+  const metrics=perf.metrics||{}, deltas=perf.deltas||{}, bench=d.benchmark||{}, win=perf.window||{};
+  const u=id.users||{};
+  const out=[];
+  out.push(['Account', id.name||d.account_id||'']);
+  out.push(['Master ID', id.account_id||d.account_id||'']);
+  out.push(['Status', id.account_status||'']);
+  out.push(['Plan', id.plan||id.tier||'']);
+  out.push(['Users', (u.active!=null?u.active:'')+(u.change!=null&&u.change!==0?(' ('+(u.change>0?'+':'')+u.change+')'):'')]);
+  out.push(['ARR (USD)', id.arr_usd!=null?id.arr_usd:'']);
+  out.push(['Window', win.end?('Trailing '+(win.months||12)+' months to '+win.end):'']);
+  out.push(['', '']);
+  out.push(['Performance metric','Value / Rank / Percentile / Peer avg']);
+  (typeof ACCT_METRICS!=='undefined'?ACCT_METRICS:[]).forEach(m=>{
+    const b=bench[m.key]||{}, v=metrics[m.key];
+    out.push([m.label, (v!=null?v:'—')+(b.rank?('  ·  rank '+b.rank+'/'+b.peers):'')+(b.percentile!=null?('  ·  '+b.percentile+'th pct'):'')+(b.peer_avg!=null?('  ·  peer avg '+b.peer_avg):'')]);
+  });
+  const sig=d.signals||{};
+  if(Object.keys(sig).length){ out.push(['','']); out.push(['Signal','Status']);
+    Object.keys(sig).forEach(k=>{ const s=sig[k]||{};
+      out.push([s.label||k, (s.status==='not_connected'||s.enabled==null)?'not connected':(s.enabled?'enabled':'disabled')]); }); }
+  return out;
+}
+
+// Open the scorecard in a NEW Google Sheet. We can't write to the user's Drive without
+// OAuth, so we hand off the data to Sheets' create flow: open a blank sheet and copy a
+// TSV to the clipboard so the user pastes one cell. Honest about the one paste step.
+function _acctExportSheets(){
+  const d=_acctData; if(!d) return;
+  const rows=_acctRowsForExport();
+  const tsv=rows.map(r=>r.map(c=>String(c==null?'':c)).join('\t')).join('\n');
+  // Copy to clipboard (best-effort) then open a new Google Sheet ready to paste at A1.
+  const done=()=>window.open('https://sheets.new','_blank','noopener');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(tsv).then(()=>{
+      _acctToast('Scorecard copied — paste into the new Google Sheet (Cmd/Ctrl+V at A1).'); done();
+    }).catch(()=>{ _acctExportCsv(); _acctToast('Clipboard blocked — CSV downloaded instead; File → Import into Sheets.'); });
+  } else {
+    _acctExportCsv(); _acctToast('CSV downloaded — File → Import it into Google Sheets.');
+  }
+}
+
+// Export to Slides: open a clean, single-slide (16:9) print view of the scorecard the
+// user can 'Save as PDF' and drop into any deck, or print directly. (A native Google
+// Slides deck in the user's Drive needs Google OAuth — see the follow-up note.)
+function _acctExportSlides(){
+  const d=_acctData; if(!d) return; const id=d.identity||{}; const perf=d.performance||{};
+  const metrics=perf.metrics||{}, bench=d.benchmark||{};
+  const u=id.users||{};
+  const chip=(l,v)=>'<span style="display:inline-block;margin:0 14px 10px 0;font:600 15px Inter,system-ui"><span style="color:#64748b">'+l+':</span> '+_esc(v)+'</span>';
+  const metricCard=(m)=>{ const b=bench[m.key]||{}, v=metrics[m.key];
+    return '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;min-width:150px">'+
+      '<div style="font:700 24px Inter,system-ui">'+_esc(v!=null?v.toLocaleString():'—')+'</div>'+
+      '<div style="color:#475569;font:600 13px Inter,system-ui;margin-top:3px">'+_esc(m.label)+'</div>'+
+      (b.rank?'<div style="color:#64748b;font:500 12px Inter,system-ui;margin-top:4px">Rank '+b.rank+'/'+b.peers+(b.percentile!=null?' · '+b.percentile+'th pct':'')+'</div>':'')+
+      '</div>'; };
+  const usersTxt=(u.active!=null?Number(u.active).toLocaleString():'—')+(u.change!=null&&u.change!==0?(' ('+(u.change>0?'+':'')+u.change+')'):'');
+  const slide='<div style="width:1280px;height:720px;box-sizing:border-box;padding:52px 60px;font-family:Inter,system-ui;color:#0f172a">'+
+    '<div style="font:800 34px Inter,system-ui;letter-spacing:-.02em">'+_esc(id.name||d.account_id||'Account')+'</div>'+
+    '<div style="color:#64748b;font:500 15px Inter;margin:4px 0 20px">Account Performance Scorecard · Master ID '+_esc(id.account_id||d.account_id||'')+'</div>'+
+    '<div style="margin-bottom:18px">'+chip('Status',id.account_status||'—')+chip('Plan',id.plan||id.tier||'—')+chip('Users',usersTxt)+chip('ARR',id.arr_usd!=null?('$'+Number(id.arr_usd).toLocaleString()):'—')+chip('Peer group',(bench.cohort&&bench.cohort.peers)?((id.account_type||'')+' · '+bench.cohort.peers+' peers'):'—')+'</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:14px">'+(typeof ACCT_METRICS!=='undefined'?ACCT_METRICS:[]).map(metricCard).join('')+'</div>'+
+    '<div style="position:absolute;bottom:36px;color:#94a3b8;font:500 12px Inter">Generated '+_esc((d.generated_at||'').slice(0,16).replace("T"," "))+' · The CIA — Customer Intelligence Agent</div>'+
+  '</div>';
+  const w=window.open('','_blank'); if(!w){ _acctToast('Pop-up blocked — allow pop-ups to export the slide.'); return; }
+  w.document.write('<!doctype html><html><head><title>'+_esc(id.name||'Scorecard')+' — Slide</title>'+
+    '<style>@page{size:1280px 720px;margin:0}body{margin:0}@media print{.noprint{display:none}}'+
+    '.bar{padding:10px 16px;background:#0b1220;color:#fff;font:600 13px Inter,system-ui}</style></head><body>'+
+    '<div class="bar noprint">Use your browser\'s Print → Save as PDF (landscape) to drop this into Slides/Keynote. <button onclick="window.print()" style="margin-left:10px">Print / Save PDF</button></div>'+
+    slide+'</body></html>');
+  w.document.close();
+}
+
+function _esc(v){ const s=String(v==null?'':v); return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Lightweight transient toast (bottom-centre), auto-dismiss.
+function _acctToast(msg){
+  let t=document.getElementById('acct-toast');
+  if(!t){ t=document.createElement('div'); t.id='acct-toast';
+    t.style.cssText='position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#0b1220;color:#fff;padding:11px 18px;border-radius:10px;font:500 13px Inter,system-ui;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:70ch';
+    document.body.appendChild(t); }
+  t.textContent=msg; t.style.display='';
+  clearTimeout(t._to); t._to=setTimeout(()=>{ if(t)t.style.display='none'; }, 6000);
 }
 
 // Quarterly schedule: POST to the backend endpoint if it exists; otherwise show an
