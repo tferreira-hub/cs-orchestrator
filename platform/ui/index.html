@@ -1334,7 +1334,7 @@ function globalFilterBar(){
   const sel=(id,label,opts,val)=>`<label class="gf-l">${label}<select class="gf-s" onchange="setFilter('${id}',this.value)">${
     opts.map(o=>`<option value="${o[0]}"${o[0]===val?' selected':''}>${o[1]}</option>`).join('')}</select></label>`;
   const segOpts=[['all','All segments']].concat(_facetValues('segment').map(s=>[s,s]));
-  const ownOpts=[['all','All owners']].concat(_facetValues('owner').map(s=>[s,s]));
+  const ownOpts=[['all','All CSMs']].concat(_facetValues('owner').map(s=>[s,s]));
   // Lifecycle stages ordered by the natural flow; only show stages present in the book.
   const stageOrder=['Implementation','Onboarding','Adoption','Value Realisation','Mature','Renewal','At Risk','Churned','Unknown'];
   const presentStages=new Set(_facetValues('stage'));
@@ -1347,7 +1347,7 @@ function globalFilterBar(){
     '<span class="gf-find"><span class="gf-ico">⌕</span><input type="text" placeholder="Search companies..." value="'+(FILTER.search.replace(/"/g,'&quot;'))+'" oninput="setSearchFilter(this.value)"></span>'+
     sel('cohort','Cohort',[['all','All'],['managed','Managed'],['pooled','Scaled / Pooled']],FILTER.cohort)+
     sel('segment','Segment',segOpts,FILTER.segment)+
-    sel('owner','Owner',ownOpts,FILTER.owner)+
+    sel('owner','CSM',ownOpts,FILTER.owner)+
     sel('health','Health',[['all','All'],['red','At risk'],['amber','Watch'],['green','Healthy']],FILTER.health)+
     sel('lifecycle','Account Status',[['active','Active'],['churned','Churned'],['all','All']],FILTER.lifecycle)+
     sel('stage','Lifecycle Stage',stageOpts,FILTER.stage)+

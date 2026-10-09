@@ -1254,8 +1254,12 @@ def test_hubspot_roster_scopes_to_csm_owner(monkeypatch):
 
     monkeypatch.setattr(config, "http_post", fake_post)
     assert sources.HUBSPOT.roster(limit=1) == ["au1-5005"]
-    filters = captured["body"]["filterGroups"][0]["filters"]
-    assert {item["propertyName"] for item in filters} == {"account_id", "hubspot_owner_id"}
+    # Scoping now matches the designated CSM field OR the record owner (two filter groups),
+    # so a CSM sees accounts where they are the CSM field or the HubSpot owner.
+    groups = captured["body"]["filterGroups"]
+    props_per_group = [{item["propertyName"] for item in g["filters"]} for g in groups]
+    assert {"account_id", "customer_success_manager"} in props_per_group
+    assert {"account_id", "hubspot_owner_id"} in props_per_group
 
 
 def test_mcp_live_success_and_fixture_opt_in(monkeypatch):

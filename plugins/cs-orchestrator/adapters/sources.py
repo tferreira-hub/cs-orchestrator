@@ -1230,6 +1230,15 @@ class HubSpot:
     def live(self) -> bool:
         return config.live_enabled() and bool(config.env("HUBSPOT_TOKEN"))
 
+    @staticmethod
+    def _csm_field() -> str:
+        """The HubSpot company property that holds the designated CSM (a user reference),
+        authoritative over the record owner for CS ownership/scoping. Configurable via
+        CS_CSM_FIELD; defaults to the custom 'customer_success_manager' field. Set
+        CS_CSM_FIELD='hubspot_owner_id' to revert to pure record-owner behaviour."""
+        import os
+        return (os.environ.get("CS_CSM_FIELD", "").strip() or "customer_success_manager")
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
 
@@ -1385,13 +1394,20 @@ class HubSpot:
         after = None
         scope = os.environ.get("CS_ACCOUNT_SCOPE", "all").strip().lower()
         owner_id = os.environ.get("CS_CSM_OWNER_ID", "").strip() if scope == "csm" else ""
-        filters = [{"propertyName": "account_id", "operator": "HAS_PROPERTY"}]
+        base_filters = [{"propertyName": "account_id", "operator": "HAS_PROPERTY"}]
+        # Owner-scope matches where the user is the designated CSM (custom field) OR the
+        # record owner, so scoping follows the same CSM-first rule as the rest of the app.
         if owner_id:
-            filters.append({"propertyName": "hubspot_owner_id", "operator": "EQ", "value": owner_id})
+            filter_groups = [
+                {"filters": base_filters + [{"propertyName": self._csm_field(), "operator": "EQ", "value": owner_id}]},
+                {"filters": base_filters + [{"propertyName": "hubspot_owner_id", "operator": "EQ", "value": owner_id}]},
+            ]
+        else:
+            filter_groups = [{"filters": base_filters}]
         while len(ids) < limit:
             page = min(100, limit - len(ids))
             body = {
-                "filterGroups": [{"filters": filters}],
+                "filterGroups": filter_groups,
                 "properties": ["account_id"],
                 "limit": page,
             }
@@ -1456,6 +1472,11 @@ class HubSpot:
 
         props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
+                 # Designated CSM: a custom company field (default customer_success_manager,
+                 # a HubSpot user reference) that is the authoritative CS owner, distinct from
+                 # the record owner (hubspot_owner_id). Configurable via CS_CSM_FIELD; the
+                 # record owner is the fallback when it is empty.
+                 self._csm_field(),
                  "cs_customer_tier", "cs_pooled_team", "industry", "country",
                  # Renewal + subscription are cheap company properties (same search call,
                  # no extra per-account fan-out) and let the whole-book roster rows show a
@@ -1491,7 +1512,14 @@ class HubSpot:
                 "segment_label": raw_segment,
                 "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
                                     .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
-                "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                # The CSM that drives owner-scoping + the CSM filter: the designated CSM
+                # custom field when set, else the HubSpot record owner. Both are user ids
+                # resolved to a name downstream (engine _owner_name). csm_source records which.
+                "owner_id": (str(p.get(self._csm_field())) if p.get(self._csm_field())
+                             else (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None)),
+                "record_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                "csm_source": ("csm_field" if p.get(self._csm_field()) else
+                               ("record_owner" if p.get("hubspot_owner_id") else None)),
                 "renewal_date": (p.get("hs_next_renewal_date") or p.get("renewal_date")
                                  or p.get("contract_renewal_date") or None),
                 "renewal_source": ("company" if (p.get("hs_next_renewal_date") or p.get("renewal_date")
@@ -1624,7 +1652,8 @@ class HubSpot:
                             "hs_active_contracts_arr", "renewal_date", "hs_next_renewal_date",
                             "contract_renewal_date", "subscription_type", "account_id",
                             "lifecyclestage", "instance", "type", "hubspot_owner_id", "industry",
-                            "state", "hs_state_code", "country", "cs_customer_tier"],
+                            "state", "hs_state_code", "country", "cs_customer_tier",
+                            self._csm_field()],
             "limit": 1,
         }
         res = config.http_post("https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
@@ -1694,8 +1723,13 @@ class HubSpot:
             "renewal_date": renewal_date,
             "renewal_source": ("company" if company_renewal else ("deal" if deal_renewal else None)),
             "subscription_type": p.get("subscription_type"),
-            "csm_owner": self._owner_name(p.get("hubspot_owner_id")),
-            "csm_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+            # Designated CSM = the custom CSM field when set, else the record owner. Both
+            # are user ids resolved to a display name. csm_source records which drove it.
+            "csm_owner": self._owner_name(p.get(self._csm_field()) or p.get("hubspot_owner_id")),
+            "csm_owner_id": (str(p.get(self._csm_field())) if p.get(self._csm_field())
+                             else (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None)),
+            "csm_source": ("csm_field" if p.get(self._csm_field()) else
+                           ("record_owner" if p.get("hubspot_owner_id") else None)),
             "industry": (p.get("industry") or "").replace("_", " ").title() or None,
             "lifecycle_stage": {
                 "20251280": "Churned Customer",
