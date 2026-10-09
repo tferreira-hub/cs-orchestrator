@@ -1274,6 +1274,28 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 </aside>
 
 <script>
+// Global safety net: a single uncaught error in this large module must never leave the
+// whole UI inert (nav/section toggles are inline onclick handlers that call functions
+// defined below — if init throws before/so a handler errors, nothing is clickable and the
+// page looks frozen). Surface the real error in a dismissible banner so it is diagnosable
+// instead of a silent freeze, and keep the rest of the app usable.
+(function(){
+  function showErr(msg){
+    try{
+      var id='cs-js-error-banner';
+      if(document.getElementById(id)) return;
+      var d=document.createElement('div'); d.id=id;
+      d.style.cssText='position:fixed;z-index:99999;left:12px;right:12px;bottom:12px;background:#fdecec;border:1px solid #e5484d;color:#7a1317;border-radius:10px;padding:12px 14px;font:400 13px/1.5 Inter,system-ui,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.18)';
+      d.innerHTML='<b>A display error occurred.</b> The page stayed partially loaded. '+
+        '<a href="javascript:location.reload()" style="color:#5b5bf0;font-weight:600">Reload</a>'+
+        '<span style="float:right;cursor:pointer;font-weight:700" onclick="this.parentNode.remove()">✕</span>'+
+        '<div style="margin-top:6px;color:#98444a;font-size:.85em;word-break:break-word">'+String(msg).slice(0,300)+'</div>';
+      (document.body||document.documentElement).appendChild(d);
+    }catch(_){}
+  }
+  window.addEventListener('error',function(e){ showErr((e&&e.message)||'script error'); });
+  window.addEventListener('unhandledrejection',function(e){ showErr((e&&e.reason&&(e.reason.message||e.reason))||'promise rejection'); });
+})();
 const mand={MUST_PROTECT:['protect','Protect'],MUST_EXPAND:['expand','Expand'],MUST_USE:['use','Adopt']};
 const hband=b=>b==='green'?'g':b==='amber'?'a':'r';
 const hcolor=b=>b==='green'?'#0ca678':b==='amber'?'#d98b0b':'#e5484d';
@@ -1461,11 +1483,16 @@ try{const _sf=JSON.parse(sessionStorage.getItem('cs_filter')||'null');if(_sf)Obj
 function go(v){
   // Agent Automation page is retired in favour of the docked Ask CS Agent.
   if(v==='agent'){toggleAgentDock(true);return;}
+  // Unknown view (stale hash, renamed nav): fall back to the Command Center rather than
+  // throwing on meta[v][0] below, which would abort the click and look like dead nav.
+  if(!meta[v]){ v='dash'; }
+  const _viewEl=document.getElementById('v-'+v);
+  if(!_viewEl){ return; }
   closeDrawer();
   _resetEnrichBudget(); // fresh progressive-enrichment budget per view visit
   window.scrollTo({top:0,behavior:'instant'});
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
-  document.getElementById('v-'+v).classList.add('on');
+  _viewEl.classList.add('on');
   // Active-state: a button matches its view by data-v. Buttons that ALSO carry a
   // data-pctab (the Pooled CS Inbox/Process/NRR leaves all share data-v="pooled") are
   // only active when their specific leaf is the current one, so clicking Inbox does not
@@ -1493,7 +1520,7 @@ function go(v){
   // Persist the active view so a reload or shared link restores the same place.
   try{sessionStorage.setItem('cs_view',v);}catch(e){}
   if(('#'+v)!==location.hash) history.replaceState(null,'',('#'+v));
-  render(v);
+  try{ render(v); }catch(e){ console.error('render failed for',v,e); }
 }
 // Restore the last view on load and keep back/forward in sync, without a page reload.
 function initialView(){
@@ -3939,7 +3966,10 @@ async function boot(){
   if(DATA&&DATA.summary&&DATA.summary.warming){
     const badge=document.getElementById('dataMode');
     if(badge){badge.textContent='Warming data (first load after deploy)…';badge.className='modebadge sample';}
-    setTimeout(boot, 4000);
+    // Keep the page interactive while warming: nav/sections already work (inline handlers),
+    // and we re-poll until the full payload is ready. Guard the re-schedule so a transient
+    // error in one iteration can never kill the loop and strand the page on the shell.
+    setTimeout(function(){ boot().catch(function(err){ console.error('boot re-poll error',err); setTimeout(boot,4000); }); }, 4000);
     return;
   }
   document.getElementById('asof').textContent=new Date().toLocaleDateString();
