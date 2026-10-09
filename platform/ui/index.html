@@ -989,23 +989,31 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .acct-id-name{font-size:1.5em;font-weight:800;color:var(--ink);line-height:1.15}
 .acct-id-sub{color:var(--ink2);font-size:.9em;margin-top:3px}
 .acct-window{display:inline-flex;align-items:center;gap:7px;background:var(--brandsoft);color:var(--brand);border-radius:999px;padding:5px 13px;font-size:.82em;font-weight:600}
-.acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
-.acct-card{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--surface);box-shadow:var(--shadow)}
-.acct-card .acct-rankbadge{display:inline-block;font-size:.66em;font-weight:800;letter-spacing:.06em;color:var(--brand);background:var(--brandsoft);border-radius:6px;padding:3px 8px;margin-bottom:8px}
-.acct-card .lbl{font-size:.78em;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--ink2)}
-.acct-card .val{font-size:1.7em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:4px;line-height:1}
-.acct-card .val.na{font-size:1em;font-weight:600;color:var(--muted)}
-.acct-card .derived{font-size:.68em;font-weight:700;color:var(--brand);background:var(--brandsoft);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:middle;letter-spacing:.03em}
-.acct-delta{display:inline-flex;align-items:center;gap:4px;font-size:.82em;font-weight:700;margin-top:9px;font-variant-numeric:tabular-nums}
+/* Metric card grid — native-dashboard parity (RANK pill, value, Vs-Prev delta, percentile bar) */
+.acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.acct-card{position:relative;border:1px solid var(--line);border-radius:14px;padding:15px 16px 16px;background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:150px}
+.acct-card.na{background:linear-gradient(180deg,#fcfdff,#f8fafc)}
+.acct-card .acct-cardtop{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;min-height:22px}
+.acct-rankpill{display:inline-flex;align-items:center;gap:5px;font-size:.68em;font-weight:800;letter-spacing:.05em;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2));border-radius:999px;padding:4px 10px;box-shadow:0 2px 6px rgba(91,91,240,.28)}
+.acct-rankpill.top{background:linear-gradient(135deg,var(--green),#17b98a);box-shadow:0 2px 6px rgba(12,166,120,.28)}
+.acct-rankpill.na{background:none;color:var(--muted);border:1px dashed #cbd2df;box-shadow:none;font-weight:700}
+.acct-card .derived{font-size:.6em;font-weight:800;color:var(--brand);background:var(--brandsoft);border-radius:5px;padding:2px 6px;letter-spacing:.04em}
+.acct-card .lbl{font-size:.76em;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--ink2)}
+.acct-card .val{font-size:2em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.05}
+.acct-card .val.na{font-size:1.02em;font-weight:600;color:var(--muted)}
+.acct-delta{display:inline-flex;align-items:center;gap:5px;font-size:.82em;font-weight:700;margin-top:8px;font-variant-numeric:tabular-nums}
+.acct-delta .vp{color:var(--muted);font-weight:600;letter-spacing:.02em}
 .acct-delta.up{color:var(--green)}.acct-delta.down{color:var(--red)}.acct-delta.flat{color:var(--muted)}
 .acct-delta.inv-up{color:var(--red)}.acct-delta.inv-down{color:var(--green)}
-.acct-bench{margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;font-size:.8em}
-.acct-bench .rk{font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
-.acct-bench .pct{color:var(--ink2)}
-.acct-bench .peeravg{color:var(--muted);font-size:.92em}
-.acct-bench.na{color:var(--muted);justify-content:flex-start}
-.acct-pctbar{height:5px;border-radius:3px;background:var(--line);margin-top:7px;overflow:hidden}
-.acct-pctbar > i{display:block;height:100%;background:var(--brand);border-radius:3px}
+.acct-pct{margin-top:auto;padding-top:11px}
+.acct-pct .pct-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:.78em;color:var(--ink2);margin-bottom:5px}
+.acct-pct .pct-top b{color:var(--ink);font-size:1.15em;font-variant-numeric:tabular-nums}
+.acct-pct .pct-top .peer{color:var(--muted);font-variant-numeric:tabular-nums}
+.acct-pct .pct-na{font-size:.78em;color:var(--muted);margin-bottom:5px}
+.acct-pctbar{position:relative;height:7px;border-radius:4px;background:#eef1f6;overflow:hidden}
+.acct-pctbar > i{display:block;height:100%;border-radius:4px;background:var(--brand)}
+.acct-pctbar .mid{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted);opacity:.45}
+.acct-skel{height:7px;border-radius:4px;background:repeating-linear-gradient(90deg,#eef1f6 0 8px,transparent 8px 14px)}
 .acct-sig{display:flex;flex-direction:column;gap:5px;border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:var(--surface)}
 .acct-sig .lbl{font-size:.8em;font-weight:700;color:var(--ink2)}
 .acct-sig .st{font-size:1.02em;font-weight:800;display:inline-flex;align-items:center;gap:7px}
@@ -1063,12 +1071,31 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .acct-trend.up{color:var(--green)}.acct-trend.down{color:var(--red)}.acct-trend.flat{color:var(--muted)}
 .acct-trend.inv-up{color:var(--red)}.acct-trend.inv-down{color:var(--green)}
 .acct-chart-empty{display:flex;align-items:center;gap:8px;font-size:.84em;color:var(--muted);padding:18px 2px}
+/* ── Comparison grouped-bar chart ───────────────────────────────── */
+.acct-cmprow{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--line)}
+.acct-cmprow:last-child{border-bottom:0}
+.acct-cmprow .cl{flex:0 0 150px;font-size:.84em;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px}
+.acct-cmprow .cl .lb-tag{font-size:.6em;font-weight:800;color:var(--brand);background:var(--brandsoft);border-radius:4px;padding:1px 5px;letter-spacing:.03em}
+.acct-cmprow .cbar{flex:1 1 auto;min-width:0}
+.acct-cmprow .cnum{flex:0 0 128px;text-align:right;font-size:.8em;font-variant-numeric:tabular-nums;color:var(--ink2);line-height:1.5}
+.acct-cmprow .cnum b{color:var(--ink)}
+.acct-cmprow .cnum .p-you{color:var(--brand)}
+/* ── At-a-glance benchmark summary (donut) ──────────────────────── */
+.acct-summary{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+.acct-donut{position:relative;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+.acct-donut .dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.acct-donut .dc b{font-size:1.7em;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.acct-donut .dc span{font-size:.66em;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:3px}
+.acct-summary-stats{flex:1 1 220px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.acct-summary-stats .s{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:var(--surface)}
+.acct-summary-stats .s .l{font-size:.74em;text-transform:uppercase;letter-spacing:.03em;color:var(--ink2)}
+.acct-summary-stats .s .v{font-size:1.3em;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
 @media print{
   body *{visibility:hidden!important}
   #acct-scorecard, #acct-scorecard *{visibility:visible!important}
   #acct-scorecard{position:absolute;left:0;top:0;width:100%;padding:0;margin:0}
   .sidebar,.topbar,.acct-pick,.acct-toolbar,.acct-sched-wrap,#globalFilterMount,.agent-dock,.acct-no-print{display:none!important}
-  .acct-card,.acct-sig,.acct-tick .t,.acct-peeravg .pa,.panel{box-shadow:none!important;break-inside:avoid}
+  .acct-card,.acct-sig,.acct-tick .t,.acct-peeravg .pa,.acct-summary-stats .s,.panel{box-shadow:none!important;break-inside:avoid}
   .acct-grid{grid-template-columns:repeat(4,1fr)}
   @page{margin:14mm}
 }
@@ -2543,18 +2570,37 @@ function _acctResetFilters(){
 
 function _acctDeltaHtml(delta,lowerIsBetter){
   if(!delta||delta.value===null||delta.value===undefined||delta.previous===null||delta.previous===undefined)
-    return '<div class="acct-delta flat">Vs. Prev —</div>';
+    return '<div class="acct-delta flat"><span class="vp">Vs. Prev</span> —</div>';
   const dv=delta.delta;
   const pct=(delta.pct_change===null||delta.pct_change===undefined)?null:delta.pct_change;
   let dir='flat', arrow='→';
-  if(dv>0){ dir='up'; arrow='↑'; }
-  else if(dv<0){ dir='down'; arrow='↓'; }
+  if(dv>0){ dir='up'; arrow='▲'; }
+  else if(dv<0){ dir='down'; arrow='▼'; }
   // For lower-is-better metrics, invert the colour semantics (a drop is good).
   let cls=dir;
   if(lowerIsBetter&&dir==='up') cls='inv-up';
   else if(lowerIsBetter&&dir==='down') cls='inv-down';
   const pctTxt=(pct===null)?'' : ' ('+(pct>0?'+':'')+pct.toFixed(1)+'%)';
-  return '<div class="acct-delta '+cls+'">'+arrow+' Vs. Prev '+(dv>0?'+':'')+_acctFmt(dv,delta._float)+pctTxt+'</div>';
+  return '<div class="acct-delta '+cls+'"><span class="vp">Vs. Prev</span> '+arrow+' '+(dv>0?'+':'')+_acctFmt(dv,delta._float)+pctTxt+'</div>';
+}
+
+// Percentile band colour: >=66 green, 33–65 amber, <33 red.
+function _acctPctColor(p){ return p>=66?'#0ca678':(p>=33?'#d98b0b':'#e5484d'); }
+
+// Percentile line + slim banded bar (median tick at 50) for a metric card. Honest empty
+// state (dashed skeleton) when the metric is not ranked in the cohort.
+function _acctPctBlock(b){
+  if(!b||b.percentile===null||b.percentile===undefined){
+    return '<div class="acct-pct"><div class="pct-na">Percentile not ranked</div><div class="acct-skel"></div></div>';
+  }
+  const pct=Math.max(0,Math.min(100,b.percentile));
+  const col=_acctPctColor(pct);
+  const peerTxt=(b.peer_avg===null||b.peer_avg===undefined)?'' :
+    '<span class="peer">peer avg '+b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1})+'</span>';
+  return '<div class="acct-pct">'+
+    '<div class="pct-top"><span><b>'+pct+'</b>th percentile</span>'+peerTxt+'</div>'+
+    '<div class="acct-pctbar"><i style="width:'+Math.max(2,pct)+'%;background:'+col+'"></i><span class="mid"></span></div>'+
+  '</div>';
 }
 
 function _acctBenchHtml(b){
@@ -2622,12 +2668,12 @@ function _acctFilterBar(d){
 }
 
 // ── Chart builders (inline SVG, no external libraries) ─────────────────────
-// Honest by construction: a null value renders no bar; an absent benchmark renders an
-// explicit empty state rather than a fabricated zero.
+// Honest by construction: a null value renders a dashed skeleton; an absent benchmark
+// renders an explicit empty state rather than a fabricated zero. Produces (a) an
+// at-a-glance benchmark-summary donut and (b) a grouped horizontal comparison chart.
 function _acctCharts(d){
   const perf=d.performance||{};
   const metrics=perf.metrics||{};
-  const deltas=perf.deltas||{};
   const bench=d.benchmark||{};
   const peers=(bench.cohort&&bench.cohort.peers)||0;
   const brand=getComputedStyle(document.documentElement).getPropertyValue('--brand').trim()||'#5b5bf0';
@@ -2635,123 +2681,81 @@ function _acctCharts(d){
   const muted='#98a2b3';
   const fmt=(v,fl)=>_acctFmt(v,fl);
 
-  // (a) Account vs peer-average horizontal bars ------------------------------
+  // (a) At-a-glance benchmark summary donut: average percentile across ranked metrics.
+  //     Only rendered when at least one metric is ranked (never a fabricated gauge).
+  const ranked=ACCT_METRICS.map(m=>bench[m.key])
+    .filter(b=>b&&b.percentile!==null&&b.percentile!==undefined);
+  let summaryPanel='';
+  if(ranked.length){
+    const avgPct=Math.round(ranked.reduce((s,b)=>s+b.percentile,0)/ranked.length);
+    const col=_acctPctColor(avgPct);
+    const top=ranked.filter(b=>b.rank===1).length;
+    const util=(d.identity&&d.identity.users&&d.identity.users.utilization_pct!=null)?d.identity.users.utilization_pct:null;
+    const donut=svgDonut([{value:avgPct,color:col},{value:100-avgPct,color:'#eef1f6'}],{size:132,thickness:16});
+    const stat=(l,v)=>'<div class="s"><div class="l">'+l+'</div><div class="v">'+v+'</div></div>';
+    summaryPanel='<div class="panel"><div class="head"><h2>Benchmark Summary</h2>'+
+      '<span class="note">Average percentile across '+ranked.length+' ranked metric'+(ranked.length===1?'':'s')+
+      (peers?(' · cohort of '+peers+' peers'):'')+'</span></div>'+
+      '<div class="body pad"><div class="acct-summary">'+
+        '<div class="acct-donut">'+donut+'<div class="dc"><b style="color:'+col+'">'+avgPct+'</b><span>avg pctile</span></div></div>'+
+        '<div class="acct-summary-stats">'+
+          stat('Metrics ranked #1', top+' / '+ranked.length)+
+          stat('Metrics ranked', ranked.length+' / '+ACCT_METRICS.length)+
+          stat('Peer cohort', peers.toLocaleString()+' peer'+(peers===1?'':'s'))+
+          (util!=null?stat('User utilisation', util+'%'):'')+
+        '</div>'+
+      '</div></div></div>';
+  }
+
+  // (b) Grouped horizontal comparison bars (this account vs peer average), normalised
+  //     per metric so each row is readable on its own scale.
   let cmpInner;
   if(!perf.connected){
     cmpInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● warehouse not connected</span></div>';
   }else{
-    const rows=ACCT_METRICS.map(m=>{
-      const you=metrics[m.key];
-      const b=bench[m.key]||null;
-      const peerAvg=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg:null;
-      if(you===null||you===undefined){
-        return '<div class="acct-chart-row"><div class="cl">'+escapeHtml(m.label)+
-          (m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
-          '<div class="cbar"><div class="acct-chart-empty" style="padding:4px 0">not connected</div></div>'+
-          '<div class="cnum">—</div></div>';
-      }
-      const max=Math.max(you||0, peerAvg||0, 0.0001);
-      const w=400; // viewBox width for bar track
-      const youW=Math.max(1,(you/max)*w);
-      const peerW=peerAvg===null?null:Math.max(0,(peerAvg/max)*w);
-      const svg='<svg viewBox="0 0 '+w+' 34" width="100%" height="34" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' account versus peer average">'+
-        '<rect x="0" y="4" width="'+w+'" height="11" rx="3" fill="'+line+'"></rect>'+
-        '<rect x="0" y="4" width="'+youW.toFixed(1)+'" height="11" rx="3" fill="'+brand+'"></rect>'+
-        '<rect x="0" y="19" width="'+w+'" height="11" rx="3" fill="'+line+'"></rect>'+
-        (peerW===null?'':'<rect x="0" y="19" width="'+peerW.toFixed(1)+'" height="11" rx="3" fill="'+muted+'"></rect>')+
-        '</svg>';
-      const peerTxt=peerAvg===null?'<span style="color:'+muted+'">peer n/a</span>':('peer <b>'+escapeHtml(fmt(peerAvg,m.float))+'</b>');
-      return '<div class="acct-chart-row">'+
-        '<div class="cl">'+escapeHtml(m.label)+(m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
-        '<div class="cbar">'+svg+'</div>'+
-        '<div class="cnum">you <b>'+escapeHtml(fmt(you,m.float))+'</b><br>'+peerTxt+'</div>'+
-      '</div>';
-    }).join('');
     const legend='<div class="acct-cmp-legend">'+
       '<span class="k"><i style="background:'+brand+'"></i>This account</span>'+
       '<span class="k"><i style="background:'+muted+'"></i>Peer average</span>'+
       (peers?'<span class="k" style="margin-left:auto">'+peers.toLocaleString()+' peers in cohort</span>':'')+
     '</div>';
+    const rows=ACCT_METRICS.map(m=>{
+      const you=metrics[m.key];
+      const b=bench[m.key]||null;
+      const peerAvg=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg:null;
+      if(you===null||you===undefined){
+        return '<div class="acct-cmprow"><div class="cl">'+escapeHtml(m.label)+
+          (m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
+          '<div class="cbar"><div class="acct-skel" style="height:10px"></div></div>'+
+          '<div class="cnum" style="color:'+muted+'">not connected</div></div>';
+      }
+      const max=Math.max(you||0, peerAvg||0, 0.0001);
+      const W=460, H=38, trackX=2, trackW=W-4;
+      const youW=Math.max(2,(you/max)*trackW);
+      const peerW=peerAvg===null?null:Math.max(0,(peerAvg/max)*trackW);
+      let grid='';
+      [0.25,0.5,0.75].forEach(g=>{
+        const x=(trackX+g*trackW).toFixed(1);
+        grid+='<line x1="'+x+'" y1="2" x2="'+x+'" y2="'+(H-2)+'" stroke="'+line+'" stroke-width="1"></line>';
+      });
+      const svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' account versus peer average">'+
+        grid+
+        '<rect x="'+trackX+'" y="6" width="'+youW.toFixed(1)+'" height="11" rx="3" fill="'+brand+'"></rect>'+
+        (peerW===null?'':'<rect x="'+trackX+'" y="21" width="'+peerW.toFixed(1)+'" height="11" rx="3" fill="'+muted+'"></rect>')+
+        '</svg>';
+      const peerTxt=peerAvg===null?'<span style="color:'+muted+'">peer n/a</span>':('peer <b>'+escapeHtml(fmt(peerAvg,m.float))+'</b>');
+      return '<div class="acct-cmprow">'+
+        '<div class="cl">'+escapeHtml(m.label)+(m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
+        '<div class="cbar">'+svg+'</div>'+
+        '<div class="cnum"><span class="p-you">you <b>'+escapeHtml(fmt(you,m.float))+'</b></span><br>'+peerTxt+'</div>'+
+      '</div>';
+    }).join('');
     cmpInner=legend+rows;
   }
   const cmpPanel='<div class="panel"><div class="head"><h2>Account vs Peer Average</h2>'+
-    '<span class="note">Each metric compared against the current benchmark cohort</span></div>'+
+    '<span class="note">Each metric scaled to its own max · bars show this account against the cohort average</span></div>'+
     '<div class="body pad">'+cmpInner+'</div></div>';
 
-  // (b) Percentile gauges per metric -----------------------------------------
-  let pctInner;
-  if(!peers){
-    pctInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● no comparable peer cohort</span></div>';
-  }else{
-    const grad=(p)=>p>=66?'#0ca678':(p>=33?'#d98b0b':'#e5484d');
-    const rows=ACCT_METRICS.map(m=>{
-      const b=bench[m.key]||null;
-      const pct=(b&&b.percentile!==null&&b.percentile!==undefined)?Math.max(0,Math.min(100,b.percentile)):null;
-      if(pct===null){
-        return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
-          '<div class="pg"><div class="acct-chart-empty" style="padding:3px 0">not ranked</div></div>'+
-          '<div class="pv">—</div></div>';
-      }
-      const col=grad(pct);
-      const w=400;
-      const fillW=Math.max(2,(pct/100)*w);
-      const svg='<svg viewBox="0 0 '+w+' 14" width="100%" height="14" preserveAspectRatio="none" role="img" aria-label="'+escapeHtml(m.label)+' percentile '+pct+'">'+
-        '<rect x="0" y="3" width="'+w+'" height="8" rx="4" fill="'+line+'"></rect>'+
-        '<rect x="0" y="3" width="'+fillW.toFixed(1)+'" height="8" rx="4" fill="'+col+'"></rect>'+
-        '<rect x="'+((w/2)-0.5).toFixed(1)+'" y="1" width="1" height="12" fill="'+muted+'" opacity="0.5"></rect>'+
-        '</svg>';
-      const rankTxt=(b&&b.rank)?('rank '+b.rank+'/'+b.peers):'';
-      return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
-        '<div class="pg">'+svg+'</div>'+
-        '<div class="pv"><b>'+pct+'th</b> pct'+(rankTxt?'<br><span style="color:'+muted+'">'+escapeHtml(rankTxt)+'</span>':'')+'</div></div>';
-    }).join('');
-    pctInner='<div class="acct-cmp-legend"><span class="k">0th (lowest) &nbsp;→&nbsp; 50th (median, dashed) &nbsp;→&nbsp; 100th (top) in cohort</span></div>'+rows;
-  }
-  const pctPanel='<div class="panel"><div class="head"><h2>Percentile Ranking</h2>'+
-    '<span class="note">Where this account sits within its benchmark cohort</span></div>'+
-    '<div class="body pad">'+pctInner+'</div></div>';
-
-  // (c) Vs-previous trend sparkline strip ------------------------------------
-  let trendInner;
-  if(!perf.connected){
-    trendInner='<div class="acct-chart-empty"><span class="acct-nc-chip">● warehouse not connected</span></div>';
-  }else{
-    const rows=ACCT_METRICS.map(m=>{
-      const dl=deltas[m.key]||null;
-      const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
-      if(!dl||dl.value===null||dl.value===undefined||dl.previous===null||dl.previous===undefined){
-        return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
-          '<div class="pg"><div class="acct-chart-empty" style="padding:3px 0">no prior period</div></div>'+
-          '<div class="pv">—</div></div>';
-      }
-      const dv=dl.delta;
-      let dir=dv>0?'up':(dv<0?'down':'flat');
-      let cls=dir; if(lowerBetter&&dir==='up')cls='inv-up'; else if(lowerBetter&&dir==='down')cls='inv-down';
-      const arrow=dv>0?'↑':(dv<0?'↓':'→');
-      const prev=dl.previous, cur=dl.value;
-      const mx=Math.max(prev||0,cur||0,0.0001);
-      // two-point sparkline (previous → current)
-      const w=120,h=26;
-      const y=(v)=>h-3-((v/mx)*(h-6));
-      const stroke=(cls==='up'||cls==='inv-down')?'#0ca678':(cls==='down'||cls==='inv-up')?'#e5484d':muted;
-      const svg='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" role="img" aria-label="'+escapeHtml(m.label)+' trend">'+
-        '<polyline points="4,'+y(prev).toFixed(1)+' '+(w-4)+','+y(cur).toFixed(1)+'" fill="none" stroke="'+stroke+'" stroke-width="2" stroke-linecap="round"></polyline>'+
-        '<circle cx="4" cy="'+y(prev).toFixed(1)+'" r="2.4" fill="'+muted+'"></circle>'+
-        '<circle cx="'+(w-4)+'" cy="'+y(cur).toFixed(1)+'" r="2.8" fill="'+stroke+'"></circle>'+
-        '</svg>';
-      const pct=(dl.pct_change===null||dl.pct_change===undefined)?'':(' ('+(dl.pct_change>0?'+':'')+dl.pct_change.toFixed(1)+'%)');
-      return '<div class="acct-pctrow"><div class="pl">'+escapeHtml(m.label)+'</div>'+
-        '<div class="pg" style="display:flex;align-items:center;gap:12px">'+svg+
-          '<span class="acct-trend '+cls+'">'+arrow+' '+(dv>0?'+':'')+escapeHtml(fmt(dv,m.float))+escapeHtml(pct)+'</span></div>'+
-        '<div class="pv">prev <b>'+escapeHtml(fmt(prev,m.float))+'</b></div></div>';
-    }).join('');
-    trendInner=rows;
-  }
-  const trendPanel='<div class="panel"><div class="head"><h2>Trend vs Previous Period</h2>'+
-    '<span class="note">Change against the prior equivalent window · lower-is-better metrics are colour-inverted</span></div>'+
-    '<div class="body pad">'+trendInner+'</div></div>';
-
-  return cmpPanel+pctPanel+trendPanel;
+  return summaryPanel+cmpPanel;
 }
 
 function _acctRenderScorecard(d){
@@ -2821,14 +2825,19 @@ function _acctRenderScorecard(d){
     const dl=deltas[m.key]?Object.assign({},deltas[m.key],{_float:m.float}):null;
     const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
     const b=bench[m.key];
-    // Prominent RANK badge at the top of the card (matches the native dashboard layout).
-    const rankBadge=(b&&b.rank)?'<div class="acct-rankbadge">RANK '+b.rank+' / '+b.peers+'</div>':'';
-    return '<div class="acct-card">'+
-      rankBadge+
-      '<div class="lbl">'+escapeHtml(m.label)+(m.derived?'<span class="derived">DERIVED</span>':'')+'</div>'+
-      (val===null?'<div class="val na">not connected</div>':'<div class="val">'+val+'</div>')+
-      _acctDeltaHtml(dl,lowerBetter)+
-      _acctBenchHtml(b)+
+    const hasVal=!(val===null);
+    // Prominent RANK pill at the top of the card (matches the native dashboard layout);
+    // ranked #1 gets the gold-green treatment, unranked gets an honest dashed pill.
+    const pill=(b&&b.rank)
+      ? '<span class="acct-rankpill'+(b.rank===1?' top':'')+'">RANK '+b.rank+' / '+b.peers+'</span>'
+      : '<span class="acct-rankpill na">UNRANKED</span>';
+    const tag=m.derived?'<span class="derived">DERIVED</span>':'';
+    return '<div class="acct-card'+(hasVal?'':' na')+'">'+
+      '<div class="acct-cardtop">'+pill+tag+'</div>'+
+      '<div class="lbl">'+escapeHtml(m.label)+'</div>'+
+      (hasVal?'<div class="val">'+val+'</div>':'<div class="val na">not connected</div>')+
+      (hasVal?_acctDeltaHtml(dl,lowerBetter):'')+
+      _acctPctBlock(b)+
     '</div>';
   }).join('');
   const perfPanel=
@@ -2853,9 +2862,11 @@ function _acctRenderScorecard(d){
         if(u.match.some(k=>low.includes(k))){ total+=(templates[n].total||0); matched=true; }
       });
       // Connected but no matching usage => honest 0 (never fabricated).
-      return '<div class="acct-card"><div class="lbl">'+escapeHtml(u.label)+'</div>'+
+      return '<div class="acct-card">'+
+        '<div class="acct-cardtop"><span class="acct-rankpill na">USAGE</span></div>'+
+        '<div class="lbl">'+escapeHtml(u.label)+'</div>'+
         '<div class="val">'+total.toLocaleString()+'</div>'+
-        '<div class="muted" style="font-size:.76em;margin-top:7px">'+(matched?'from automation usage':'no usage in window')+'</div></div>';
+        '<div class="acct-delta flat"><span class="vp">'+(matched?'from automation usage':'no usage in window')+'</span></div></div>';
     }).join('')+'</div>';
   }
   const usagePanel=
