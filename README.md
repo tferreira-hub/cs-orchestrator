@@ -143,6 +143,7 @@ Ask for today's actions. Northwind comes back as a Priority-1 churn risk (ML chu
 ## Docs
 
 **Product & features**
+- [Docs/USER-GUIDE.md](Docs/USER-GUIDE.md): **end-user guide** — per-role, click-by-click walkthrough of every page (start here).
 - [Docs/CS-PLATFORM-GUIDE.md](Docs/CS-PLATFORM-GUIDE.md): full CS Platform feature guide.
 - [Docs/CSM-QUICK-OVERVIEW.md](Docs/CSM-QUICK-OVERVIEW.md): day-to-day quick start for CSMs.
 - [Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md](Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md): how pooled round-robin + the daily task queue work, end to end.
