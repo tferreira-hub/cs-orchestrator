@@ -1747,6 +1747,10 @@ def portfolio() -> dict:
             "subscription_type": hsobj.get("subscription_type"),
             "csm_owner": hsobj.get("csm_owner"),
             "lifecycle_stage": hsobj.get("lifecycle_stage"),
+            # Derived CS lifecycle STAGE (deterministic state machine: Implementation →
+            # Onboarding → Adoption → Value Realisation → Mature, + Renewal / At Risk /
+            # Churned). Distinct from the raw HubSpot lifecycle_stage (Customer/Churned).
+            "cs_lifecycle_stage": lifecycle_state(live).get("stage"),
             "health": h,
             "renewal_forecast": forecast,
             "connected": _connected(a),
@@ -1836,6 +1840,17 @@ def portfolio() -> dict:
                     _conn["churn"] = True
                 if _metrics_sig:
                     _conn["metrics"] = True
+                # Derived CS lifecycle STAGE for the whole-book row, from the batched signals
+                # we have (churn + warehouse metrics + renewal date + HubSpot lifecycle). With
+                # no deep adoption signal lifecycle_state falls back to health/renewal/churn,
+                # which is honest: Churned / At Risk / Renewal / Mature, else "Unknown".
+                _stage_acct = {
+                    "hubspot": {"renewal_date": _rd, "arr_usd": c.get("arr_usd"),
+                                "lifecycle_stage": c.get("lifecycle_stage")},
+                    "churn": _churn_sig, "metrics": _metrics_sig,
+                    "zendesk": {}, "usage": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
+                }
+                _cs_stage = lifecycle_state(_stage_acct).get("stage") if (_churn_sig or _metrics_sig or _rd or is_churned) else "Unknown"
                 rows.append({
                     "account_id": aid,
                     "name": c.get("name"),
@@ -1851,6 +1866,7 @@ def portfolio() -> dict:
                     "csm_owner": _owner_names.get(str(c.get("owner_id"))) if c.get("owner_id") else None,
                     "csm_owner_id": c.get("owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
+                    "cs_lifecycle_stage": _cs_stage,
                     "churned": is_churned,
                     "health": health,
                     "renewal_forecast": (renewal_forecast({"hubspot": {"renewal_date": _rd}, "arr_usd": c.get("arr_usd")}, health)
@@ -1877,6 +1893,16 @@ def portfolio() -> dict:
     at_risk_arr = sum(r["arr_usd"] or 0 for r in rows
                       if r["health"]["computable"] and r["health"]["band"] == "red")
 
+    # Lifecycle-stage distribution across the shown book (count + ARR per derived CS stage),
+    # so the Command Center can show a stage legend and the Lifecycle Stage filter has a
+    # real population. 'Unknown' = no signal to place the account on the curve (honest).
+    _stage_mix: dict[str, dict] = {}
+    for r in rows:
+        _st = r.get("cs_lifecycle_stage") or "Unknown"
+        slot = _stage_mix.setdefault(_st, {"stage": _st, "accounts": 0, "arr_usd": 0})
+        slot["accounts"] += 1
+        slot["arr_usd"] += r.get("arr_usd") or 0
+
     return {
         "summary": {
             "accounts": len(rows),
@@ -1899,6 +1925,9 @@ def portfolio() -> dict:
             "book_pooled": pooled_count,
             "enriched_count": len(enriched_ids),
             "churned_included": include_churned,
+            # Derived CS lifecycle-stage distribution (count + ARR per stage) across the
+            # shown book, for the Command Center stage legend + Lifecycle Stage filter.
+            "lifecycle_stage_mix": sorted(_stage_mix.values(), key=lambda s: -s["accounts"]),
         },
         "accounts": rows,
         "tasks": result["tasks"],
@@ -4433,6 +4462,15 @@ def lifecycle_state(account: dict) -> dict:
     # Forward maturity from adoption + health.
     ad = adoption_score(account)
     ascore = ad.get("score") if ad.get("computable") else None
+    # Renewal stage: inside the T-90 window a healthy/established account is in its renewal
+    # motion (takes precedence over Mature/Value Realisation so the stage reflects where the
+    # relationship actually is in its cycle). At-risk/churned were already handled above.
+    try:
+        _dtr = _days_to_renewal(hs.get("renewal_date"))
+    except Exception:  # noqa: BLE001
+        _dtr = None
+    if _dtr is not None and 0 <= _dtr <= 90:
+        return {"stage": "Renewal", "reason": f"Renewal is {_dtr} days away (T-90 window); the account is in its renewal cycle.", "flow": "forward"}
     if ascore is not None:
         if ascore >= 70 and band == "green":
             return {"stage": "Value Realisation", "reason": f"Strong adoption ({ascore}) and healthy relationship.", "flow": "forward"}

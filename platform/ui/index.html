@@ -1240,7 +1240,7 @@ let DATA=null;
 // ── Global portfolio filter ──────────────────────────────────────────────────
 // A single filter state that EVERY view reads via filteredAccounts(), so changing
 // it once reflects across the whole platform (dashboard, risk, renewals, etc.).
-const FILTER={cohort:'all',segment:'all',owner:'all',health:'all',lifecycle:'active',search:''};
+const FILTER={cohort:'all',segment:'all',owner:'all',health:'all',lifecycle:'active',stage:'all',search:''};
 let _currentView='dash';
 // Resolve an account's owner to a display label. Prefer the resolved CSM name; never show
 // a bare HubSpot owner ID (a number) as if it were a name - fall back to "Unassigned".
@@ -1271,6 +1271,7 @@ function filteredAccounts(){
     if(FILTER.health!=='all'){const b=a.health&&a.health.band; if(b!==FILTER.health) return false;}
     if(FILTER.lifecycle==='active' && a.churned) return false;
     if(FILTER.lifecycle==='churned' && !a.churned) return false;
+    if(FILTER.stage!=='all' && (a.cs_lifecycle_stage||'Unknown')!==FILTER.stage) return false;
     if(FILTER.search){const q=FILTER.search.toLowerCase(); if(!((a.name||'').toLowerCase().includes(q)||(a.account_id||'').toLowerCase().includes(q))) return false;}
     return true;
   });
@@ -1290,7 +1291,7 @@ function filteredTasks(){
 // whether dashboard aggregates should be recomputed client-side from the filtered set
 // vs. trusting the richer server-side whole-book roll-up (rm.*).
 function _filterActive(){
-  return FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||!!FILTER.search;
+  return FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||FILTER.stage!=='all'||!!FILTER.search;
 }
 // Client-side aggregates over the filtered accounts, matching the shape of the server
 // revenue-motion (rm.*) fields the dashboard reads. Only the figures that CAN be honestly
@@ -1323,6 +1324,7 @@ function _facetValues(key){
     let v;
     if(key==='segment') v=a.segment||'Unknown';
     else if(key==='owner') v=_ownerLabel(a);
+    else if(key==='stage') v=a.cs_lifecycle_stage||'Unknown';
     if(v) s.add(v);
   });
   return [...s].sort();
@@ -1333,6 +1335,10 @@ function globalFilterBar(){
     opts.map(o=>`<option value="${o[0]}"${o[0]===val?' selected':''}>${o[1]}</option>`).join('')}</select></label>`;
   const segOpts=[['all','All segments']].concat(_facetValues('segment').map(s=>[s,s]));
   const ownOpts=[['all','All owners']].concat(_facetValues('owner').map(s=>[s,s]));
+  // Lifecycle stages ordered by the natural flow; only show stages present in the book.
+  const stageOrder=['Implementation','Onboarding','Adoption','Value Realisation','Mature','Renewal','At Risk','Churned','Unknown'];
+  const presentStages=new Set(_facetValues('stage'));
+  const stageOpts=[['all','All stages']].concat(stageOrder.filter(s=>presentStages.has(s)).map(s=>[s,s]));
   const nf=x=>x.toLocaleString();
   const countLabel=(n===total)
     ? nf(total)+' <em>companies</em>'
@@ -1343,9 +1349,10 @@ function globalFilterBar(){
     sel('segment','Segment',segOpts,FILTER.segment)+
     sel('owner','Owner',ownOpts,FILTER.owner)+
     sel('health','Health',[['all','All'],['red','At risk'],['amber','Watch'],['green','Healthy']],FILTER.health)+
-    sel('lifecycle','Lifecycle',[['active','Active'],['churned','Churned'],['all','All']],FILTER.lifecycle)+
+    sel('lifecycle','Account Status',[['active','Active'],['churned','Churned'],['all','All']],FILTER.lifecycle)+
+    sel('stage','Lifecycle Stage',stageOpts,FILTER.stage)+
     '<span class="gf-count">'+countLabel+'</span>'+
-    (FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||FILTER.search?'<button class="gf-clear" onclick="clearFilter()">Clear</button>':'')+
+    (FILTER.cohort!=='all'||FILTER.segment!=='all'||FILTER.owner!=='all'||FILTER.health!=='all'||FILTER.lifecycle!=='active'||FILTER.stage!=='all'||FILTER.search?'<button class="gf-clear" onclick="clearFilter()">Clear</button>':'')+
   '</div>';
 }
 function _refreshFilterMount(){const gfm=document.getElementById('globalFilterMount');if(gfm&&gfm.style.display!=='none')gfm.innerHTML=globalFilterBar();}
@@ -1355,7 +1362,7 @@ function setSearchFilter(v){FILTER.search=v;try{sessionStorage.setItem('cs_filte
   render(_currentView);
   const c=document.querySelector('#globalFilterMount .gf-count');if(c){const n=filteredAccounts().length,total=(DATA&&DATA.accounts||[]).length,nf=x=>x.toLocaleString();c.innerHTML=(n===total)?nf(total)+' <em>companies</em>':nf(n)+' <em>of</em> '+nf(total)+' <em>companies</em>';}}
 function setFilter(k,v){FILTER[k]=v;try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();_syncSidebarCounts();render(_currentView);}
-function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();_syncSidebarCounts();render(_currentView);}
+function clearFilter(){FILTER.cohort='all';FILTER.segment='all';FILTER.owner='all';FILTER.health='all';FILTER.lifecycle='active';FILTER.stage='all';FILTER.search='';try{sessionStorage.setItem('cs_filter',JSON.stringify(FILTER));}catch(e){}_refreshFilterMount();_syncSidebarCounts();render(_currentView);}
 // Keep the sidebar nav counts in sync with the active filter from ANY view, not only when
 // the Command Center re-renders. Mirrors the counts renderScopeBar sets.
 function _syncSidebarCounts(){
