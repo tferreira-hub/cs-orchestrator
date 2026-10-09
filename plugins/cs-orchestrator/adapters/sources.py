@@ -1918,6 +1918,38 @@ class HubSpot:
 
     # Owner id -> display name, cached across accounts to avoid repeat calls.
     _OWNER_CACHE: dict[str, str] = {}
+    _OWNERS_WARMED: bool = False
+
+    def warm_owners(self) -> int:
+        """Page /crm/v3/owners ONCE and populate both the id->name and email->id caches.
+        Replaces the per-owner live GET fan-out that _owner_name otherwise does on the cold
+        whole-book build (36+ serialised GETs, ~16s, worse under prod throttling — this was
+        a major part of the cold /api/portfolio stall). Best-effort; returns the count."""
+        if not self.live():
+            return 0
+        n = 0
+        after = None
+        try:
+            while True:
+                url = "https://api.hubapi.com/crm/v3/owners?limit=100"
+                if after:
+                    url += f"&after={after}"
+                page = config.http_get(url, self._headers())
+                for o in page.get("results", []):
+                    oid = str(o.get("id"))
+                    name = " ".join(x for x in [o.get("firstName"), o.get("lastName")] if x).strip() or o.get("email")
+                    self._OWNER_CACHE[oid] = name
+                    em = str(o.get("email") or "").strip().lower()
+                    if em:
+                        self._OWNER_EMAIL_CACHE[em] = oid
+                    n += 1
+                after = (page.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        self._OWNERS_WARMED = True
+        return n
 
     def _owner_name(self, owner_id):
         if not owner_id:
@@ -1925,6 +1957,12 @@ class HubSpot:
         oid = str(owner_id)
         if oid in self._OWNER_CACHE:
             return self._OWNER_CACHE[oid]
+        # Cold miss: prefer the single bulk warm over a per-id GET. Once warmed, any id
+        # still missing is genuinely unknown and we cache None rather than re-fetching.
+        if not self._OWNERS_WARMED:
+            self.warm_owners()
+            if oid in self._OWNER_CACHE:
+                return self._OWNER_CACHE[oid]
         try:
             o = config.http_get(f"https://api.hubapi.com/crm/v3/owners/{oid}", self._headers())
             name = " ".join(x for x in [o.get("firstName"), o.get("lastName")] if x).strip() or o.get("email")

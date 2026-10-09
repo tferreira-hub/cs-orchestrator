@@ -299,6 +299,19 @@ def warm_reports():
     (not from a request handler). MUST NOT use _cached_report (which now returns a
     warming placeholder on cold miss)."""
     import time as _t
+    import sys as _sys
+    def _log(msg):
+        print(f"[warm] {msg}", file=_sys.stderr, flush=True)
+    _wt0 = _t.time()
+    _log("warm_reports START")
+    # Bulk-warm the HubSpot owner id->name map in ONE paginated call so the whole-book
+    # build never does per-owner live GETs (that serial fan-out was ~16s cold and worse
+    # under prod throttling). Best-effort.
+    try:
+        if _src.HUBSPOT.live():
+            _s = _t.time(); on = _src.HUBSPOT.warm_owners(); _log(f"owners warm: {on} owners in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"owners warm ERROR {type(exc).__name__}: {exc}")
     # Synchronously warm the WHOLE-BOOK roster cache so the very first portfolio() render
     # shows the full customer book (~4,300), not just the deeply-enriched ~50 slice.
     # portfolio() reads list_all_companies(cached_only=True), which returns [] on a cold
@@ -307,29 +320,32 @@ def warm_reports():
     # request happened to warm it. Best-effort; never crashes the boot thread.
     try:
         if _src.HUBSPOT.live():
-            _src.HUBSPOT.list_all_companies()  # blocking full scan, populates the cache
-    except Exception:  # noqa: BLE001
-        pass
+            _s = _t.time()
+            n = len(_src.HUBSPOT.list_all_companies())  # blocking full scan, populates the cache
+            _log(f"roster scan done: {n} rows in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"roster scan ERROR {type(exc).__name__}: {exc}")
     # Load whole-book warehouse metrics (NDR inputs + licence utilisation) up front so the
     # first dashboard load shows a real Portfolio NDR instead of "no data" while the lazy
     # non-blocking cache warms. Best-effort; never crashes the boot thread.
     try:
-        warm_batch_metrics()
-    except Exception:  # noqa: BLE001
-        pass
+        _s = _t.time(); warm_batch_metrics(); _log(f"batch_metrics done in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"batch_metrics ERROR {type(exc).__name__}: {exc}")
     # Whole-book churn signal so portfolio health scores across the book on first load.
     try:
-        warm_batch_churn()
-    except Exception:  # noqa: BLE001
-        pass
+        _s = _t.time(); warm_batch_churn(); _log(f"batch_churn done in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"batch_churn ERROR {type(exc).__name__}: {exc}")
     # Prime the portfolio cache SYNCHRONOUSLY (the ~80s whole-book health build) on this
     # boot thread, so the first /api/portfolio request after deploy is a warm, instant hit
     # instead of an 85s cold build on the request path (which the edge times out → the
     # dashboard was stuck on 'Checking sources').
     try:
-        warm_portfolio()
-    except Exception:  # noqa: BLE001
-        pass
+        _s = _t.time(); n = warm_portfolio(); _log(f"warm_portfolio done: {n} accounts in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"warm_portfolio ERROR {type(exc).__name__}: {exc}")
+    _log(f"warm_reports COMPLETE in {round(_t.time()-_wt0,1)}s")
     for name, build in [("onboarding_governance", _onboarding_governance_build),
                         ("payment_risk_report", _payment_risk_report_build)]:
         try:
