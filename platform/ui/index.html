@@ -2061,6 +2061,7 @@ function _quarterPanelHtml(sc){
     '<span class="note">What I\'m tracking · as of '+escapeHtml(sc.as_of||'')+'</span></div>'+
     '<div class="body pad"><div class="qsc-grid">'+cards+'</div></div></div>';
 }
+function renderMyPortfolio(){
   const host=document.getElementById('md-pane-portfolio'); if(!host||!DATA)return;
   const accts=filteredAccounts();
   const body=accts.map(a=>{
@@ -4793,14 +4794,14 @@ function taskSummaryStrip(tasks,caption){
 }
 // Account list view state: sort + text filter + health-band filter (Planhat "filtered view").
 let _acctSort={key:'health',dir:'asc'};
-let _acctFilter={q:'',band:null};
+let _acctListFilter={q:'',band:null};
 function acctSetSort(key){
   if(_acctSort.key===key){_acctSort.dir=_acctSort.dir==='asc'?'desc':'asc';}
   else{_acctSort.key=key;_acctSort.dir=(key==='name'||key==='segment'||key==='owner'||key==='phase')?'asc':'desc';}
   document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
 }
-function acctSetFilter(q){_acctFilter.q=q;_acctRefreshTable();}
-function acctToggleBand(b){_acctFilter.band=(_acctFilter.band===b)?null:b;_acctRefreshTable();}
+function acctSetFilter(q){_acctListFilter.q=q;_acctRefreshTable();}
+function acctToggleBand(b){_acctListFilter.band=(_acctListFilter.band===b)?null:b;_acctRefreshTable();}
 function _acctRefreshTable(){
   const host=document.getElementById('acct-table-host');
   if(host){host.innerHTML=_acctTableInner(filteredAccounts());}
@@ -4890,7 +4891,7 @@ function acctTable(rows){
   ];
   const tabs='<div class="viewtabs">'+views.map(v=>'<button class="vtab'+(_acctView===v.id?' active':'')+'" onclick="acctSetView(\''+v.id+'\')"><span class="vt-ico">'+v.ico+'</span>'+v.label+'</button>').join('')+'<button class="vtab vt-add" title="Save a new view">+</button></div>';
   // Filter pill bar (Planhat "filtered view"): find-in-view + health-band pills + count.
-  const bandPill=(b,lbl)=>'<span class="fpill'+(_acctFilter.band===b?' active':'')+'" onclick="acctToggleBand(\''+b+'\')">'+lbl+(_acctFilter.band===b?' <span class="fp-x">×</span>':'')+'</span>';
+  const bandPill=(b,lbl)=>'<span class="fpill'+(_acctListFilter.band===b?' active':'')+'" onclick="acctToggleBand(\''+b+'\')">'+lbl+(_acctListFilter.band===b?' <span class="fp-x">×</span>':'')+'</span>';
   const bar='<div class="filterbar">'+
     '<span class="fb-find"><span class="fb-ico">⌕</span><input type="text" placeholder="Find in view..." oninput="acctSetFilter(this.value)"></span>'+
     bandPill('red','At risk')+bandPill('amber','Watch')+bandPill('green','Healthy')+
@@ -4903,19 +4904,19 @@ function acctTable(rows){
 let _acctView='all';
 function acctSetView(v){
   _acctView=v;
-  if(v==='risk')_acctFilter.band='red';
-  else if(v==='watch')_acctFilter.band='amber';
-  else if(v==='healthy')_acctFilter.band='green';
-  else _acctFilter.band=null;
+  if(v==='risk')_acctListFilter.band='red';
+  else if(v==='watch')_acctListFilter.band='amber';
+  else if(v==='healthy')_acctListFilter.band='green';
+  else _acctListFilter.band=null;
   if(v==='renew'){_acctSort={key:'renews',dir:'asc'};}
   document.getElementById('accounts-body').innerHTML=acctSummaryStrip(filteredAccounts())+acctTable(filteredAccounts());
 }
 function _acctTableInner(rows){
   const NC='<span class="nc">not connected</span>';
   const ND='<span class="muted">no data</span>';
-  const q=(_acctFilter.q||'').trim().toLowerCase();
+  const q=(_acctListFilter.q||'').trim().toLowerCase();
   let list=rows.filter(a=>{
-    if(_acctFilter.band){const b=a.health&&a.health.band;if(b!==_acctFilter.band)return false;}
+    if(_acctListFilter.band){const b=a.health&&a.health.band;if(b!==_acctListFilter.band)return false;}
     if(q){const hay=((a.name||'')+' '+(a.account_id||'')+' '+(a.segment||'')+' '+(a.csm_owner||'')+' '+(a.lifecycle_stage||'')).toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
