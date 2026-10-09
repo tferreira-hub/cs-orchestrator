@@ -991,6 +991,7 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .acct-window{display:inline-flex;align-items:center;gap:7px;background:var(--brandsoft);color:var(--brand);border-radius:999px;padding:5px 13px;font-size:.82em;font-weight:600}
 .acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
 .acct-card{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--surface);box-shadow:var(--shadow)}
+.acct-card .acct-rankbadge{display:inline-block;font-size:.66em;font-weight:800;letter-spacing:.06em;color:var(--brand);background:var(--brandsoft);border-radius:6px;padding:3px 8px;margin-bottom:8px}
 .acct-card .lbl{font-size:.78em;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--ink2)}
 .acct-card .val{font-size:1.7em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:4px;line-height:1}
 .acct-card .val.na{font-size:1em;font-weight:600;color:var(--muted)}
@@ -2524,10 +2525,12 @@ function _acctRenderScorecard(d){
             (function(){
               // Users: 'active (±change)' — native-dashboard parity. Honest when absent.
               var u=id.users;
-              if(!u||u.active===null||u.active===undefined) return metaChip('Users','not connected');
-              var txt=Number(u.active).toLocaleString();
-              if(u.change!==null&&u.change!==undefined&&u.change!==0){
-                txt+=' ('+(u.change>0?'+':'')+Number(u.change).toLocaleString()+')';
+              var active=u?Number(u.active):NaN;
+              if(!u||!Number.isFinite(active)) return metaChip('Users','not connected');
+              var txt=active.toLocaleString();
+              var chg=Number(u.change);
+              if(Number.isFinite(chg)&&chg!==0){
+                txt+=' ('+(chg>0?'+':'')+chg.toLocaleString()+')';
               }
               return metaChip('Users', txt);
             })()+
@@ -2559,7 +2562,10 @@ function _acctRenderScorecard(d){
     const dl=deltas[m.key]?Object.assign({},deltas[m.key],{_float:m.float}):null;
     const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
     const b=bench[m.key];
+    // Prominent RANK badge at the top of the card (matches the native dashboard layout).
+    const rankBadge=(b&&b.rank)?'<div class="acct-rankbadge">RANK '+b.rank+' / '+b.peers+'</div>':'';
     return '<div class="acct-card">'+
+      rankBadge+
       '<div class="lbl">'+escapeHtml(m.label)+(m.derived?'<span class="derived">DERIVED</span>':'')+'</div>'+
       (val===null?'<div class="val na">not connected</div>':'<div class="val">'+val+'</div>')+
       _acctDeltaHtml(dl,lowerBetter)+
@@ -2670,7 +2676,7 @@ function _acctRenderScorecard(d){
         '<div id="acct-sched-note" class="acct-sched-note"></div>'+
       '</div></div>';
 
-  const dataNote=(d.roster_only&&d.data_note)
+  const dataNote=(d.data_note)
     ? '<div class="acct-no-print" style="margin:0 0 10px;padding:10px 14px;border:1px solid #f0d58a;background:#fdf6e3;border-radius:10px;font:500 13px Inter,system-ui;color:#8a6d00">'+escapeHtml(d.data_note)+'</div>'
     : '';
   card.innerHTML=

@@ -415,6 +415,38 @@ def test_roster_only_account_renders_identity_not_404(monkeypatch):
     assert card["connected"]["warehouse_performance"] is False
 
 
+def test_perf_present_dim_missing_shows_profile_note(monkeypatch):
+    """An account with PERFORMANCE rows but no DIMENSION row (e.g. '1300 Hired') must show
+    its live metrics, NOT claim 'no warehouse performance data', and surface an accurate
+    'profile/benchmark unavailable' note. roster_only must be False (perf is present)."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {})   # no dim
+    monkeypatch.setattr(sources.AccountPerformance, "performance", lambda self, ref: {
+        "metrics": {"jobs_created": 23, "ads_posted": 52}, "previous": {"jobs_created": 16},
+        "window": {"months": 12, "end": "2026-10"}, "_source": "redshift-live",
+    })
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "feature_usage", lambda self, ref: {})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": [
+        {"account_id": "au9-2", "name": "1300 Hired", "arr_usd": 3396, "country": "Australia"},
+    ]})
+    engine.set_principal(None)
+    card = engine.account_performance("au9-2")
+    assert card["identity"]["name"] == "1300 Hired"
+    assert card["performance"]["metrics"]["jobs_created"] == 23   # live metrics shown
+    assert card["has_warehouse_performance"] is True
+    assert card["has_warehouse_profile"] is False
+    assert card["roster_only"] is False                          # NOT a bare roster-only
+    assert card["data_note"] and "profile" in card["data_note"].lower()
+
+
 def test_unknown_account_still_404s_when_not_in_roster(monkeypatch):
     """An id in NO source and NOT in the roster is genuinely unknown -> KeyError (404)."""
     import engine, dataaccess

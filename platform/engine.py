@@ -2462,6 +2462,24 @@ def account_performance(account_id: str) -> dict:
     previous.pop("_days_to_close_sum", None)
     deltas = _acct_perf_deltas(metrics, previous) if (metrics or previous) else {}
 
+    # Accurate provenance: an account can be in the PERFORMANCE table but missing from the
+    # account DIMENSION (status/type/plan + the icp/account_type that drives benchmarking).
+    # Distinguish three honest states so the banner never contradicts what's on screen:
+    #   - has_perf  : performance metrics loaded (even if dim is missing)
+    #   - has_dim   : the warehouse dimension row exists
+    has_perf = bool(perf and (metrics or previous))
+    has_dim = bool(dim)
+    data_note = None
+    if roster_only and not has_perf and not has_dim:
+        data_note = ("This account is in your book but has no live warehouse data yet "
+                     "(not provisioned in the data warehouse). Showing account details only.")
+    elif has_perf and not has_dim:
+        # Perf present, profile/dimension absent -> benchmark + status/type/plan unavailable.
+        data_note = ("Performance metrics are live, but this account's warehouse profile "
+                     "(status, type, plan) and peer benchmark aren't provisioned yet, so "
+                     "those fields and rankings are unavailable.")
+        roster_only = False
+
     # --- peer benchmark -------------------------------------------------------
     benchmark = {}
     try:
@@ -2576,12 +2594,12 @@ def account_performance(account_id: str) -> dict:
             "hubspot": bool(hubspot),
             "zendesk": tickets.get("status") != "not_connected",
         },
-        # Honest provenance note for an account that's in the book but has no warehouse row
-        # yet (so the scorecard shows identity only). None when the warehouse resolved.
+        # Honest provenance: distinguishes 'no warehouse data at all' from 'performance
+        # present but profile/benchmark missing'. data_note is computed above.
         "roster_only": roster_only,
-        "data_note": ("This account is in your book but has no live warehouse performance "
-                      "data yet (not provisioned in the data warehouse). Showing account "
-                      "details only." if roster_only else None),
+        "has_warehouse_profile": has_dim,
+        "has_warehouse_performance": has_perf,
+        "data_note": data_note,
     }
 
 
