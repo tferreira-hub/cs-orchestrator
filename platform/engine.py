@@ -2482,10 +2482,17 @@ def account_performance(account_id: str, business_type: str | None = None,
         data_note = ("This account is in your book but has no live warehouse data yet "
                      "(not provisioned in the data warehouse). Showing account details only.")
     elif has_perf and not has_dim:
-        # Perf present, profile/dimension absent -> benchmark + status/type/plan unavailable.
-        data_note = ("Performance metrics are live, but this account's warehouse profile "
-                     "(status, type, plan) and peer benchmark aren't provisioned yet, so "
-                     "those fields and rankings are unavailable.")
+        # Perf present, warehouse dimension absent. Profile (status/type/plan) is backfilled
+        # from HubSpot where available; only the peer BENCHMARK genuinely needs the warehouse
+        # dimension, so be precise rather than claiming the profile is unavailable.
+        if hubspot:
+            data_note = ("Peer benchmarking isn't available for this account yet (no "
+                         "warehouse profile row), so rankings are hidden. Account details "
+                         "and performance metrics are live.")
+        else:
+            data_note = ("Performance metrics are live, but this account's warehouse profile "
+                         "(status, type, plan) and peer benchmark aren't provisioned yet, so "
+                         "those fields and rankings are unavailable.")
         roster_only = False
 
     # --- peer benchmark -------------------------------------------------------
@@ -2550,11 +2557,16 @@ def account_performance(account_id: str, business_type: str | None = None,
         "account_id": account_id,
         "name": name,
         "arr_usd": arr_usd,                              # None when HubSpot not connected
-        "account_status": dim.get("account_status"),
-        "account_type": dim.get("account_type"),
+        # Identity fields prefer the warehouse dimension; when the dim row is missing (an
+        # account not yet in snp_jobadder_all_accounts), fall back to HubSpot so the header
+        # still shows real values instead of "Not available". Honest None only when neither
+        # source has it. account_source records which won, for transparency.
+        "account_status": dim.get("account_status") or hubspot.get("lifecycle_stage"),
+        "account_type": dim.get("account_type") or hubspot.get("segment_label") or hubspot.get("segment"),
         "account_kind": dim.get("account_kind"),
-        "plan": dim.get("tier_name"),
-        "tier": dim.get("tier_name"),
+        "plan": dim.get("tier_name") or hubspot.get("customer_tier"),
+        "tier": dim.get("tier_name") or hubspot.get("customer_tier"),
+        "account_source": ("warehouse" if dim else ("hubspot" if hubspot else None)),
         "country": dim.get("country") or hubspot.get("country"),
         # Users (native-dashboard parity): active = latest max-daily-users-over-month,
         # change = warehouse Vs-Prev delta. None/{} when the metrics warehouse is not live.

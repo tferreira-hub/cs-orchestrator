@@ -25,6 +25,23 @@ Redshift grants are not IAM/Terraform-managed; they live in the database).
 > (`HAS_TABLE_PRIVILEGE` = true for both; NDR back to 87.1% live). Schema USAGE survived
 > (it is granted on the schema, not the rebuilt tables), so only table SELECT was lost.
 
+> NOTE (2026-10-10): the Account Performance scorecard (per-account benchmarking) also
+> needs `marts.snp_jobadder_all_accounts` (the account DIMENSION / SCD2 snapshot) and the
+> `rpt.rpt_account_performance_monthly` + `rpt.rpt_job_automation_usage_monthly` reporting
+> tables. The DIMENSION grant was found MISSING in the live warehouse: the churn-reader
+> could read `rpt` perf but NOT `marts.snp_jobadder_all_accounts`
+> (`HAS_TABLE_PRIVILEGE` = false), so EVERY account scorecard showed "Status/Type/Plan: not
+> available" and "UNRANKED / no peer cohort" — the dimension + benchmark queries were
+> `permission denied for relation snp_jobadder_all_accounts` (seen in the app logs once
+> `CS_LOG_SOURCE_ERRORS=1` was enabled). The perf tables WERE readable, which is why
+> performance metrics showed but rankings/profile did not. Fixed this session: one-time
+> `GRANT SELECT` on the dimension + re-affirmed `ALTER DEFAULT PRIVILEGES FOR USER dbt IN
+> SCHEMA marts` (the table is dbt-owned and DROP+recreated, so the default-privilege is the
+> durable fix). Verified: `HAS_TABLE_PRIVILEGE(132, 'marts.snp_jobadder_all_accounts',
+> 'SELECT')` = true, and `account_performance('AU2-2090')` returned a live 393-peer cohort
+> with real ranks/percentiles. Re-run section 2 below (now including the dimension + perf
+> tables) after any warehouse rebuild if the scorecard regresses.
+
 Account: Data Platform **503561421603** · region ap-southeast-2
 Workgroup: `data-platform-redshift-warehouse-wg-prod`
 (id `96c87b2d-6d6d-4003-b919-f5b8d0ee39d0`) · database `dwh`
@@ -54,16 +71,22 @@ platform queries:
 | `rpt.rpt_account_ndr_monthly` | NDR (current vs prior-year revenue) |
 | `marts.int_ds_account_churn_scoring` | ML churn score (a view over `stg`) |
 | `stg.stg_jobadder_all_accounts` | underlying table the churn view reads |
+| `marts.snp_jobadder_all_accounts` | account DIMENSION (status/type/plan/AI flags) + the key the scorecard benchmark cohort joins on (2026-10-10) |
+| `rpt.rpt_account_performance_monthly` | per-account performance metrics + benchmark cohort (2026-10-10) |
+| `rpt.rpt_job_automation_usage_monthly` | per-account automation/AI feature usage on the scorecard (2026-10-10) |
 
 Apply once as a Data Platform admin (Redshift Data API or query editor):
 
 ```sql
 GRANT USAGE  ON SCHEMA rpt   TO "IAMR:cs-platform-churn-reader";
-GRANT SELECT ON TABLE  rpt.rpt_account_ndr_monthly        TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  rpt.rpt_account_ndr_monthly         TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  rpt.rpt_account_performance_monthly TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  rpt.rpt_job_automation_usage_monthly TO "IAMR:cs-platform-churn-reader";
 GRANT USAGE  ON SCHEMA marts TO "IAMR:cs-platform-churn-reader";
-GRANT SELECT ON TABLE  marts.int_ds_account_churn_scoring TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  marts.int_ds_account_churn_scoring  TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  marts.snp_jobadder_all_accounts     TO "IAMR:cs-platform-churn-reader";
 GRANT USAGE  ON SCHEMA stg   TO "IAMR:cs-platform-churn-reader";
-GRANT SELECT ON TABLE  stg.stg_jobadder_all_accounts      TO "IAMR:cs-platform-churn-reader";
+GRANT SELECT ON TABLE  stg.stg_jobadder_all_accounts       TO "IAMR:cs-platform-churn-reader";
 ```
 
 Example apply via the Data API (admin creds):

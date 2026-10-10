@@ -216,6 +216,11 @@ variable "app_environment" {
     CS_PENDO_ACTIVITY   = "1"
     CS_STALE_REVALIDATE = "1"
     CS_CACHE_TTL        = "600"
+    # Log source-adapter failures (e.g. Redshift permission-denied, vendor errors) to
+    # stderr/CloudWatch. Default ON: a silent data-source failure is otherwise invisible
+    # and was the reason a missing warehouse GRANT took so long to diagnose (every account
+    # scorecard rendered empty with no error anywhere). Cheap, non-sensitive (no payloads).
+    CS_LOG_SOURCE_ERRORS = "1"
     # Enriched/health-scored roster size: how many accounts get the full multi-vendor
     # fan-out + a computable health score. The cold-cache build is SYNCHRONOUS on the
     # first request (all_accounts()), so this value directly bounds first-load latency:
