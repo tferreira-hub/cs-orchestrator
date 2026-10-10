@@ -48,11 +48,25 @@ def test_rbac_no_admin_group_without_explicit_config(monkeypatch):
 
 
 def test_rbac_admin_group_matches_by_id(monkeypatch):
-    """Identity Center may send the group id rather than the name; substring match
-    handles both (as in ja-observe)."""
+    """Identity Center may send the group id rather than the name; whole-token
+    matching handles both the name and the UUID (as in ja-observe)."""
     import rbac
     monkeypatch.setenv("CS_ADMIN_GROUPS", "a4d8e4c8-5041-7005-a1cf-87f1c635306b")
     assert rbac.resolve_role("x@jobadder.com", "[a4d8e4c8-5041-7005-a1cf-87f1c635306b]") == rbac.ADMIN
+
+
+def test_rbac_admin_group_no_substring_overmatch(monkeypatch):
+    """A configured admin group must match only the WHOLE group token, never as a
+    substring. A user who is in a distinct group that merely CONTAINS the admin
+    group name (e.g. 'CS-Platform-Admins-ReadOnly') must NOT be granted admin."""
+    import rbac
+    monkeypatch.setenv("CS_ADMIN_GROUPS", "CS-Platform-Admins")
+    monkeypatch.delenv("AUTH_ADMIN_EMAILS", raising=False)
+    assert rbac.resolve_role("x@jobadder.com", "[CS-Platform-Admins-ReadOnly]") == rbac.CSM
+    assert rbac.has_cs_access("x@jobadder.com", "[CS-Platform-Admins-ReadOnly]") is False
+    # The exact token still matches (and a trailing/leading-space variant too).
+    assert rbac.resolve_role("x@jobadder.com", "[CS-Platform-Admins]") == rbac.ADMIN
+    assert rbac.resolve_role("x@jobadder.com", "[ Other, CS-Platform-Admins ]") == rbac.ADMIN
 
 
 def test_has_cs_access_admin_user_and_denied(monkeypatch):

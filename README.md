@@ -76,7 +76,7 @@ This is not an AI that guesses. The WoW rules are encoded as deterministic code,
 | CS stack as agent tools (HubSpot, Zendesk, Pendo, Stripe, Jiminny, Redshift) | Tools / MCP | `plugins/cs-orchestrator/mcp-servers/cs_stack_server.py` |
 | `cs-orchestrator` orchestrator + 4 specialist agents (`risk-analyst`, `renewal-planner`, `outreach-drafter`, `cs-playbook-judge`) | Custom agents (multi-agent, subagent loops, self-correction) | `plugins/cs-orchestrator/agents/*.agent.md` |
 | WoW rules (Three Mandates, routing, thresholds, cadence, payment) | Automatic skill | `plugins/cs-orchestrator/skills/cs-playbook/SKILL.md` |
-| Multi-instance suppression + grounding gate + deterministic playbook judge | Enforcement hooks + feedback sensor | `plugins/cs-orchestrator/hooks/`, `plugins/cs-orchestrator/playbook_judge.py` |
+| Multi-instance suppression + grounding gate + deterministic playbook judge | Enforcement + feedback sensors (invoked in-process; the hook scripts live in `hooks/`, `hooks.json` is intentionally empty) | `plugins/cs-orchestrator/hooks/`, `plugins/cs-orchestrator/playbook_judge.py` |
 
 ### Feedforward and feedback
 
@@ -87,8 +87,8 @@ Following Fowler/Böckeler's model, a harness is Guides (feedforward) + Sensors 
 | `cs-playbook` SKILL.md + `copilot-instructions.md` + agent definitions | inferential | feedforward |
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
-| `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (324 tests) | computational | feedback |
+| `grounding-gate.py` (final-answer check, invoked in-process) | computational | feedback |
+| `pytest` (402 tests) | computational | feedback |
 | `playbook_judge.py` (queue checker keyed on stable `rule_id`, returns PASS / NEEDS_CHANGES, wired into `orchestrate()`) | computational | feedback |
 | `cs-playbook-judge` agent (LLM-as-judge, semantic review on top of the code checks) | inferential | feedback |
 
@@ -125,7 +125,7 @@ python3 plugins/cs-orchestrator/mcp-servers/cs_stack_server.py
 pip install -r requirements-dev.txt
 python3 -m pytest plugins/cs-orchestrator/tests/ -v
 ```
-324 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
+402 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
 
 **As a Copilot plugin:**
 

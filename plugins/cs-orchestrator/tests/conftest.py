@@ -25,6 +25,41 @@ for p in (str(PLUGIN), str(PLATFORM)):
         sys.path.insert(0, p)
 
 
+def _force_offline() -> None:
+    """Hard offline guard for the whole test session.
+
+    The adapters go live whenever a vendor token is present in the environment
+    (config.live_enabled() defaults True; HubSpot.live() = live_enabled() and a token).
+    If a developer has a real .env / HUBSPOT_TOKEN exported, importing config auto-loads
+    it (config._load_dotenv) and tests that spawn the roster warm/deal-renewal daemon
+    threads would then make REAL vendor calls (observed as HTTP 401 from a background
+    thread during pytest).
+
+    We eliminate that entire class of leak deterministically:
+      * CS_USE_LIVE=0 forces config.live_enabled() False everywhere, so every adapter
+        .live() is False regardless of any token that happens to be set.
+      * CS_ROSTER_DEAL_RENEWAL=0 disables the background deal-renewal enrichment thread
+        so no orphaned daemon can outlive a test's monkeypatch and hit the network.
+      * Vendor tokens are cleared as belt-and-braces so even code paths that bypass
+        live_enabled() have no credentials to use.
+    Individual tests that need liveness still monkeypatch `.live()`/the adapter object
+    directly (they never rely on real tokens), so this does not weaken any coverage."""
+    os.environ["CS_USE_LIVE"] = "0"
+    os.environ["CS_ROSTER_DEAL_RENEWAL"] = "0"
+    os.environ.pop("CS_ALLOW_WRITE", None)
+    for tok in ("HUBSPOT_TOKEN", "ZENDESK_TOKEN", "ZENDESK_EMAIL", "ZENDESK_SUBDOMAIN",
+                "STRIPE_API_KEY", "PENDO_API_KEY", "JIMINNY_API_KEY", "ROCKETLANE_TOKEN"):
+        os.environ.pop(tok, None)
+
+
+_force_offline()
+
+
+def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
+    """Re-assert the offline guard at session start, after any plugin/env loading."""
+    _force_offline()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_shared_globals():
     import orchestrate
@@ -65,3 +100,19 @@ def _isolate_shared_globals():
         if hasattr(engine, "_INBOUND_QUEUE"):
             engine._INBOUND_QUEUE.clear()
             engine._INBOUND_QUEUE_LOADED = True
+
+    # Clear the process-global HubSpot roster warm flags + cache so a background warm
+    # thread that a test left in flight cannot make a later test order-dependent (the
+    # _roster_warming / _roster_renewal_filling flags are set on the CLASS and were not
+    # otherwise reset). CS_USE_LIVE=0 + CS_ROSTER_DEAL_RENEWAL=0 already prevent any
+    # real network call; this just stops stale state leaking across tests.
+    _sources = sys.modules.get("adapters.sources")
+    if _sources is not None and hasattr(_sources, "HubSpot"):
+        hs_cls = _sources.HubSpot
+        hs_cls._roster_warming = False
+        hs_cls._roster_renewal_filling = False
+        if hasattr(hs_cls, "_full_roster_cache"):
+            try:
+                delattr(hs_cls, "_full_roster_cache")
+            except AttributeError:
+                pass

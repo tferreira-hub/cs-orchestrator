@@ -259,6 +259,10 @@ def test_entitlements_reports_explicit_utilization(monkeypatch):
 
     monkeypatch.setenv("ENTITLEMENTS_API_URL", "https://ent.example")
     monkeypatch.setenv("ENTITLEMENTS_KEY", "test-key")
+    # Tests the liveness-detection + utilization contract with a mocked transport
+    # (no real network). The suite-wide conftest forces CS_USE_LIVE=0 to block live
+    # calls, so re-enable the master switch for this liveness assertion.
+    monkeypatch.setenv("CS_USE_LIVE", "1")
     captured = {}
     def fake_get(url, headers, timeout=12):
         captured["url"] = url

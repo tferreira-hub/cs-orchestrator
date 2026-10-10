@@ -31,8 +31,8 @@ This harness has both halves:
 | `cs-playbook` rules + `copilot-instructions.md` + agent defs | inferential | feedforward |
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
-| `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (324 tests) | computational | feedback |
+| `grounding-gate.py` (final-answer check, invoked in-process) | computational | feedback |
+| `pytest` (402 tests) | computational | feedback |
 | **`playbook_judge.py`** (deterministic queue checker keyed on stable `rule_id` → PASS/NEEDS_CHANGES, wired into `orchestrate()`) | **computational** | **feedback** |
 | **`cs-playbook-judge`** agent (LLM-as-judge, semantic review beyond the code checks) | **inferential** | **feedback** |
 
@@ -103,8 +103,8 @@ Our plugin is a Copilot marketplace of its own.
 2. In a `copilot` session, invoke the agent:
    > "@cs-orchestrator what are my top CS actions today?"
    The agent calls the `cs-stack` MCP tools, applies the `cs-playbook` rules, the
-   suppression hook drops test-instance noise, and the grounding gate checks every figure
-   on `Stop`.
+   suppression filter drops test-instance noise, and the grounding gate checks every figure
+   in the final answer against the structured action-packet evidence.
 
 ## Part C. Run the product (the CS Platform UI)
 
@@ -120,9 +120,13 @@ map are all driven by the same rules engine the agent uses. One source of truth.
 - `plugins/cs-orchestrator/plugin.json` + `.github/plugin/marketplace.json` follow the
   JobAdder agent-plugins format (matched field for field against the local clone).
 - `.mcp.json` uses `type: stdio`.
-- `hooks.json` fires `grounding-gate.py` on `Stop` using the `${PLUGIN_ROOT}` convention.
-- MCP server and hook resolve their data from their own location (no env needed).
-- **324 tests pass** (`plugins/cs-orchestrator/tests/`): rules, suppression, grounding gate,
+- The `grounding-gate.py` script is invoked programmatically on the orchestrator's final
+  answer / structured action packet (see `agent_runner.py`), not registered as a Copilot
+  `Stop` hook — `hooks.json` is intentionally empty (asserted by
+  `test_grounding_gate_is_not_registered_as_a_stop_hook`). The `${PLUGIN_ROOT}` wiring
+  convention is kept available for when a managed-runtime Stop hook is desired.
+- MCP server and the grounding-gate script resolve their data from their own location (no env needed).
+- **402 tests pass** (`plugins/cs-orchestrator/tests/`): rules, suppression, grounding gate,
   Stripe secret-key guard, and the playbook judge (PASS on a clean queue; catches
   priority/evidence/draft/routing violations on a deliberately-broken queue).
 - The **playbook judge runs on every queue** (`orchestrate()` returns a `judge` verdict; the

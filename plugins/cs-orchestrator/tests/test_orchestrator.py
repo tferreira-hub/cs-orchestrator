@@ -431,8 +431,12 @@ def test_churn_live_requires_database_and_target():
     from adapters import sources
 
     keys = ("REDSHIFT_DATABASE", "REDSHIFT_WORKGROUP", "REDSHIFT_CLUSTER_ID",
-            "REDSHIFT_CHURN_TABLE", "REDSHIFT_CHURN_MODE")
+            "REDSHIFT_CHURN_TABLE", "REDSHIFT_CHURN_MODE", "CS_USE_LIVE")
     prev = {k: os.environ.pop(k, None) for k in keys}
+    # This test exercises the liveness-DETECTION logic itself, so the master
+    # live switch must be on (the suite-wide conftest sets CS_USE_LIVE=0 to block
+    # real network calls; no network is made here — only .live() config checks).
+    os.environ["CS_USE_LIVE"] = "1"
     try:
         assert sources.CHURN.live() is False, "must be False with no config"
         os.environ["REDSHIFT_DATABASE"] = "analytics"

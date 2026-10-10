@@ -20,7 +20,7 @@ Each row says what it unblocks and where the platform already meets it.
   real signals today; the fuller onboarding-velocity lifecycle view is Phase-2 scope.
 
 ## What is NOT pending
-All application logic for the requirements is built, tested (360 tests), and deployed:
+All application logic for the requirements is built, tested (402 tests), and deployed:
 HubSpot bi-directional + gated writes, Stripe dunning, Zendesk ingest + reply/close,
 telemetry, **live ML churn**, Jiminny, multi-instance suppression, churn→P1/24h, No-Chasing,
 renewal cadence, expansion→CSQL, health scoring, segmentation + **platform-executed

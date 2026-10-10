@@ -7,7 +7,7 @@ Notes · Tech-Touch V3 · V5 Follow-Up Notes).
 **Headline:** every functional requirement is built, and an end-to-end source audit
 (9 Oct) verified each against code + UI + tests rather than intent. The audit found four
 real code gaps that the previous (6 Oct) version of this scorecard had marked done or
-glossed; **all four are now fixed, tested, and on PR #167** (341 tests passing). The only
+glossed; **all four are now fixed, tested, and on PR #167** (402 tests passing). The only
 items still not switched on are **external dependencies** (a HubSpot email template, wiring
 the 5 inbound webhooks into the platform, two security key rotations) — not capability
 gaps. A few pillars are intentionally Phase-2 / non-platform per your own docs.
