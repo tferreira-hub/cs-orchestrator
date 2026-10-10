@@ -18,6 +18,7 @@ Nothing here contains a secret; all credentials come from config.env().
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from . import config, identity
@@ -104,6 +105,9 @@ class Zendesk:
             "by_instance": {identity.normalise(account_ref): last7},
             "_source": "zendesk-live",
             "_org_name": org_name,
+            # Origin-source deep link to the Zendesk organisation record.
+            "zendesk_url": (f"https://{sub}.zendesk.com/agent/organizations/{org_id}/tickets"
+                            if (sub and org_id) else None),
         }
 
     # ---- Writes (increment 3): reply to and close/transfer tickets so a CSM can resolve
@@ -238,8 +242,15 @@ class Pendo:
         # velocity relies solely on explicit metadata mappings (data gap if unmapped).
         if config.env("CS_PENDO_ACTIVITY") == "1":
             activity_last7, activity_prev7 = self._activity_velocity(ref, headers)
+            # Also derive real adoption signals from the aggregation API: the account
+            # metadata carries no adoption/engagement scores (pendo_predict is empty on
+            # this install), but featureEvents DO expose genuine usage. We count distinct
+            # active visitors and distinct features used over a 30-day window. These are
+            # real, not fabricated; an idle account correctly yields 0.
+            active_users_30d, features_used_30d = self._adoption_signals(ref, headers)
         else:
             activity_last7, activity_prev7 = None, None
+            active_users_30d, features_used_30d = None, None
 
         mapped_api_last = configured_metric("api_calls_last_7d")
         mapped_api_prev = configured_metric("api_calls_prev_7d")
@@ -253,6 +264,13 @@ class Pendo:
             "active_users_pct": configured_metric("active_users_pct"),
             "license_utilization_pct": configured_metric("license_utilization_pct"),
             "key_feature_adoption_pct": configured_metric("key_feature_adoption_pct"),
+            # Derived from the Aggregation API (real usage, not metadata). Raw counts
+            # over a 30-day window: distinct active visitors and distinct features used.
+            # These are honest absolute counts (an idle account yields 0); they are NOT
+            # percentages because Pendo gives us no licensed-seat / total-feature
+            # denominator here, so we never fabricate a %.
+            "active_users_30d": active_users_30d,
+            "features_used_30d": features_used_30d,
             # Explicit metadata mapping wins; else the derived aggregation activity count.
             "api_calls_last_7d": mapped_api_last if mapped_api_last is not None else activity_last7,
             "api_calls_prev_7d": mapped_api_prev if mapped_api_prev is not None else activity_prev7,
@@ -271,6 +289,12 @@ class Pendo:
             "plan_price": agent.get("planprice"),
             "site": agent.get("sitename"),
             "by_instance": {ref: {"days_since_last_visit": days_since_visit}},
+            # Origin-source deep link to the Pendo account view, ONLY when the app's
+            # subscription/app id is configured (PENDO_APP_URL, e.g.
+            # https://app.pendo.io/s/<subId>/account/). The per-account URL path is
+            # install-specific, so we never guess it - no config means no link.
+            "pendo_url": ((config.env("PENDO_APP_URL").rstrip("/") + "/" + ref)
+                          if config.env("PENDO_APP_URL") else None),
             "_source": "pendo-live",
         }
 
@@ -304,6 +328,39 @@ class Pendo:
         if last7 is None and prev7 is None:
             return None, None
         return last7, prev7
+
+    def _adoption_signals(self, ref: str, headers: dict) -> tuple[int | None, int | None]:
+        """Real adoption signals from the Pendo Aggregation API over a 30-day window:
+        (active_users, features_used) = the number of DISTINCT visitors who generated
+        feature events, and the number of DISTINCT features touched, for this account.
+
+        The account-metadata endpoint has no adoption scores (pendo_predict is empty on
+        this install), but featureEvents expose genuine usage. We group by visitorId /
+        featureId and count the resulting rows (= distinct values). Returns (None, None)
+        on any failure; an idle account legitimately returns (0, 0). Never fabricated."""
+        day = 86400 * 1000
+        import time as _time
+        first = int(_time.time() * 1000) - 30 * day
+
+        def _distinct(group_field: str) -> int | None:
+            pipeline = [
+                {"source": {"featureEvents": {"featureId": None},
+                            "timeSeries": {"period": "dayRange", "first": first, "count": 30}}},
+                {"filter": f'accountId == "{ref}"'},
+                {"group": {"group": [group_field], "fields": [{"ev": {"sum": "numEvents"}}]}},
+            ]
+            try:
+                res = self._aggregation(pipeline, headers)
+            except Exception:  # noqa: BLE001 - best-effort; absence = data gap
+                return None
+            rows = res.get("results") if isinstance(res, dict) else None
+            return len(rows) if rows is not None else None
+
+        active_users = _distinct("visitorId")
+        features_used = _distinct("featureId")
+        if active_users is None and features_used is None:
+            return None, None
+        return active_users, features_used
 
     @staticmethod
     def _aggregation(pipeline: list, headers: dict) -> dict:
@@ -383,6 +440,59 @@ class RocketLane:
             if any(k in lbl for k in label_contains):
                 return f.get("fieldValueLabel") or f.get("fieldValue")
         return None
+
+    def list_active_projects(self, limit: int = 500) -> list[dict[str, Any]]:
+        """All non-archived onboarding projects straight from Rocket Lane (source-first),
+        so the governance view is COMPLETE regardless of how the account roster was warmed
+        and without depending on brittle per-account name matching. Returns a normalised
+        list; [] when not live or on error (honest, never fabricated).
+
+        Each row: {company_name, company_id, project_name, status, start_date, due_date,
+        archived, owner, _source}."""
+        if not self.live():
+            return []
+        import urllib.parse
+        base = self._base()
+        headers = self._headers()
+        out: list[dict[str, Any]] = []
+        page_token = None
+        try:
+            while len(out) < limit:
+                params = {"pageSize": min(100, limit - len(out)),
+                          "sortBy": "createdAt", "sortOrder": "DESC"}
+                if page_token:
+                    params["pageToken"] = page_token
+                res = config.http_get(f"{base}/1.0/projects?{urllib.parse.urlencode(params)}", headers)
+                data = (res.get("data") or []) if isinstance(res, dict) else []
+                for p in data:
+                    if p.get("archived"):
+                        continue
+                    status_obj = p.get("status") or {}
+                    status_label = status_obj.get("label") if isinstance(status_obj, dict) else status_obj
+                    cust = p.get("customer") or {}
+                    owner = p.get("owner") or {}
+                    owner_name = " ".join(x for x in [owner.get("firstName"), owner.get("lastName")] if x) or owner.get("emailId")
+                    out.append({
+                        "company_name": cust.get("companyName"),
+                        "company_id": cust.get("companyId"),
+                        "project_name": p.get("projectName"),
+                        "status": status_label,
+                        "start_date": p.get("startDate"),
+                        "due_date": p.get("dueDate"),
+                        "archived": bool(p.get("archived")),
+                        "owner": owner_name,
+                        "health": self._field(p, ("health", "onboarding health", "status health")),
+                        "_source": "rocket-lane-live",
+                    })
+                pg = (res.get("pagination") or {}) if isinstance(res, dict) else {}
+                page_token = pg.get("nextPageToken")
+                if not page_token or not data:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[rocket-lane] list_active_projects {type(exc).__name__}: {exc}", file=_s.stderr)
+            return []
+        return out
 
 
 
@@ -547,6 +657,7 @@ class Stripe:
             # Identity for the Payment Risk Report: the Stripe customer id builds the
             # dashboard link, and the customer email is a billing-contact fallback.
             "customer_id": cid,
+            "stripe_url": (f"https://dashboard.stripe.com/customers/{cid}" if cid else None),
             "customer_email": cust_email,
             "_source": "stripe-live",
         }
@@ -774,8 +885,79 @@ class Churn:
             "_source": "redshift-live",
         }
 
+    def batch_scores(self) -> dict[str, dict]:
+        """Whole-book churn signal in ONE query, keyed by uppercase-hyphen ref (AU1-5005).
 
-# ------------------------------------------------- Account metrics (Redshift) ---
+        Parallels AccountMetrics.batch_metrics: instead of a per-account fan-out, pull the
+        latest churn row for every account so portfolio HEALTH is computable across the
+        whole book (an account with a churn status/score is scorable), not just the
+        deeply-enriched slice. Returns {ref: {churn_status|ml_churn_score, ...}} or {} when
+        not live / on any error (never fabricates). Honours REDSHIFT_CHURN_MODE
+        (status|score), the same as score()."""
+        if not self.live():
+            return {}
+        import time
+        client = self._client()
+        try:
+            table = self._identifier(config.env("REDSHIFT_CHURN_TABLE") or "", qualified=True)
+            id_col = self._identifier(config.env("REDSHIFT_CHURN_ID_COLUMN") or "nk_ja_account")
+        except config.SourceError:
+            return {}
+        mode = (config.env("REDSHIFT_CHURN_MODE") or "score").lower()
+        if mode == "status":
+            status_col = self._identifier(config.env("REDSHIFT_CHURN_STATUS_COLUMN") or "calculated_churn_status")
+            sel = f"{id_col} AS k, {status_col} AS churn_status"
+            order_col = status_col
+        else:
+            score_col = self._identifier(config.env("REDSHIFT_CHURN_SCORE_COLUMN") or "churn_probability")
+            scored_at_col = self._identifier(config.env("REDSHIFT_CHURN_SCORED_AT_COLUMN") or "scored_at")
+            sel = f"{id_col} AS k, {score_col} AS ml_churn_score"
+            order_col = scored_at_col
+        # One row per account (latest), via a window - mirrors batch_metrics. A per-account
+        # correlated subquery timed out at scale; ROW_NUMBER over the whole table is fast.
+        sql = (f"SELECT k, {'churn_status' if mode=='status' else 'ml_churn_score'} FROM ("
+               f"  SELECT {sel}, ROW_NUMBER() OVER (PARTITION BY {id_col} ORDER BY {order_col} DESC) rn"
+               f"  FROM {table}) WHERE rn = 1")
+        out: dict[str, dict] = {}
+        try:
+            resp = client.execute_statement(Sql=sql, **self._target_kwargs())
+            sid = resp["Id"]
+            deadline = time.monotonic() + self.POLL_TIMEOUT_S
+            status = "SUBMITTED"
+            while status not in ("FINISHED", "FAILED", "ABORTED"):
+                if time.monotonic() > deadline:
+                    return {}
+                time.sleep(self.POLL_INTERVAL_S)
+                status = client.describe_statement(Id=sid)["Status"]
+            if status != "FINISHED":
+                return {}
+            token = None
+            while True:
+                kw = {"Id": sid}
+                if token:
+                    kw["NextToken"] = token
+                res = client.get_statement_result(**kw)
+                for row in res.get("Records", []):
+                    ref = self._cell(row[0])
+                    if not ref:
+                        continue
+                    val = self._cell(row[1])
+                    if mode == "status":
+                        out[str(ref).upper()] = {"churn_status": val, "computed": False,
+                                                 "_source": "redshift-live"}
+                    else:
+                        out[str(ref).upper()] = {"ml_churn_score": val, "computed": False,
+                                                 "_source": "redshift-live"}
+                token = res.get("NextToken")
+                if not token:
+                    break
+        except Exception as exc:  # noqa: BLE001 - best-effort; absence is a data gap, not a crash
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[churn-batch] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        return out
+
+
 class AccountMetrics:
     """Real per-account business metrics from the Data Platform warehouse
     (rpt.rpt_account_ndr_monthly): revenue/NDR, user adoption (active vs committed seats),
@@ -867,6 +1049,110 @@ class AccountMetrics:
             "_source": "redshift-live",
         }
 
+    def batch_metrics(self, account_refs: list) -> dict[str, dict]:
+        """Latest-month warehouse metrics for the whole book in a SINGLE query, keyed by
+        the uppercase-hyphen ref (AU1-2014). This is the whole-book path: one query instead
+        of a per-account fan-out, so portfolio NDR and licence utilisation populate across
+        the book without N round-trips. Uses a ROW_NUMBER window to pick each account's
+        latest reporting month (verified ~10k accounts in ~4s; a per-row correlated
+        subquery timed out at 50s+). account_refs is accepted for interface symmetry but
+        the whole latest-month snapshot is pulled and the caller selects the refs it needs.
+        Returns {} on any failure or when not live (never fabricates)."""
+        if not self.live():
+            return {}
+        import time
+        ch = self._c()
+        try:
+            table = ch._identifier(config.env("REDSHIFT_METRICS_TABLE") or "rpt.rpt_account_ndr_monthly", qualified=True)
+            id_col = ch._identifier(config.env("REDSHIFT_METRICS_ID_COLUMN") or "ja_account")
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        cell = ch._cell
+        out: dict[str, dict] = {}
+        sql = (
+            f"SELECT {id_col}, revenue, revenue_for_the_previous_year, "
+            "max_daily_users_over_month, deal_committed_users, tenure_months, user_change, "
+            "account_status_rms, revenue_change FROM ("
+            f"  SELECT {id_col}, revenue, revenue_for_the_previous_year, "
+            "  max_daily_users_over_month, deal_committed_users, tenure_months, user_change, "
+            "  account_status_rms, revenue_change, "
+            f"  ROW_NUMBER() OVER (PARTITION BY {id_col} ORDER BY date_reporting_month DESC) AS rn "
+            f"  FROM {table}"
+            ") WHERE rn = 1"
+        )
+        try:
+            resp = client.execute_statement(Sql=sql, **ch._target_kwargs())
+            sid = resp["Id"]
+            deadline = time.monotonic() + self.POLL_TIMEOUT_S
+            status = "SUBMITTED"
+            while status not in ("FINISHED", "FAILED", "ABORTED"):
+                if time.monotonic() > deadline:
+                    return {}
+                time.sleep(self.POLL_INTERVAL_S)
+                status = client.describe_statement(Id=sid)["Status"]
+            if status != "FINISHED":
+                return {}
+            token = None
+            while True:
+                kw = {"Id": sid}
+                if token:
+                    kw["NextToken"] = token
+                res = client.get_statement_result(**kw)
+                for row in res.get("Records", []):
+                    ref = cell(row[0])
+                    if not ref:
+                        continue
+                    rev = cell(row[1]); rev_py = cell(row[2])
+                    active_users = cell(row[3]); committed = cell(row[4])
+                    # Revenue comes back as a STRING ('0.00', '1234.50'). Coerce to float
+                    # for the guards: a non-empty string like '0.00' is truthy, so the old
+                    # `if rev_py:` guard let 0/0 through and silently nulled NDR. NDR is only
+                    # meaningful when BOTH years have real revenue (> 0).
+                    def _f2(x):
+                        try:
+                            return float(x) if x not in (None, "") else None
+                        except (TypeError, ValueError):
+                            return None
+                    rev_n, rev_py_n = _f2(rev), _f2(rev_py)
+                    ndr_pct = None
+                    if rev_py_n and rev_py_n > 0 and rev_n is not None:
+                        try:
+                            ndr_pct = round(100.0 * rev_n / rev_py_n)
+                        except (ZeroDivisionError, ValueError):
+                            ndr_pct = None
+                    user_util = None
+                    committed_n = _f2(committed)
+                    if committed_n and committed_n > 0:
+                        try:
+                            user_util = round(100.0 * float(active_users or 0) / committed_n)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            user_util = None
+                    out[str(ref).upper()] = {
+                        "mrr_usd": rev,
+                        "revenue_prev_year_usd": rev_py,
+                        "ndr_pct": ndr_pct,
+                        "active_users": active_users,
+                        "committed_users": committed,
+                        "user_utilization_pct": user_util,
+                        "tenure_months": cell(row[5]),
+                        "user_change": cell(row[6]),
+                        # Warehouse account status (Active / Churned / PaymentRequired /
+                        # CancelRequested) and revenue trend - richer, authoritative signals
+                        # from the NDR mart that the health score can act on directly.
+                        "account_status_rms": cell(row[7]),
+                        "revenue_change": cell(row[8]),
+                        "_source": "redshift-live",
+                    }
+                token = res.get("NextToken")
+                if not token:
+                    break
+        except Exception as exc:  # noqa: BLE001 - batch is best-effort; absence is a data gap
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s; print(f"[account-metrics-batch] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        return out
+
 
 # ------------------------------------------------------------------ Jiminny ---
 class Jiminny:
@@ -944,8 +1230,95 @@ class HubSpot:
     def live(self) -> bool:
         return config.live_enabled() and bool(config.env("HUBSPOT_TOKEN"))
 
+    @staticmethod
+    def _csm_fields() -> list[str]:
+        """Ordered list of HubSpot company properties that may hold the designated CSM, most
+        specific first. The resolver takes the FIRST non-empty one, then falls back to the
+        record owner. Configurable via CS_CSM_FIELD (comma-separated); default tries
+        'retention_owner' (the owner-distinct retention/CS assignment) then
+        'customer_success_manager'. Set CS_CSM_FIELD='hubspot_owner_id' to use only the
+        record owner."""
+        import os
+        raw = (os.environ.get("CS_CSM_FIELD", "") or "").strip()
+        if raw:
+            fields = [f.strip() for f in raw.split(",") if f.strip()]
+            if fields:
+                return fields
+        return ["retention_owner", "customer_success_manager"]
+
+    @classmethod
+    def _resolve_csm(cls, props: dict) -> tuple:
+        """Resolve (csm_user_id, source) from a company's properties: the first non-empty
+        value across _csm_fields(), labelled with which field it came from; else the record
+        owner (source='record_owner'); else (None, None). Transparent + deterministic."""
+        for field in cls._csm_fields():
+            v = props.get(field)
+            if v not in (None, ""):
+                return str(v), field
+        owner = props.get("hubspot_owner_id")
+        if owner not in (None, ""):
+            return str(owner), "record_owner"
+        return None, None
+
+    @staticmethod
+    def _looks_like_owner_id(value) -> bool:
+        """A HubSpot owner id is all-digits. A custom CSM field that holds a person's NAME
+        (text) is not — so we can tell an owner-field value from a text-name value and scope
+        / display each correctly."""
+        s = str(value or "").strip()
+        return bool(s) and s.isdigit()
+
+    @classmethod
+    def _resolve_csm_identity(cls, props: dict) -> tuple:
+        """Resolve the designated CSM as (owner_id, csm_name, source).
+
+        - If the configured field holds a HubSpot owner id (digits), owner_id is set and the
+          name is resolved downstream from the owner record (existing behaviour).
+        - If it holds a TEXT NAME (a custom text field), csm_name is set directly and
+          owner_id is left None so a bad /owners/{name} lookup is never attempted; scoping
+          can then match on the name. Never fabricates."""
+        value, source = cls._resolve_csm(props)
+        if value is None:
+            return None, None, None
+        if cls._looks_like_owner_id(value):
+            return value, None, source
+        return None, value, source
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {config.env('HUBSPOT_TOKEN')}", "Content-Type": "application/json"}
+
+    _portal_id_cache = None
+
+    def portal_id(self) -> str | None:
+        """The HubSpot portal (hub) id, resolved once from the account-info API and cached.
+        Used to build 'View in HubSpot' deep links to the real company record. An explicit
+        HUBSPOT_PORTAL_ID env wins (lets a deploy pin it without an extra API call). Returns
+        None when unavailable, so callers simply omit the link rather than build a dead one."""
+        if HubSpot._portal_id_cache:
+            return HubSpot._portal_id_cache
+        env_pid = config.env("HUBSPOT_PORTAL_ID")
+        if env_pid:
+            HubSpot._portal_id_cache = str(env_pid).strip()
+            return HubSpot._portal_id_cache
+        if not self.live():
+            return None
+        try:
+            info = config.http_get("https://api.hubapi.com/account-info/v3/details", self._headers())
+            pid = (info or {}).get("portalId")
+            if pid:
+                HubSpot._portal_id_cache = str(pid)
+                return HubSpot._portal_id_cache
+        except Exception:  # noqa: BLE001 - deep-link convenience; never block the account view
+            return None
+        return None
+
+    def company_url(self, company_id) -> str | None:
+        """Build the 'open this company in HubSpot' URL, or None when we can't (no portal
+        id or no company id) so the UI omits the link rather than render a broken one."""
+        pid = self.portal_id()
+        if not pid or not company_id:
+            return None
+        return f"https://app.hubspot.com/contacts/{pid}/company/{company_id}"
 
     def revenue_motion_deals(self, window_days: int | None = None) -> dict:
         """Aggregate booked revenue motion from HubSpot deals over a rolling window.
@@ -1049,6 +1422,38 @@ class HubSpot:
         HubSpot._rm_cache = (_t2.time(), result)
         return result
 
+    def upsell_count_since(self, since_iso: str) -> int | None:
+        """Exact count of closed-won upsell/expansion deals (Price-Rise pipeline) with a
+        closedate on/after `since_iso` (YYYY-MM-DD). Reads HubSpot's authoritative `total`
+        from a single search (count only — no deal list), so the quarterly 'Pro upgrades'
+        KPI is precise rather than inferred from a capped top-10 list. Returns None when
+        not live / unreadable (honest data-gap, never a fabricated 0)."""
+        if not self.live():
+            return None
+        from datetime import datetime, timezone
+        try:
+            since_ms = int(datetime.fromisoformat(since_iso[:10]).replace(
+                tzinfo=timezone.utc).timestamp() * 1000)
+        except (ValueError, TypeError):
+            return None
+        upsell_pipe = config.env("HUBSPOT_UPSELL_PIPELINE_ID") or "10754643"
+        body = {
+            "filterGroups": [{"filters": [
+                {"propertyName": "pipeline", "operator": "EQ", "value": upsell_pipe},
+                {"propertyName": "hs_is_closed_won", "operator": "EQ", "value": "true"},
+                {"propertyName": "closedate", "operator": "GTE", "value": since_ms},
+            ]}],
+            "properties": ["dealname"],
+            "limit": 1,
+        }
+        try:
+            res = config.http_post_readonly(
+                "https://api.hubapi.com/crm/v3/objects/deals/search", self._headers(), body)
+        except Exception:  # noqa: BLE001
+            return None
+        total = res.get("total")
+        return int(total) if isinstance(total, int) else None
+
     def roster(self, limit: int | None = None) -> list[str]:
         """Live account roster: companies that carry an `account_id` (AUx-yyyyy).
 
@@ -1066,13 +1471,25 @@ class HubSpot:
         after = None
         scope = os.environ.get("CS_ACCOUNT_SCOPE", "all").strip().lower()
         owner_id = os.environ.get("CS_CSM_OWNER_ID", "").strip() if scope == "csm" else ""
-        filters = [{"propertyName": "account_id", "operator": "HAS_PROPERTY"}]
+        base_filters = [{"propertyName": "account_id", "operator": "HAS_PROPERTY"}]
+        # Owner-scope matches where the user is the designated CSM (custom field) OR the
+        # record owner, so scoping follows the same CSM-first rule as the rest of the app.
         if owner_id:
-            filters.append({"propertyName": "hubspot_owner_id", "operator": "EQ", "value": owner_id})
+            # Match where the user is in ANY of the designated-CSM fields OR the record
+            # owner (one filter group per field; HubSpot ORs across groups), so scoping
+            # follows the same first-non-empty CSM rule as the rest of the app.
+            filter_groups = [
+                {"filters": base_filters + [{"propertyName": f, "operator": "EQ", "value": owner_id}]}
+                for f in self._csm_fields()
+            ] + [
+                {"filters": base_filters + [{"propertyName": "hubspot_owner_id", "operator": "EQ", "value": owner_id}]},
+            ]
+        else:
+            filter_groups = [{"filters": base_filters}]
         while len(ids) < limit:
             page = min(100, limit - len(ids))
             body = {
-                "filterGroups": [{"filters": filters}],
+                "filterGroups": filter_groups,
                 "properties": ["account_id"],
                 "limit": page,
             }
@@ -1137,64 +1554,193 @@ class HubSpot:
 
         props = ["name", "account_id", "arr", "arr__v2_", "hs_active_contracts_arr",
                  "icp_sales_segment", "cs_segment", "lifecyclestage", "hubspot_owner_id",
-                 "cs_customer_tier", "industry", "country"]
+                 # Designated CSM: an ordered list of custom company fields (default
+                 # retention_owner then customer_success_manager, both HubSpot user refs)
+                 # that are authoritative over the record owner for CS ownership. The
+                 # resolver takes the first non-empty, else the record owner. Configurable
+                 # via CS_CSM_FIELD (comma-separated).
+                 *self._csm_fields(),
+                 "cs_customer_tier", "cs_pooled_team", "industry", "country",
+                 # Renewal + subscription are cheap company properties (same search call,
+                 # no extra per-account fan-out) and let the whole-book roster rows show a
+                 # renewal date + drive the Renewals-by-Month / Upcoming Renewals views for
+                 # every CSM's book, not just the ~50 deeply-enriched accounts.
+                 "hs_next_renewal_date", "renewal_date", "contract_renewal_date",
+                 "subscription_type"]
         rows: list[dict[str, Any]] = []
-        after = None
-        while len(rows) < limit:
-            page = min(100, limit - len(rows))
-            body = {
-                "filterGroups": [{"filters": [
-                    {"propertyName": "lifecyclestage", "operator": "IN",
-                     "values": self._ingest_lifecycle_stages()}  # customer + churned by default; configurable to add onboarding
-                ]}],
-                "properties": props,
-                "limit": page,
+
+        def _n(p, *keys):
+            for k in keys:
+                v = p.get(k)
+                if v not in (None, ""):
+                    try:
+                        return int(float(v))
+                    except (ValueError, TypeError):
+                        pass
+            return None
+
+        def _row(r: dict) -> dict:
+            p = r.get("properties", {})
+            acc = p.get("account_id")
+            tier = (p.get("cs_customer_tier") or "").strip()
+            managed = bool(acc)
+            pooled = (tier.lower() == "pooled") or (not managed)
+            raw_segment = p.get("icp_sales_segment") or p.get("cs_segment")
+            return {
+                "company_id": r.get("id"),
+                "account_id": (identity.normalise(acc) if acc else None),
+                "name": p.get("name"),
+                "arr_usd": _n(p, "arr__v2_", "arr", "hs_active_contracts_arr"),
+                "segment": self._map_segment(raw_segment),
+                "segment_label": raw_segment,
+                "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
+                                    .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
+                # The CSM that drives owner-scoping + the CSM filter: resolved from the
+                # ordered CSM-field list, else the record owner. An owner-id field resolves
+                # to a name downstream (engine _owner_name); a TEXT-name field populates
+                # csm_name directly. csm_source records which field drove it.
+                "owner_id": self._resolve_csm_identity(p)[0],
+                "csm_name": self._resolve_csm_identity(p)[1],
+                "record_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+                "csm_source": self._resolve_csm_identity(p)[2],
+                "renewal_date": (p.get("hs_next_renewal_date") or p.get("renewal_date")
+                                 or p.get("contract_renewal_date") or None),
+                "renewal_source": ("company" if (p.get("hs_next_renewal_date") or p.get("renewal_date")
+                                                  or p.get("contract_renewal_date")) else None),
+                "subscription_type": p.get("subscription_type") or None,
+                "customer_tier": tier or None,
+                "pooled_team": (p.get("cs_pooled_team") or None),
+                "managed": managed,
+                "pooled": pooled,
+                "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
+                "country": p.get("country"),
+                "industry": (p.get("industry") or "").replace("_", " ").title() or None,
+                "_source": "hubspot-live",
             }
-            if after:
-                body["after"] = after
-            res = config.http_post(
-                "https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
-            for r in res.get("results", []):
-                p = r.get("properties", {})
-                acc = p.get("account_id")
-                tier = (p.get("cs_customer_tier") or "").strip()
-                managed = bool(acc)
-                pooled = (tier.lower() == "pooled") or (not managed)
 
-                def _n(*keys):
-                    for k in keys:
-                        v = p.get(k)
-                        if v not in (None, ""):
-                            try:
-                                return int(float(v))
-                            except (ValueError, TypeError):
-                                pass
-                    return None
-
-                raw_segment = p.get("icp_sales_segment") or p.get("cs_segment")
-                rows.append({
-                    "company_id": r.get("id"),
-                    "account_id": (identity.normalise(acc) if acc else None),
-                    "name": p.get("name"),
-                    "arr_usd": _n("arr__v2_", "arr", "hs_active_contracts_arr"),
-                    "segment": self._map_segment(raw_segment),
-                    "segment_label": raw_segment,
-                    "lifecycle_stage": {"20251280": "Churned Customer", "customer": "Customer"}
-                                        .get(p.get("lifecyclestage"), p.get("lifecyclestage")),
-                    "owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
-                    "customer_tier": tier or None,
-                    "managed": managed,
-                    "pooled": pooled,
-                    "cohort": ("managed" if managed and not (tier.lower() == "pooled") else "pooled"),
-                    "country": p.get("country"),
-                    "industry": (p.get("industry") or "").replace("_", " ").title() or None,
-                    "_source": "hubspot-live",
-                })
-            after = (res.get("paging", {}) or {}).get("next", {}).get("after")
-            if not after:
+        # Scan ONE lifecycle stage at a time, in the configured order, paginating each
+        # fully before the next. _ingest_lifecycle_stages() lists ACTIVE first ('customer')
+        # then churned ('20251280'), so the active book always fills before the churned
+        # bucket — critical because churned (~6.9k) is far larger than active (~4.3k) and
+        # would otherwise exhaust the limit / partial warm and crowd active accounts out of
+        # the roster that drives the dashboard's default "active" view.
+        for stage in self._ingest_lifecycle_stages():
+            if len(rows) >= limit:
                 break
+            after = None
+            while len(rows) < limit:
+                page = min(100, limit - len(rows))
+                body = {
+                    "filterGroups": [{"filters": [
+                        {"propertyName": "lifecyclestage", "operator": "EQ", "value": stage}
+                    ]}],
+                    "properties": props,
+                    "limit": page,
+                }
+                if after:
+                    body["after"] = after
+                res = config.http_post(
+                    "https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
+                for r in res.get("results", []):
+                    rows.append(_row(r))
+                after = (res.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
+        # Cache the roster rows IMMEDIATELY (the ~42s scan is done), so the dashboard gets
+        # the whole book on first paint. The renewal-from-deal fallback below is the slow
+        # part (~5min of batched association + deal reads for thousands of accounts), so it
+        # must NOT block this return — it runs in the background and updates the cached rows
+        # in place as derivations complete. CS_ROSTER_DEAL_RENEWAL=0 disables it entirely;
+        # CS_ROSTER_DEAL_RENEWAL_SYNC=1 forces the old blocking behaviour (used by tests).
         HubSpot._full_roster_cache = (_t.time(), rows, limit)
+        _deal_renewal_on = os.environ.get("CS_ROSTER_DEAL_RENEWAL", "1").strip().lower() \
+            not in ("0", "false", "no", "off")
+        _deal_renewal_sync = os.environ.get("CS_ROSTER_DEAL_RENEWAL_SYNC", "").strip().lower() \
+            in ("1", "true", "yes", "on")
+        if _deal_renewal_on:
+            def _fill_bg():
+                try:
+                    self._fill_roster_renewals_from_deals(rows)
+                    # Rows are mutated in place; refresh the cache timestamp so the enriched
+                    # rows (now carrying deal-derived renewals) are what subsequent reads get.
+                    HubSpot._full_roster_cache = (_t.time(), rows, limit)
+                except Exception:  # noqa: BLE001 - best-effort enrichment, never break the roster
+                    pass
+            if _deal_renewal_sync:
+                _fill_bg()
+            elif not getattr(HubSpot, "_roster_renewal_filling", False):
+                HubSpot._roster_renewal_filling = True
+                import threading
+                def _bg():
+                    try:
+                        _fill_bg()
+                    finally:
+                        HubSpot._roster_renewal_filling = False
+                threading.Thread(target=_bg, daemon=True).start()
         return rows[:limit]
+
+    def _fill_roster_renewals_from_deals(self, rows: list[dict], batch: int = 100) -> int:
+        """For roster rows with no company-level renewal date, derive one from the
+        account's associated closed-won deal and fill it in place (renewal_source='deal').
+
+        Batched to stay within HubSpot rate limits:
+          1. v4 batch association read (companies -> deals), up to `batch` companies/call
+          2. v3 deals batch/read for the union of associated deal ids
+          3. per-company: pick the closed-won deal, derive (signed/close + term)
+
+        Returns the number of rows filled. Best-effort: any error leaves rows unchanged
+        (the company simply keeps renewal_date=None, an honest gap, never a fake value)."""
+        targets = [r for r in rows
+                   if not r.get("renewal_date") and r.get("company_id")]
+        if not targets:
+            return 0
+        headers = self._headers()
+        filled = 0
+        for i in range(0, len(targets), batch):
+            chunk = targets[i:i + batch]
+            by_company = {str(r["company_id"]): r for r in chunk}
+            # 1. company -> deal associations in one batched call.
+            assoc_body = {"inputs": [{"id": cid} for cid in by_company]}
+            assoc = config.http_post(
+                "https://api.hubapi.com/crm/v4/associations/companies/deals/batch/read",
+                headers, assoc_body)
+            company_deal_ids: dict[str, list[str]] = {}
+            all_deal_ids: set[str] = set()
+            for res in assoc.get("results", []):
+                cid = str((res.get("from") or {}).get("id") or "")
+                dids = [str(t.get("toObjectId")) for t in res.get("to", [])
+                        if t.get("toObjectId")]
+                if cid and dids:
+                    company_deal_ids[cid] = dids
+                    all_deal_ids.update(dids)
+            if not all_deal_ids:
+                continue
+            # 2. deal properties for the union of associated deals, in batched reads.
+            deal_props: dict[str, dict] = {}
+            ids = list(all_deal_ids)
+            for j in range(0, len(ids), 100):
+                sub = ids[j:j + 100]
+                body = {"inputs": [{"id": d} for d in sub],
+                        "properties": ["amount", "hs_arr", "closedate", "deal_signed_date",
+                                       "contract_length__months_", "hs_is_closed_won", "dealstage"]}
+                res = config.http_post(
+                    "https://api.hubapi.com/crm/v3/objects/deals/batch/read", headers, body)
+                for r in res.get("results", []):
+                    deal_props[str(r.get("id"))] = r.get("properties", {})
+            # 3. derive per company from its closed-won deal.
+            for cid, dids in company_deal_ids.items():
+                props = [deal_props[d] for d in dids if d in deal_props]
+                picked = self._pick_closed_won_deal(props)
+                if not picked:
+                    continue
+                renewal = self._derive_renewal_from_deal_props(picked)
+                if renewal:
+                    row = by_company.get(cid)
+                    if row is not None:
+                        row["renewal_date"] = renewal
+                        row["renewal_source"] = "deal"
+                        filled += 1
+        return filled
 
     def _find_company(self, account_ref: str) -> dict[str, Any]:
         # HubSpot stores the AUx-yyyy id in the `account_id` company property,
@@ -1206,7 +1752,8 @@ class HubSpot:
                             "hs_active_contracts_arr", "renewal_date", "hs_next_renewal_date",
                             "contract_renewal_date", "subscription_type", "account_id",
                             "lifecyclestage", "instance", "type", "hubspot_owner_id", "industry",
-                            "state", "hs_state_code", "country", "cs_customer_tier"],
+                            "state", "hs_state_code", "country", "cs_customer_tier",
+                            *self._csm_fields()],
             "limit": 1,
         }
         res = config.http_post("https://api.hubapi.com/crm/v3/objects/companies/search", self._headers(), body)
@@ -1262,6 +1809,7 @@ class HubSpot:
         pooled = (str(customer_tier or "").strip().lower() == "pooled") if customer_tier else None
         return {
             "company_id": c.get("id"),
+            "hubspot_url": self.company_url(c.get("id")),
             "name": p.get("name"),
             "segment": self._map_segment(raw_segment),  # engine model: Strategic / Scaled
             "segment_label": raw_segment,               # original HubSpot label for display
@@ -1275,8 +1823,11 @@ class HubSpot:
             "renewal_date": renewal_date,
             "renewal_source": ("company" if company_renewal else ("deal" if deal_renewal else None)),
             "subscription_type": p.get("subscription_type"),
-            "csm_owner": self._owner_name(p.get("hubspot_owner_id")),
-            "csm_owner_id": (str(p.get("hubspot_owner_id")) if p.get("hubspot_owner_id") else None),
+            # Designated CSM = first non-empty CSM field (ordered), else the record owner.
+            # Resolved to a display name. csm_source records which field drove it.
+            "csm_owner": self._owner_name(self._resolve_csm(p)[0]),
+            "csm_owner_id": self._resolve_csm(p)[0],
+            "csm_source": self._resolve_csm(p)[1],
             "industry": (p.get("industry") or "").replace("_", " ").title() or None,
             "lifecycle_stage": {
                 "20251280": "Churned Customer",
@@ -1359,13 +1910,10 @@ class HubSpot:
                                    "contract_length__months_", "hs_is_closed_won", "dealstage"]}
             res = config.http_post(
                 "https://api.hubapi.com/crm/v3/objects/deals/batch/read", self._headers(), body)
-            won = [r.get("properties", {}) for r in res.get("results", [])
-                   if str(r.get("properties", {}).get("hs_is_closed_won")).lower() == "true"]
-            pool = won or [r.get("properties", {}) for r in res.get("results", [])]
-            if not pool:
+            all_props = [r.get("properties", {}) for r in res.get("results", [])]
+            p = self._pick_closed_won_deal(all_props)
+            if not p:
                 return None
-            pool.sort(key=lambda pr: pr.get("closedate") or "", reverse=True)
-            p = pool[0]
 
             def _f(k):
                 try:
@@ -1374,23 +1922,45 @@ class HubSpot:
                     return None
 
             arr = _f("hs_arr") or _f("amount")
-            renewal = None
-            start = p.get("deal_signed_date") or p.get("closedate")
-            term = p.get("contract_length__months_")
-            if start and term:
-                try:
-                    from datetime import datetime
-                    base = datetime.fromisoformat(str(start)[:10])
-                    months = int(float(term))
-                    yy = base.year + (base.month - 1 + months) // 12
-                    mm = (base.month - 1 + months) % 12 + 1
-                    dd = min(base.day, 28)
-                    renewal = f"{yy:04d}-{mm:02d}-{dd:02d}"
-                except (ValueError, TypeError):
-                    renewal = None
+            renewal = self._derive_renewal_from_deal_props(p)
             return {"arr_usd": arr, "renewal_date": renewal}
         except Exception:  # noqa: BLE001
             return None
+
+    @staticmethod
+    def _derive_renewal_from_deal_props(p: dict) -> str | None:
+        """Derive a renewal date from a single deal's properties, identically for the
+        deep per-account path (_account_deal) and the whole-book roster path
+        (list_all_companies), so the two never disagree:
+            renewal_date <- (deal_signed_date or closedate) + contract_length__months_
+        Returns an ISO yyyy-mm-dd string, or None when the inputs are missing/unparsable.
+        Day is clamped to 28 to stay valid across month lengths (matches the original)."""
+        start = p.get("deal_signed_date") or p.get("closedate")
+        term = p.get("contract_length__months_")
+        if not (start and term):
+            return None
+        try:
+            base = datetime.fromisoformat(str(start)[:10])
+            months = int(float(term))
+            yy = base.year + (base.month - 1 + months) // 12
+            mm = (base.month - 1 + months) % 12 + 1
+            dd = min(base.day, 28)
+            return f"{yy:04d}-{mm:02d}-{dd:02d}"
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _pick_closed_won_deal(deal_props: list[dict]) -> dict | None:
+        """From a list of deal property dicts, pick the most relevant one for renewal
+        derivation: prefer closed-won deals, newest closedate first. Mirrors the
+        selection in _account_deal so the roster and deep paths agree."""
+        if not deal_props:
+            return None
+        won = [p for p in deal_props
+               if str(p.get("hs_is_closed_won")).lower() == "true"]
+        pool = won or deal_props
+        pool.sort(key=lambda pr: pr.get("closedate") or "", reverse=True)
+        return pool[0] if pool else None
 
     @staticmethod
     def _map_segment(label):
@@ -1406,6 +1976,38 @@ class HubSpot:
 
     # Owner id -> display name, cached across accounts to avoid repeat calls.
     _OWNER_CACHE: dict[str, str] = {}
+    _OWNERS_WARMED: bool = False
+
+    def warm_owners(self) -> int:
+        """Page /crm/v3/owners ONCE and populate both the id->name and email->id caches.
+        Replaces the per-owner live GET fan-out that _owner_name otherwise does on the cold
+        whole-book build (36+ serialised GETs, ~16s, worse under prod throttling — this was
+        a major part of the cold /api/portfolio stall). Best-effort; returns the count."""
+        if not self.live():
+            return 0
+        n = 0
+        after = None
+        try:
+            while True:
+                url = "https://api.hubapi.com/crm/v3/owners?limit=100"
+                if after:
+                    url += f"&after={after}"
+                page = config.http_get(url, self._headers())
+                for o in page.get("results", []):
+                    oid = str(o.get("id"))
+                    name = " ".join(x for x in [o.get("firstName"), o.get("lastName")] if x).strip() or o.get("email")
+                    self._OWNER_CACHE[oid] = name
+                    em = str(o.get("email") or "").strip().lower()
+                    if em:
+                        self._OWNER_EMAIL_CACHE[em] = oid
+                    n += 1
+                after = (page.get("paging", {}) or {}).get("next", {}).get("after")
+                if not after:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        self._OWNERS_WARMED = True
+        return n
 
     def _owner_name(self, owner_id):
         if not owner_id:
@@ -1413,6 +2015,12 @@ class HubSpot:
         oid = str(owner_id)
         if oid in self._OWNER_CACHE:
             return self._OWNER_CACHE[oid]
+        # Cold miss: prefer the single bulk warm over a per-id GET. Once warmed, any id
+        # still missing is genuinely unknown and we cache None rather than re-fetching.
+        if not self._OWNERS_WARMED:
+            self.warm_owners()
+            if oid in self._OWNER_CACHE:
+                return self._OWNER_CACHE[oid]
         try:
             o = config.http_get(f"https://api.hubapi.com/crm/v3/owners/{oid}", self._headers())
             name = " ".join(x for x in [o.get("firstName"), o.get("lastName")] if x).strip() or o.get("email")
@@ -1774,7 +2382,799 @@ class HubSpot:
                 "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
                 "_source": "hubspot-live-readonly"}
 
+    def set_exec_f2f(self, account_ref: str, met_on: str, outcome: str | None = None,
+                     apply: bool = False) -> dict[str, Any]:
+        """Write the latest Executive Sponsor F2F back to the HubSpot company so Sales/CS
+        share one source of truth (V5 UC2: Exec Sponsorship field synced bi-directionally).
+        Writes cs_last_exec_f2f_date (date) and, when provided, cs_last_exec_f2f_outcome
+        (text). Auto-creates the properties if missing. Two-gate (apply + CS_ALLOW_WRITE);
+        dry-run by default; reversible. Owner-scope is enforced at the engine/endpoint."""
+        met_on = (met_on or "").strip()
+        if not met_on:
+            raise ValueError("met_on (ISO date) is required")
+        c = self._find_company(account_ref)  # read-only lookup
+        props: dict[str, Any] = {"cs_last_exec_f2f_date": met_on[:10]}
+        outcome = (outcome or "").strip()
+        if outcome:
+            props["cs_last_exec_f2f_outcome"] = outcome
+        definitions = {
+            "cs_last_exec_f2f_date": {"label": "CS Last Exec F2F Date", "type": "date",
+                                      "fieldType": "date", "groupName": "companyinformation"},
+            "cs_last_exec_f2f_outcome": {"label": "CS Last Exec F2F Outcome", "type": "string",
+                                         "fieldType": "textarea", "groupName": "companyinformation"},
+        }
+        can_apply = apply and config.writes_allowed()
+        if can_apply:
+            for name in props:
+                try:
+                    definition = dict(definitions[name]); definition["name"] = name
+                    config.http_post("https://api.hubapi.com/crm/v3/properties/companies",
+                                     self._headers(), definition)
+                except Exception:  # noqa: BLE001 - property likely already exists
+                    pass
+            config.http_patch(
+                f"https://api.hubapi.com/crm/v3/objects/companies/{c['id']}",
+                self._headers(), {"properties": props})
+            return {"synced": True, "mode": "applied", "target": "hubspot.crm.companies",
+                    "company_id": c["id"], "written_fields": props,
+                    "_source": "hubspot-live-write"}
+        return {"synced": False, "mode": "dry-run", "target": "hubspot.crm.companies",
+                "company_id": c["id"], "would_write": props,
+                "note": "No HubSpot mutation sent. Set CS_ALLOW_WRITE=1 and request apply=true.",
+                "_source": "hubspot-live-readonly"}
+
+    def inbound_tickets(self, window_days: int | None = None, limit: int | None = None) -> list[dict]:
+        """Read recent Service Hub tickets and normalise them to the inbound-intake shape.
+
+        This is the Option A PULL source for the Tech-Touch pooled queue: instead of
+        waiting for an external webhook, the platform reads the tickets it already has
+        access to via the existing HubSpot token and feeds them through the same triage +
+        round-robin as the webhook seam.
+
+        Tickets are fetched NEWEST-FIRST via the CRM search endpoint with a createdate
+        lower bound, because the plain list endpoint returns oldest-first and a portal
+        with tens of thousands of historical tickets would never reach recent ones within
+        a sane page cap. The company association (needed to resolve the account) is read
+        per candidate ticket by id, since the search endpoint does not return associations.
+
+        Each returned item is {id, channel, from, subject, body, company_id, received_at}
+        where company_id is the FIRST associated HubSpot company (resolved to an account
+        by the engine). Returns [] when HubSpot is not live, so the caller shows an honest
+        empty queue rather than fabricating tickets.
+
+        FILTERING (so the pooled queue gets real customer inbound, not internal noise):
+          - recency window: only tickets created in the last CS_HS_INBOUND_WINDOW_DAYS
+            (default 7).
+          - open only: tickets whose pipeline stage is a closed/resolved stage are
+            skipped (CS_HS_INBOUND_CLOSED_STAGES, comma-separated, default '4').
+          - exclude internal mirrors: tickets whose subject matches any term in
+            CS_HS_INBOUND_EXCLUDE (default 'slack channel,new post in') are dropped, so
+            Slack-notification mirror tickets never reach a CSM as customer inbound.
+        """
+        if not self.live():
+            return []
+        from datetime import datetime, timezone, timedelta
+        window_days = int(config.env("CS_HS_INBOUND_WINDOW_DAYS") or window_days or 7)
+        page_cap = int(config.env("CS_HS_INBOUND_LIMIT") or limit or 200)
+        closed_stages = {s.strip() for s in
+                         (config.env("CS_HS_INBOUND_CLOSED_STAGES") or "4").split(",") if s.strip()}
+        exclude_terms = [t.strip().lower() for t in
+                         (config.env("CS_HS_INBOUND_EXCLUDE") or "slack channel,new post in").split(",")
+                         if t.strip()]
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        since_ms = int(since.timestamp() * 1000)
+
+        props = ["subject", "content", "hs_pipeline_stage", "source_type", "createdate",
+                 "hs_primary_company"]
+        search_url = "https://api.hubapi.com/crm/v3/objects/tickets/search"
+        assoc_url = "https://api.hubapi.com/crm/v4/associations/tickets/companies/batch/read"
+        items: list[dict] = []
+        after = None
+        scanned = 0
+        # Page the search newest-first until we exhaust the window or hit the scan cap.
+        while scanned < page_cap:
+            body = {
+                "filterGroups": [{"filters": [
+                    {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)}]}],
+                "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
+                "properties": props,
+                "limit": 100,
+            }
+            if after:
+                body["after"] = after
+            try:
+                res = config.http_post_readonly(search_url, self._headers(), body)
+            except Exception:  # noqa: BLE001 - best-effort read; honest empty on failure
+                break
+            results = res.get("results", []) if isinstance(res, dict) else []
+            if not results:
+                break
+            # Collect the candidates that pass the open/exclude filters, then resolve ALL
+            # of their company associations in ONE v4 batch call (not one GET per ticket -
+            # that was ~100 sequential calls per page and timed out the request).
+            page_candidates = []
+            for t in results:
+                scanned += 1
+                p = t.get("properties", {}) or {}
+                if str(p.get("hs_pipeline_stage") or "") in closed_stages:
+                    continue
+                subject = (p.get("subject") or "").strip()
+                sl = subject.lower()
+                if any(term in sl for term in exclude_terms):
+                    continue
+                received_ts = None
+                created_raw = p.get("createdate")
+                if created_raw:
+                    try:
+                        dt = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        received_ts = int(dt.timestamp())
+                    except ValueError:
+                        pass
+                page_candidates.append({
+                    "ticket_id": str(t.get("id")),
+                    "subject": subject,
+                    "body": (p.get("content") or "").strip(),
+                    "received_at": received_ts,
+                    "company_name": (p.get("hs_primary_company") or "").strip() or None,
+                })
+            # One batch association read for this page: ticket_id -> first company id.
+            company_by_ticket: dict[str, str] = {}
+            if page_candidates:
+                try:
+                    ares = config.http_post_readonly(
+                        assoc_url, self._headers(),
+                        {"inputs": [{"id": c["ticket_id"]} for c in page_candidates]})
+                    for r in (ares.get("results", []) if isinstance(ares, dict) else []):
+                        frm = str(((r.get("from") or {}).get("id")) or "")
+                        tos = r.get("to") or []
+                        if frm and tos and tos[0].get("toObjectId"):
+                            company_by_ticket[frm] = str(tos[0]["toObjectId"])
+                except Exception:  # noqa: BLE001 - leave unmapped on error
+                    company_by_ticket = {}
+            for c in page_candidates:
+                items.append({
+                    "id": "hs-" + c["ticket_id"],
+                    "channel": "mailbox",
+                    "from": "",  # ticket objects do not carry a sender email; left blank honestly
+                    "subject": c["subject"],
+                    "body": c["body"],
+                    "company_id": company_by_ticket.get(c["ticket_id"]),
+                    "company_name": c["company_name"],
+                    "received_at": c["received_at"],
+                })
+            after = (((res.get("paging") or {}).get("next") or {}).get("after"))
+            if not after:
+                break
+        return items
+
+
+# ----------------------------------------------------- Account Performance ---
+class AccountPerformance:
+    """Per-account recruiting performance scorecard from the Data Platform warehouse,
+    replicating & improving JobAdder's native 'Account' dashboard. Read-only via the same
+    cross-account Redshift Data API path as Churn/AccountMetrics (no persistent DB / VPC
+    connection). NEVER fabricates: returns {} / None / 'not_connected' when a table/field
+    is absent.
+
+    Live data model (verified against prod `dwh`):
+      rpt.rpt_account_performance_monthly   one row per account per calendar month, keyed on
+        `ja_account` (AUx-yyyy). `is_completed_month` flags a full month. Monthly COUNTS
+        (created_jobs_total, posted_ads_total, posted_boards, applications_total,
+        placements_total, closed_jobs_total, created_opportunities) are SUMmed over a window.
+        Days-to-Place = SUM(days_to_close_total) / SUM(closed_jobs_total) (guarded). Also
+        carries `icp`, `tier`, `max_daily_users_over_month`.
+      marts.snp_jobadder_all_accounts       account dimension (SCD2). The latest snapshot is
+        `dbt_valid_to IS NULL`. Keyed on (pk_instance, client_id); the AUx-yyyy join key is
+        UPPER(pk_instance) || '-' || client_id. Carries account_name, account_status,
+        account_type, account_kind, tier_name, country, is_ai_matching_enabled (=> 'Adder
+        Intelligence Match'), is_floats_enabled (=> 'AI Float'), stripe_customer_id,
+        global_customer_id.
+      rpt.rpt_job_automation_usage_monthly  per-account automation usage, keyed on `ja_account`,
+        grouped by automation_template_name.
+
+    Window is the trailing N COMPLETED months (default 12, override CS_ACCT_PERF_WINDOW_MONTHS),
+    plus the equal PRIOR window for Vs.-Prev deltas. Peer benchmark cohort = accounts sharing
+    the SAME icp AND SAME account_type over the same window.
+    """
+
+    POLL_INTERVAL_S = 1.0
+    POLL_TIMEOUT_S = int(config.env("CS_REDSHIFT_POLL_TIMEOUT_S") or 45)
+
+    PERF_TABLE = "rpt.rpt_account_performance_monthly"
+    DIM_TABLE = "marts.snp_jobadder_all_accounts"
+    AUTOMATION_TABLE = "rpt.rpt_job_automation_usage_monthly"
+
+    # The dim keys on (pk_instance, client_id); the AUx-yyyy ref is the two joined. Kept as a
+    # SQL expression so dimension()/benchmark() reuse the identical join everywhere.
+    _DIM_KEY_EXPR = "UPPER(pk_instance) || '-' || client_id"
+
+    # Metric name -> the SUMmable monthly column in the perf table. Days-to-Place and
+    # Source-Efficiency are DERIVED (not direct SUMs) and handled separately.
+    _COUNT_METRICS = {
+        "jobs_created": "created_jobs_total",
+        "ads_posted": "posted_ads_total",
+        "board_usage": "posted_boards",
+        "applications": "applications_total",
+        "placements": "placements_total",
+        "jobs_closed": "closed_jobs_total",
+        "opportunities_created": "created_opportunities",
+    }
+
+    # Size bands derived from a REAL column (max_daily_users_over_month in the perf table —
+    # the same seat/user signal JobAdder's native dashboard uses). Ordered; the last band is
+    # open-ended. Each entry: (band_label, lo_inclusive, hi_inclusive_or_None).
+    _SIZE_BANDS = [
+        ("1-25", 1, 25),
+        ("26-75", 26, 75),
+        ("76-100", 76, 100),
+        ("101+", 101, None),
+    ]
+
+    @classmethod
+    def _size_band_labels(cls) -> list:
+        return [b[0] for b in cls._SIZE_BANDS]
+
+    @classmethod
+    def _size_band_for(cls, users) -> str | None:
+        """Map a user/seat count to a size-band label. Honest None when the count is
+        missing (never buckets an unknown)."""
+        try:
+            u = float(users)
+        except (TypeError, ValueError):
+            return None
+        if u < 1:
+            return None
+        for label, lo, hi in cls._SIZE_BANDS:
+            if u >= lo and (hi is None or u <= hi):
+                return label
+        return None
+
+    # SQL CASE that reproduces _size_band_for() inside the cohort query, over the per-account
+    # MAX(max_daily_users_over_month). Kept in lock-step with _SIZE_BANDS above.
+    _SIZE_BAND_CASE = (
+        "CASE "
+        "WHEN users_max IS NULL OR users_max < 1 THEN NULL "
+        "WHEN users_max <= 25 THEN '1-25' "
+        "WHEN users_max <= 75 THEN '26-75' "
+        "WHEN users_max <= 100 THEN '76-100' "
+        "ELSE '101+' END"
+    )
+
+    # Explicit cohort keys the UI can request via `peer_group`. Maps a key to the set of
+    # auto-dimensions the cohort is matched on. Unknown keys fall back to the default.
+    _PEER_GROUPS = {
+        "icp+account_type": ("icp", "account_type"),   # default (today's behaviour)
+        "icp": ("icp",),
+        "account_type": ("account_type",),
+        "size": ("size_band",),
+        "all": (),                                       # whole live cohort (no auto-dims)
+    }
+
+    def live(self) -> bool:
+        return (config.live_enabled() and bool(config.env("REDSHIFT_DATABASE"))
+                and bool(config.env("REDSHIFT_WORKGROUP") or config.env("REDSHIFT_CLUSTER_ID"))
+                and ((config.env("CS_ACCT_PERF_ENABLED") or "1") not in ("0", "false")))
+
+    # Reuse the churn adapter's cross-account connection helpers (client/target/cell/identifier)
+    # exactly as AccountMetrics does, so there is one place that knows how to reach Redshift.
+    _churn = None
+
+    def _c(self):
+        if AccountPerformance._churn is None:
+            AccountPerformance._churn = Churn()
+        return AccountPerformance._churn
+
+    @staticmethod
+    def window_months() -> int:
+        try:
+            n = int(config.env("CS_ACCT_PERF_WINDOW_MONTHS") or 12)
+        except (TypeError, ValueError):
+            n = 12
+        return n if n > 0 else 12
+
+    def _run(self, client, ch, sql: str, params: list | None = None):
+        """Execute a Data API statement, poll to completion, return (ColumnMetadata-names,
+        [ [cell,...], ... ]). Returns (None, None) on timeout/failure (never raises for a
+        data gap)."""
+        import time
+        kw = {"Sql": sql, **ch._target_kwargs()}
+        if params:
+            kw["Parameters"] = params
+        resp = client.execute_statement(**kw)
+        sid = resp["Id"]
+        deadline = time.monotonic() + self.POLL_TIMEOUT_S
+        status = "SUBMITTED"
+        desc = {}
+        while status not in ("FINISHED", "FAILED", "ABORTED"):
+            if time.monotonic() > deadline:
+                return (None, None)
+            time.sleep(self.POLL_INTERVAL_S)
+            desc = client.describe_statement(Id=sid)
+            status = desc["Status"]
+        if status != "FINISHED":
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] query failed: {desc.get('Error')}", file=_s.stderr)
+            return (None, None)
+        rows = []
+        cols = None
+        token = None
+        while True:
+            gkw = {"Id": sid}
+            if token:
+                gkw["NextToken"] = token
+            res = client.get_statement_result(**gkw)
+            if cols is None:
+                cols = [c["name"] for c in res.get("ColumnMetadata", [])]
+            for rec in res.get("Records", []):
+                rows.append([ch._cell(f) for f in rec])
+            token = res.get("NextToken")
+            if not token:
+                break
+        return (cols, rows)
+
+    @staticmethod
+    def _num(v):
+        """Coerce a Data API cell (which may be str/int/float/None) to float, else None."""
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    # -- window SQL fragments --------------------------------------------------
+    # Trailing N COMPLETED months ending at the start of the current month, and the equal
+    # PRIOR window immediately before it. Expressed relative to DATE_TRUNC('month', CURRENT_DATE)
+    # so the window always covers whole, already-closed months.
+    def _window_predicates(self, n: int):
+        cur = f"""(date_reporting_month >= DATEADD(month, -{n}, DATE_TRUNC('month', CURRENT_DATE))
+                   AND date_reporting_month < DATE_TRUNC('month', CURRENT_DATE))"""
+        prev = f"""(date_reporting_month >= DATEADD(month, -{2*n}, DATE_TRUNC('month', CURRENT_DATE))
+                    AND date_reporting_month < DATEADD(month, -{n}, DATE_TRUNC('month', CURRENT_DATE)))"""
+        return cur, prev
+
+    def _agg_select(self):
+        """SELECT list of SUMmed count metrics + the days/closed/apps components used for the
+        two DERIVED metrics. Order is fixed so callers can index the result deterministically."""
+        parts = [f"SUM({col}) AS {name}" for name, col in self._COUNT_METRICS.items()]
+        parts.append("SUM(days_to_close_total) AS _days_to_close_sum")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _derive(row: dict):
+        """Add the two DERIVED metrics to a metrics dict in-place and return it. Guards all
+        divide-by-zero to None (honest 'not computable')."""
+        placements = row.get("placements")
+        applications = row.get("applications")
+        closed = row.get("jobs_closed")
+        days_sum = row.pop("_days_to_close_sum", None)
+        # Days-to-Place = total days-to-close / closed jobs (guard /0).
+        row["days_to_place"] = (round(days_sum / closed, 1)
+                                if (days_sum is not None and closed) else None)
+        # Source Efficiency (DERIVED) = applications per placement.
+        row["source_efficiency"] = (round(applications / placements, 1)
+                                     if (applications is not None and placements) else None)
+        return row
+
+    def _metrics_from_row(self, cols, row):
+        if not row:
+            return None
+        idx = {c: i for i, c in enumerate(cols)}
+        out = {}
+        for name in self._COUNT_METRICS:
+            # Counts are whole numbers; keep ints where possible, else None.
+            v = self._num(row[idx[name]]) if name in idx else None
+            out[name] = int(v) if v is not None else None
+        ds = self._num(row[idx["_days_to_close_sum"]]) if "_days_to_close_sum" in idx else None
+        out["_days_to_close_sum"] = ds
+        return self._derive(out)
+
+    def performance(self, account_ref: str, window_months: int | None = None) -> dict:
+        """SUMmed metrics for the account over the trailing `window_months` COMPLETED months
+        AND the equal prior window (for Vs.-Prev deltas). Returns
+        {metrics:{...}, previous:{...}, window:{months,start,end}, _source} or {} when not
+        live / no data (never fabricates)."""
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.PERF_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, prev_pred = self._window_predicates(n)
+        sel = self._agg_select()
+        sql = (
+            f"SELECT 'cur' AS period, {sel} FROM {self.PERF_TABLE} "
+            f"WHERE ja_account = :ref AND is_completed_month = TRUE AND {cur_pred} "
+            f"UNION ALL "
+            f"SELECT 'prev' AS period, {sel} FROM {self.PERF_TABLE} "
+            f"WHERE ja_account = :ref AND is_completed_month = TRUE AND {prev_pred}"
+        )
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None:
+            return {}
+        pidx = cols.index("period")
+        metrics = previous = None
+        for r in rows:
+            m = self._metrics_from_row(cols, r)
+            if r[pidx] == "cur":
+                metrics = m
+            elif r[pidx] == "prev":
+                previous = m
+        if metrics is None and previous is None:
+            return {}
+        # Window bounds (ISO) for display, derived the same way as the SQL predicate.
+        from datetime import date
+        today = date.today()
+        start_month = date(today.year, today.month, 1)
+
+        def _shift(d, months):
+            y = d.year + (d.month - 1 - months) // 12
+            mo = (d.month - 1 - months) % 12 + 1
+            return date(y, mo, 1)
+
+        win_end = start_month  # exclusive
+        win_start = _shift(start_month, n)
+        return {
+            "metrics": metrics or {},
+            "previous": previous or {},
+            "window": {"months": n, "start": win_start.isoformat(), "end": win_end.isoformat()},
+            "_source": "redshift-live",
+        }
+
+    def benchmark(self, account_ref: str, window_months: int | None = None,
+                  business_type: str | None = None, size_band: str | None = None,
+                  peer_group: str | None = None) -> dict:
+        """Peer-cohort benchmark: by default the cohort = accounts with the SAME icp AND
+        SAME account_type over the same window (identical to the historical behaviour when
+        no override params are passed). Per metric returns {rank, peers, percentile,
+        peer_avg} for the account (rank 1 = best; higher is better for all metrics EXCEPT
+        days_to_place / source_efficiency where LOWER is better). Honest None per metric
+        (and cohort<2 -> {} overall) when there isn't a comparable cohort. Returns {} when
+        not live / no data.
+
+        Optional cohort OVERRIDES (all honest — never fabricate a cohort):
+          business_type  override the account_type the cohort is matched on (instead of the
+                         target's own account_type). Maps directly to dim.account_type.
+          size_band      restrict the cohort to accounts in this seat-size band
+                         (one of _size_band_labels(), computed from the REAL perf-table
+                         column max_daily_users_over_month). Honestly ignored (no-op, flagged
+                         in the returned `applied_filters`) if the band is unrecognised.
+          peer_group     an explicit cohort key (one of _PEER_GROUPS) selecting WHICH auto
+                         dimensions the cohort is keyed on (e.g. 'icp' only, 'account_type'
+                         only, 'size', or 'all'). Unknown keys fall back to the default
+                         'icp+account_type'. business_type/size_band still apply on top.
+
+        The returned dict carries `applied_filters` describing exactly what shaped the
+        cohort (so the UI can show the active filter state and any honestly-ignored input).
+        """
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.PERF_TABLE, qualified=True)
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, _ = self._window_predicates(n)
+
+        # --- resolve cohort shaping (honest; records what actually applied) --------------
+        # peer_group selects which auto dimensions the cohort is keyed on; default keeps
+        # today's (icp, account_type) behaviour exactly.
+        pg_key = peer_group if peer_group in self._PEER_GROUPS else "icp+account_type"
+        pg_dims = self._PEER_GROUPS[pg_key]
+        bt = (business_type or None)
+        # size_band override is only honoured when it's a recognised band; otherwise it is a
+        # no-op (recorded as ignored) — never fabricated.
+        requested_size = size_band or None
+        sb = size_band if size_band in self._size_band_labels() else None
+        # The 'size' peer_group means "match my own size band": only meaningful if we don't
+        # already have an explicit size_band filter.
+        match_target_size = ("size_band" in pg_dims) and sb is None
+
+        params = [{"name": "ref", "value": ref}]
+        where = []
+        # Auto dimensions from the chosen peer_group (matched against the target's own row).
+        if "icp" in pg_dims:
+            where.append("j.icp = t.icp")
+        if "account_type" in pg_dims and bt is None:
+            # Null-safe: when the target has no dim row (account_type NULL), don't let the
+            # match collapse to empty — fall back to matching on the other dimensions (icp)
+            # so performance-only accounts still get a real cohort.
+            where.append("(j.account_type = t.account_type OR t.account_type IS NULL)")
+        if match_target_size:
+            where.append("j.size_band = t.size_band")
+        # Explicit overrides (take precedence over the matching auto dimension).
+        if bt is not None:
+            where.append("j.account_type = :bt")
+            params.append({"name": "bt", "value": bt})
+        if sb is not None:
+            where.append("j.size_band = :sb")
+            params.append({"name": "sb", "value": sb})
+        # 'all' peer_group with no overrides => whole live cohort (always-true predicate).
+        where_sql = " AND ".join(where) if where else "TRUE"
+
+        # Per-account windowed aggregate joined to its latest dim snapshot (for account_type),
+        # restricted to the resolved cohort. One pass, computes each metric's value per
+        # account; Python then ranks the target within the cohort. The size band is derived
+        # from the REAL perf column max_daily_users_over_month (per-account MAX over window).
+        sql = f"""
+        WITH perf AS (
+          SELECT ja_account,
+                 MAX(icp) AS icp,
+                 MAX(max_daily_users_over_month) AS users_max,
+                 SUM(created_jobs_total)    AS jobs_created,
+                 SUM(posted_ads_total)      AS ads_posted,
+                 SUM(posted_boards)         AS board_usage,
+                 SUM(applications_total)    AS applications,
+                 SUM(placements_total)      AS placements,
+                 SUM(closed_jobs_total)     AS jobs_closed,
+                 SUM(created_opportunities) AS opportunities_created,
+                 SUM(days_to_close_total)   AS days_sum
+          FROM {self.PERF_TABLE}
+          WHERE is_completed_month = TRUE AND {cur_pred}
+          GROUP BY ja_account
+        ),
+        dim AS (
+          SELECT {self._DIM_KEY_EXPR} AS ja_account, account_type
+          FROM {self.DIM_TABLE} WHERE dbt_valid_to IS NULL
+        ),
+        joined AS (
+          SELECT p.*, d.account_type, ({self._SIZE_BAND_CASE}) AS size_band
+          FROM perf p LEFT JOIN dim d USING (ja_account)
+        ),
+        target AS (SELECT icp, account_type, size_band FROM joined WHERE ja_account = :ref)
+        SELECT j.ja_account, j.jobs_created, j.ads_posted, j.board_usage, j.applications,
+               j.placements, j.jobs_closed, j.opportunities_created, j.days_sum
+        FROM joined j, target t
+        WHERE {where_sql}
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, params)
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+
+        # Build per-account metric values (incl. the two derived metrics) for the whole cohort.
+        def _derived_for(r):
+            applications = self._num(r[idx["applications"]])
+            placements = self._num(r[idx["placements"]])
+            closed = self._num(r[idx["jobs_closed"]])
+            days_sum = self._num(r[idx["days_sum"]])
+            dtp = (days_sum / closed) if (days_sum is not None and closed) else None
+            se = (applications / placements) if (applications is not None and placements) else None
+            return dtp, se
+
+        # Metrics to rank: name -> (higher_is_better)
+        metric_dirs = {
+            "jobs_created": True, "ads_posted": True, "board_usage": True,
+            "applications": True, "placements": True, "jobs_closed": True,
+            "opportunities_created": True, "days_to_place": False, "source_efficiency": False,
+        }
+        cohort = []
+        target_vals = None
+        for r in rows:
+            acc = r[idx["ja_account"]]
+            dtp, se = _derived_for(r)
+            vals = {name: self._num(r[idx[name]]) for name in self._COUNT_METRICS if name in idx}
+            vals["days_to_place"] = dtp
+            vals["source_efficiency"] = se
+            cohort.append((acc, vals))
+            if acc == ref:
+                target_vals = vals
+
+        peers = len(cohort)
+        if peers < 2 or target_vals is None:
+            return {}  # not a comparable cohort — honest empty
+
+        out = {}
+        for name, higher_better in metric_dirs.items():
+            tv = target_vals.get(name)
+            # Values present across the cohort for this metric.
+            present = [v[name] for (_a, v) in cohort if v.get(name) is not None]
+            if tv is None or len(present) < 2:
+                out[name] = None
+                continue
+            # A zero on a higher-is-better metric is NO activity, not a performance signal.
+            # Ranking it would be misleading (it ties with the many other zero-activity
+            # accounts and lands at a flattering percentile), so surface it as unranked with
+            # an honest reason rather than implying the account outperformed its peers.
+            if higher_better and (tv == 0):
+                out[name] = {"rank": None, "peers": len(present), "percentile": None,
+                             "peer_avg": round(sum(present) / len(present), 1),
+                             "higher_is_better": higher_better, "no_activity": True}
+                continue
+            # Rank: 1 = best. Count strictly-better peers, +1.
+            if higher_better:
+                better = sum(1 for v in present if v > tv)
+            else:
+                better = sum(1 for v in present if v < tv)
+            rank = better + 1
+            cohort_n = len(present)
+            # Percentile: fraction of cohort this account is at-or-better-than (0..100).
+            if higher_better:
+                at_or_below = sum(1 for v in present if v <= tv)
+            else:
+                at_or_below = sum(1 for v in present if v >= tv)
+            percentile = round(100.0 * at_or_below / cohort_n)
+            peer_avg = round(sum(present) / cohort_n, 1)
+            out[name] = {
+                "rank": rank,
+                "peers": cohort_n,
+                "percentile": percentile,
+                "peer_avg": peer_avg,
+                "higher_is_better": higher_better,
+            }
+        out["_source"] = "redshift-live"
+        out["cohort"] = {"peers": peers}
+        # Honest record of exactly what shaped this cohort, including any input that was
+        # recognised but not a valid value (so the UI never mis-reports an active filter).
+        out["applied_filters"] = {
+            "peer_group": pg_key,
+            "business_type": bt,
+            "size_band": sb,
+            "size_band_ignored": (requested_size if (requested_size and sb is None) else None),
+            "matched_dimensions": list(pg_dims),
+        }
+        return out
+
+    def benchmark_filter_options(self) -> dict:
+        """Enumerate the filter options the UI renders for the benchmark cohort controls:
+          { business_types: [distinct dim account_type ...],
+            size_bands:     [ _size_band_labels() ],   # fixed, derived ranges
+            peer_groups:    [ keys of _PEER_GROUPS ] }
+        business_types come from a BOUNDED distinct query over the live dim; size_bands and
+        peer_groups are the fixed vocabularies above. Honest {} when not live / query fails
+        (never fabricates options). size_bands/peer_groups are always safe to render because
+        they are static vocabularies, but they are only returned once we know the source is
+        live so the UI shows controls only when the warehouse is connected."""
+        if not self.live():
+            return {}
+        ch = self._c()
+        try:
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        sql = f"""
+        SELECT DISTINCT account_type
+        FROM {self.DIM_TABLE}
+        WHERE dbt_valid_to IS NULL AND account_type IS NOT NULL AND account_type <> ''
+        ORDER BY account_type
+        LIMIT 200
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, None)
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None:
+            return {}
+        business_types = [r[0] for r in rows if r and r[0] not in (None, "")]
+        return {
+            "business_types": business_types,
+            "size_bands": self._size_band_labels(),
+            "peer_groups": list(self._PEER_GROUPS.keys()),
+            "_source": "redshift-live",
+        }
+
+    def dimension(self, account_ref: str) -> dict:
+        """Latest-snapshot account dimension fields from snp_jobadder_all_accounts. Returns {}
+        when not live / no matching row (never fabricates)."""
+        if not self.live():
+            return {}
+        ch = self._c()
+        try:
+            ch._identifier(self.DIM_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        sql = f"""
+        SELECT account_name, account_status, account_type, account_kind, tier_name, country,
+               is_ai_matching_enabled, is_floats_enabled, stripe_customer_id, global_customer_id
+        FROM {self.DIM_TABLE}
+        WHERE {self._DIM_KEY_EXPR} = :ref AND dbt_valid_to IS NULL
+        LIMIT 1
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+        r = rows[0]
+        return {
+            "account_name": r[idx["account_name"]],
+            "account_status": r[idx["account_status"]],
+            "account_type": r[idx["account_type"]],
+            "account_kind": r[idx["account_kind"]],
+            "tier_name": r[idx["tier_name"]],
+            "country": r[idx["country"]],
+            "is_ai_matching_enabled": r[idx["is_ai_matching_enabled"]],
+            "is_floats_enabled": r[idx["is_floats_enabled"]],
+            "stripe_customer_id": r[idx["stripe_customer_id"]],
+            "global_customer_id": r[idx["global_customer_id"]],
+            "_source": "redshift-live",
+        }
+
+    def feature_usage(self, account_ref: str, window_months: int | None = None) -> dict:
+        """Best-effort automation/feature usage from rpt_job_automation_usage_monthly, grouped
+        by automation_template_name over the trailing window. Returns
+        {templates:{name:{total,successful,failed}}, _source} or {} when none/absent (never
+        fabricates)."""
+        if not self.live():
+            return {}
+        n = window_months or self.window_months()
+        ch = self._c()
+        try:
+            ch._identifier(self.AUTOMATION_TABLE, qualified=True)
+        except config.SourceError:
+            return {}
+        client = ch._client()
+        ref = identity.normalise(account_ref).upper()
+        cur_pred, _ = self._window_predicates(n)
+        sql = f"""
+        SELECT automation_template_name,
+               SUM(total_usage) AS total, SUM(successful_usage) AS successful,
+               SUM(failed_usage) AS failed
+        FROM {self.AUTOMATION_TABLE}
+        WHERE ja_account = :ref AND {cur_pred}
+        GROUP BY automation_template_name
+        ORDER BY total DESC
+        """
+        try:
+            cols, rows = self._run(client, ch, sql, [{"name": "ref", "value": ref}])
+        except Exception as exc:  # noqa: BLE001
+            if config.env("CS_LOG_SOURCE_ERRORS"):
+                import sys as _s
+                print(f"[acct-perf] {type(exc).__name__}: {exc}", file=_s.stderr)
+            return {}
+        if cols is None or not rows:
+            return {}
+        idx = {c: i for i, c in enumerate(cols)}
+        templates = {}
+        for r in rows:
+            name = r[idx["automation_template_name"]]
+            if not name:
+                continue
+            templates[str(name)] = {
+                "total": int(self._num(r[idx["total"]]) or 0),
+                "successful": int(self._num(r[idx["successful"]]) or 0),
+                "failed": int(self._num(r[idx["failed"]]) or 0),
+            }
+        if not templates:
+            return {}
+        return {"templates": templates, "_source": "redshift-live"}
+
 
 # Singletons the router uses.
-ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS = (
-    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements(), AccountMetrics())
+ZENDESK, PENDO, STRIPE, CHURN, JIMINNY, ROCKET_LANE, HUBSPOT, ENTITLEMENTS, ACCOUNT_METRICS, ACCOUNT_PERF = (
+    Zendesk(), Pendo(), Stripe(), Churn(), Jiminny(), RocketLane(), HubSpot(), Entitlements(),
+    AccountMetrics(), AccountPerformance())

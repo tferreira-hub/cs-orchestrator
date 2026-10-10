@@ -27,6 +27,12 @@
 #   GRANT USAGE ON SCHEMA stg   TO "IAMR:cs-platform-churn-reader";
 #   GRANT SELECT ON TABLE stg.stg_jobadder_all_accounts      TO "IAMR:cs-platform-churn-reader";
 # (The IAMR:cs-platform-churn-reader DB user is auto-created by Redshift on first assume.)
+#
+# DURABLE grants (REQUIRED - the rpt/marts tables are owned by `dbt` and DROP+recreated each
+# dbt build, dropping the table SELECT grants above; see GRANTS-RUNBOOK.md section 2a):
+#   ALTER DEFAULT PRIVILEGES FOR USER dbt IN SCHEMA rpt   GRANT SELECT ON TABLES TO "IAMR:cs-platform-churn-reader";
+#   ALTER DEFAULT PRIVILEGES FOR USER dbt IN SCHEMA marts GRANT SELECT ON TABLES TO "IAMR:cs-platform-churn-reader";
+#   ALTER DEFAULT PRIVILEGES FOR USER dbt IN SCHEMA stg   GRANT SELECT ON TABLES TO "IAMR:cs-platform-churn-reader";
 # =============================================================================
 
 terraform {

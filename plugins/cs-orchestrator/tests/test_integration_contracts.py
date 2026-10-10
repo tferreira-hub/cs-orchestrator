@@ -259,6 +259,10 @@ def test_entitlements_reports_explicit_utilization(monkeypatch):
 
     monkeypatch.setenv("ENTITLEMENTS_API_URL", "https://ent.example")
     monkeypatch.setenv("ENTITLEMENTS_KEY", "test-key")
+    # Tests the liveness-detection + utilization contract with a mocked transport
+    # (no real network). The suite-wide conftest forces CS_USE_LIVE=0 to block live
+    # calls, so re-enable the master switch for this liveness assertion.
+    monkeypatch.setenv("CS_USE_LIVE", "1")
     captured = {}
     def fake_get(url, headers, timeout=12):
         captured["url"] = url
@@ -440,10 +444,14 @@ def test_jiminny_negative_sentiment_raises_computed_risk():
     assert risk["computed"] is True
 
 
-def test_retention_metrics_compute_grr_and_expansion_pipeline():
+def test_retention_metrics_compute_grr_and_expansion_pipeline(monkeypatch):
     """GRR must compute from real churn; expansion is reported as a SEPARATE pipeline
     figure (opportunity), never folded into an inflated NDR percentage."""
     import engine
+    # Isolate from any live warehouse snapshot so this GRR/expansion test is deterministic:
+    # with no warehouse rows and no per-account metrics, NDR is honestly None.
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
     accounts = {
         "au1-1": {"hubspot": {"name": "A", "segment": "Strategic", "arr_usd": 400000},
                   "sources": {"hubspot": "live"}, "churn": {}, "usage": {}, "zendesk": {},
@@ -467,11 +475,43 @@ def test_retention_metrics_compute_grr_and_expansion_pipeline():
     assert r["expansion_pipeline_accounts"] == 1
     assert r["target"] == {"grr_pct": 92, "ndr_pct": 100}
 
+def test_test_instances_excluded_from_arr_and_retention(monkeypatch):
+    """UC3 edge case: internal/test instances (sandbox/dev/test id suffix) must NOT be
+    counted in corporate ARR, GRR, or NDR."""
+    import engine
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
+    accounts = {
+        # Real primary account.
+        "au1-100": {"hubspot": {"name": "Real Co", "segment": "Strategic", "arr_usd": 300000,
+                                "account_id": "au1-100"},
+                    "sources": {"hubspot": "live"},
+                    "metrics": {"mrr_usd": 300000, "revenue_prev_year_usd": 250000},
+                    "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+        # Test/sandbox instance — must be EXCLUDED from ARR + NDR.
+        "au1-100-sbx": {"hubspot": {"name": "Real Co Sandbox", "segment": "Strategic", "arr_usd": 999000,
+                                    "account_id": "au1-100-sbx"},
+                        "sources": {"hubspot": "live"},
+                        "metrics": {"mrr_usd": 999000, "revenue_prev_year_usd": 10},
+                        "churn": {}, "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {}},
+    }
+    r = engine._retention_metrics(accounts, {})
+    # Only the real account's ARR counts; the sandbox's inflated 999k is dropped.
+    assert r["base_arr_usd"] == 300000
+    assert r["excluded_test_instances"] == 1
+    # NDR excludes the sandbox too: 300k / 250k = 120% (NOT inflated by the sbx 999k/10).
+    assert r["ndr_pct"] == 120.0 and r["ndr_accounts"] == 1
 
-def test_ndr_computed_from_warehouse_monthly_arr():
+
+
+def test_ndr_computed_from_warehouse_monthly_arr(monkeypatch):
     """NDR is dollar-weighted current vs prior-year revenue from rpt_account_ndr_monthly,
     across accounts that carry both figures."""
     import engine
+    # Isolate from any live warehouse snapshot so NDR is computed from the per-account
+    # metrics blocks the accounts carry (deterministic across the full suite).
+    monkeypatch.setattr(engine, "_batch_metrics_for", lambda ids: {})
+    monkeypatch.setattr(engine, "warm_batch_metrics", lambda: 0)
     accounts = {
         "au1-1": {"hubspot": {"name": "A", "arr_usd": 120000}, "sources": {"hubspot": "live", "metrics": "live"},
                   "metrics": {"mrr_usd": 120000, "revenue_prev_year_usd": 100000},
@@ -483,6 +523,67 @@ def test_ndr_computed_from_warehouse_monthly_arr():
     r = engine._retention_metrics(accounts, {})
     # (120k + 60k) / (100k + 100k) = 90%
     assert r["ndr_pct"] == 90.0 and r["ndr_computable"] is True and r["ndr_accounts"] == 2
+
+def test_retention_accounts_span_whole_book_for_csm_scope(monkeypatch):
+    """Portfolio NDR must compute for a CSM whose book sits OUTSIDE the enriched slice.
+    _retention_accounts() pulls the owner-scoped whole-book roster and attaches the
+    batched warehouse metrics (prior-year revenue), so NDR is real - not 'no data' -
+    for every CSM's actual book. The rules-engine account set is untouched."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "faizaa@x"})
+    # Enriched slice holds only another owner's account; scoped to this CSM it is empty.
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {
+        "AU1-1": {"sources": {"hubspot": "live"},
+                  "hubspot": {"name": "Other", "arr_usd": 1000,
+                              "hubspot_owner_id": "111", "csm_owner": "Someone"},
+                  "churn": {}, "usage": {}, "zendesk": {}, "stripe": {},
+                  "jiminny": {}, "onboarding": {}},
+    })
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                {"account_id": "AU2-2", "company_id": "c2", "name": "Beta",
+                 "arr_usd": 50000, "owner_id": "999", "csm_owner": "Faizaa",
+                 "lifecycle_stage": "customer", "renewal_date": "2027-01-01"},
+                {"account_id": "AU3-3", "company_id": "c3", "name": "Gamma",
+                 "arr_usd": 30000, "owner_id": "999", "csm_owner": "Faizaa",
+                 "lifecycle_stage": "customer", "renewal_date": None},
+                {"account_id": "AU9-9", "company_id": "c9", "name": "NotHers",
+                 "arr_usd": 9999, "owner_id": "111", "lifecycle_stage": "customer"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(
+        HUBSPOT=_FakeHS(),
+        ACCOUNT_METRICS=types.SimpleNamespace(live=lambda: True),
+    ))
+    engine._BATCH_METRICS["data"] = {
+        "AU2-2": {"mrr_usd": 60000, "revenue_prev_year_usd": 50000, "_source": "redshift-live"},
+        "AU3-3": {"mrr_usd": 27000, "revenue_prev_year_usd": 30000, "_source": "redshift-live"},
+    }
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        ra = engine._retention_accounts()
+        # Owner-scoped: only this CSM's accounts, never another owner's.
+        assert set(ra.keys()) == {"AU2-2", "AU3-3"}
+        r = engine._retention_metrics(ra, {})
+        assert r["ndr_computable"] is True
+        assert r["ndr_accounts"] == 2
+        # (60000 + 27000) / (50000 + 30000) = 108.75 -> 108.8
+        assert r["ndr_pct"] == 108.8
+        assert r["base_arr_usd"] == 80000
+    finally:
+        engine.set_principal(None)
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
 
 
 def test_retention_not_computable_without_live_arr():
@@ -689,7 +790,7 @@ def test_run_monthly_digests_batch_summary_is_honest(monkeypatch):
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
-def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
+def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch, tmp_path):
     """The strategic review window: named accounts get drafts; comment -> commented;
     approve -> approved; dispatch sends approved + auto-baselines unreviewed, holds commented."""
     import engine, dataaccess
@@ -707,7 +808,7 @@ def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
     monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
     engine.set_principal(None)
     engine.orchestrate.set_account_provider(lambda: book)
-    engine._DIGEST_REVIEWS.clear()
+    monkeypatch.setenv("CS_DIGEST_REVIEWS_FILE", str(tmp_path / "reviews.jsonl"))
     try:
         q = engine.monthly_review_queue(period="October 2026")
         # Only the NAMED account is in the strategic review queue.
@@ -728,11 +829,10 @@ def test_strategic_monthly_review_queue_comment_approve_dispatch(monkeypatch):
         actions = {r["account_id"]: r["action"] for r in d2["accounts"]}
         assert actions["au1-named"] == "approved-dispatch"
     finally:
-        engine._DIGEST_REVIEWS.clear()
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
-def test_dispatch_auto_baselines_unreviewed(monkeypatch):
+def test_dispatch_auto_baselines_unreviewed(monkeypatch, tmp_path):
     """Unreviewed (draft) named accounts auto-baseline on dispatch (spec edge case)."""
     import engine, dataaccess
     named = {"hubspot": {"name": "NamedCo", "segment_label": "Enterprise", "arr_usd": 90000,
@@ -745,12 +845,11 @@ def test_dispatch_auto_baselines_unreviewed(monkeypatch):
     monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
     engine.set_principal(None)
     engine.orchestrate.set_account_provider(lambda: book)
-    engine._DIGEST_REVIEWS.clear()
+    monkeypatch.setenv("CS_DIGEST_REVIEWS_FILE", str(tmp_path / "reviews.jsonl"))
     try:
         d = engine.dispatch_reviewed_digests(period="October 2026", apply=True)
         assert d["accounts"][0]["action"] == "auto-baseline"
     finally:
-        engine._DIGEST_REVIEWS.clear()
         engine.orchestrate.set_account_provider(engine.orchestrate._load)
 
 
@@ -1159,8 +1258,12 @@ def test_hubspot_roster_scopes_to_csm_owner(monkeypatch):
 
     monkeypatch.setattr(config, "http_post", fake_post)
     assert sources.HUBSPOT.roster(limit=1) == ["au1-5005"]
-    filters = captured["body"]["filterGroups"][0]["filters"]
-    assert {item["propertyName"] for item in filters} == {"account_id", "hubspot_owner_id"}
+    # Scoping now matches the designated CSM field OR the record owner (two filter groups),
+    # so a CSM sees accounts where they are the CSM field or the HubSpot owner.
+    groups = captured["body"]["filterGroups"]
+    props_per_group = [{item["propertyName"] for item in g["filters"]} for g in groups]
+    assert {"account_id", "customer_success_manager"} in props_per_group
+    assert {"account_id", "hubspot_owner_id"} in props_per_group
 
 
 def test_mcp_live_success_and_fixture_opt_in(monkeypatch):
@@ -1654,8 +1757,8 @@ def test_playbook_approval_requires_quality_gates(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="quality gates"):
         server._record_playbook_review(proposal["proposal_id"], {
             "decision": "approve_for_implementation",
-            "reviewed_by": "CS Leadership", "review_note": "Reviewed",
-        })
+            "review_note": "Reviewed",
+        }, principal={"email": "lead@jobadder.com", "role": "admin"})
 
 
 def test_judge_rejects_suppressed_risk_and_wrong_priority():
@@ -1894,13 +1997,13 @@ def test_playbook_proposal_review_records_approval_audit(monkeypatch, tmp_path):
         "quality_risk": "Could delay low-confidence actions.", "test_cases": "Missing source blocks PASS.",
     })
     reviewed = server._record_playbook_review(proposal["proposal_id"], {
-        "decision": "approve_for_implementation", "reviewed_by": "CS Leadership",
+        "decision": "approve_for_implementation",
         "review_note": "Evidence and rollback reviewed.",
         "review_checklist": {
             "evidence_verified": True, "policy_conflict_checked": True,
             "tests_added": True, "rollback_defined": True,
         },
-    })
+    }, principal={"email": "lead@jobadder.com", "role": "admin", "name": "CS Leadership"})
     assert reviewed["status"] == "approved_for_implementation"
     summary = server._playbook_summary()
     current = summary["proposals"][0]
@@ -2091,3 +2194,452 @@ def test_operating_rhythm_groups_tasks_into_wow_blocks(monkeypatch):
     assert b["weekly_adoption_qbr"]["count"] == 1
     assert b["monday_review"]["summary"]["p1_count"] == 1
     assert b["monday_review"]["summary"]["worst_health"][0]["account_id"] == "au1-a"
+
+
+def test_adoption_score_uses_aggregation_counts_when_no_pct():
+    """When Pendo exposes no mapped adoption/feature PERCENTAGES (the real state on this
+    install), the adoption score must still compute from the live Aggregation-API counts
+    (active_users_30d, features_used_30d). An active account scores high; an idle one 0."""
+    import engine
+    active = {"usage": {"active_users_30d": 135, "features_used_30d": 935,
+                        "days_since_last_visit": 1}}
+    r = engine.adoption_score(active)
+    assert r["computable"] is True
+    assert r["score"] >= 90, f"active account should score high, got {r['score']}"
+    labels = [c["label"] for c in r["components"]]
+    assert "Active users (30d)" in labels
+    assert "Feature breadth (30d)" in labels
+
+    idle = {"usage": {"active_users_30d": 0, "features_used_30d": 0,
+                      "days_since_last_visit": 126}}
+    r2 = engine.adoption_score(idle)
+    assert r2["computable"] is True
+    assert r2["score"] == 0, f"idle account should score 0, got {r2['score']}"
+
+
+def test_task_metrics_honours_cs_today(monkeypatch):
+    """_task_metrics must anchor overdue/age on CS_TODAY (the same date tasks are stamped
+    with), not the wall clock - otherwise KPIs/leaderboard overdue counts skew whenever
+    the platform runs on a business-date anchor. Regression for the date.today() bug."""
+    import engine
+    monkeypatch.setenv("CS_TODAY", "2026-12-01")
+    monkeypatch.setattr(engine, "_load_task_events", lambda: {})
+    tasks = [{"task_id": "t1", "created_on": "2026-11-01", "due_on": "2026-11-10", "priority": 2}]
+    m = engine._task_metrics(tasks)
+    assert m["overdue_tasks"] == 1, "task due 2026-11-10 is overdue vs CS_TODAY 2026-12-01"
+    assert m["average_task_age_days"] == 30.0, "age must be measured from CS_TODAY"
+
+
+def test_admin_coverage_matrix_rolls_up_roles(monkeypatch):
+    """admin_coverage_matrix reports per-role coverage % and ARR-at-risk across active
+    accounts, excluding churned. One account has Exec Sponsor only; the other is churned."""
+    import engine, dataaccess
+    a1 = {"hubspot": {"name": "ActiveCo", "arr_usd": 100000, "lifecycle_stage": "Customer",
+                      "contacts": [{"role": "Executive Sponsor", "email": "e@co.com"}]},
+          "sources": {"hubspot": "live"}}
+    a2 = {"hubspot": {"name": "DeadCo", "arr_usd": 50000, "lifecycle_stage": "Churned Customer",
+                      "contacts": []},
+          "sources": {"hubspot": "live"}}
+    monkeypatch.setattr(engine, "_scoped_accounts", lambda: {"au1-a": a1, "au1-d": a2})
+    m = engine.admin_coverage_matrix()
+    assert m["summary"]["active_accounts"] == 1  # churned excluded
+    roles = {r["role"]: r for r in m["roles"]}
+    assert roles["Executive Sponsor"]["covered"] == 1
+    assert roles["Executive Sponsor"]["coverage_pct"] == 100
+    # Finance + Primary Admin missing on the one active account -> 100k ARR at risk each.
+    assert roles["Finance Contact"]["missing"] == 1
+    assert roles["Finance Contact"]["arr_at_risk_usd"] == 100000
+
+
+def test_inbound_queue_ages_sla_on_read(monkeypatch):
+    """An open inbound ticket received >24h ago must flip to sla_breached on READ, even
+    though it was recorded as on-track at intake (ageing-on-read, UC1 SLA)."""
+    import engine, time
+    old = int(time.time()) - 30 * 3600  # 30h ago
+    engine._INBOUND_QUEUE.clear()
+    engine._INBOUND_QUEUE["t1"] = {
+        "id": "t1", "status": "open", "destination": "cs_pooled_queue", "intent": "billing",
+        "assigned_to": "Abs Vir", "received_at": old, "sla_due": old + 24 * 3600,
+        "sla_breached": False, "needs_reassign": False, "recorded_at": "2026-10-01",
+    }
+    try:
+        q = engine.inbound_queue()
+        t = q["tickets"][0]
+        assert t["sla_breached"] is True, "a 30h-old open ticket must be breached on read"
+        assert q["sla_breached"] == 1
+    finally:
+        engine._INBOUND_QUEUE.clear()
+
+
+def test_batch_metrics_attach_to_scoped_accounts(monkeypatch):
+    """Whole-book warehouse metrics attach to accounts: licence utilisation flows into
+    usage, the metrics block carries NDR inputs, and sources.metrics is marked live - so
+    NDR and licence utilisation populate across the book, not just the enriched slice."""
+    import engine, dataaccess, time
+    book = {"au1-5005": {"hubspot": {"name": "SeatCo", "arr_usd": 20000}, "sources": {"hubspot": "live"}}}
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: book)
+    engine.set_principal(None)
+    engine._BATCH_METRICS["data"] = {"AU1-5005": {"mrr_usd": 1200.0, "revenue_prev_year_usd": 1000.0,
+                                     "ndr_pct": 120, "active_users": 9, "committed_users": 10,
+                                     "user_utilization_pct": 90, "_source": "redshift-live"}}
+    engine._BATCH_METRICS["at"] = time.time()
+    monkeypatch.setattr(engine._src.ACCOUNT_METRICS, "live", lambda: True)
+    try:
+        scoped = engine._scoped_accounts()
+        a = scoped["au1-5005"]
+        assert a["usage"]["license_utilization_pct"] == 90
+        assert a["metrics"]["committed_users"] == 10 and a["metrics"]["active_users"] == 9
+        assert a["sources"]["metrics"] == "live"
+    finally:
+        engine._BATCH_METRICS["data"] = {}; engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_datagaps_spans_whole_book_with_honest_source_status(monkeypatch):
+    """Data Gaps reports HubSpot required-field gaps across the WHOLE active book (not
+    just the deeply-enriched slice), while source-system coverage for un-enriched roster
+    rows is marked 'not_checked' - never fabricated as a record presence/absence."""
+    import types
+    import engine
+    import orchestrate
+
+    monkeypatch.setattr(orchestrate, "load_accounts", lambda: {
+        "AU1": {"sources": {"hubspot": "live", "zendesk": "live",
+                            "stripe": "live_no_record", "usage": "live"},
+                "hubspot": {"name": "Alpha", "segment_label": "Agency", "arr_usd": 1000,
+                            "renewal_date": "2027-01-01", "csm_owner": "Faizaa",
+                            "subscription_type": "annual",
+                            "contacts": [{"role": "Finance Contact"}]}},
+    })
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                {"account_id": "AU1", "name": "Alpha", "lifecycle_stage": "customer"},
+                {"account_id": "AU2", "name": "Beta", "lifecycle_stage": "customer",
+                 "segment": "Corporate", "arr_usd": 500, "renewal_date": None,
+                 "owner_id": "123", "subscription_type": None},
+                {"account_id": "AU3", "name": "Gamma", "lifecycle_stage": "customer",
+                 "segment": None, "arr_usd": None, "renewal_date": None,
+                 "owner_id": None, "subscription_type": None},
+                {"account_id": "AU9", "name": "OldCo", "lifecycle_stage": "churned"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    g = engine.datagaps()
+    s = g["summary"]
+
+    # Whole book: enriched AU1 + roster AU2/AU3; churned OldCo excluded.
+    assert s["total_accounts"] == 3
+    assert s["book_total_accounts"] == 3
+    assert s["enriched_accounts"] == 1
+
+    # Field gaps tally the enriched account AND the roster rows together.
+    fg = s["hubspot_field_gaps"]
+    assert fg["Renewal date"] == 2        # AU2 + AU3
+    assert fg["Subscription type"] == 2   # AU2 + AU3
+    assert fg["Segment (ICP)"] == 1       # AU3
+    assert fg["ARR"] == 1                 # AU3
+    assert fg["CSM owner"] == 1           # AU3
+
+    # Vendor coverage stays scoped to the enriched slice (AU1 only).
+    assert s["coverage_pct"]["stripe"] == 0   # AU1 was live_no_record
+
+    # Roster-only rows never fabricate vendor presence: honest 'not_checked'.
+    beta = next(r for r in g["accounts"] if r["account_id"] == "AU2")
+    assert beta["enriched"] is False
+    assert beta["coverage_status"]["zendesk"] == "not_checked"
+    assert beta["coverage_status"]["stripe"] == "not_checked"
+    assert beta["coverage_status"]["usage"] == "not_checked"
+    assert beta["missing_systems"] == []  # unknown, not claimed
+    assert set(beta["missing_fields"]) == {"Renewal date", "Subscription type"}
+
+
+def test_warm_batch_metrics_populates_cache_for_ndr(monkeypatch):
+    """Boot warm loads whole-book warehouse metrics synchronously so the FIRST dashboard
+    render shows a real Portfolio NDR instead of 'no data' while the lazy cache warms."""
+    import types
+    import engine
+
+    engine._BATCH_METRICS["data"] = {}
+    engine._BATCH_METRICS["at"] = 0.0
+
+    class _FakeMetrics:
+        def live(self):
+            return True
+
+        def batch_metrics(self, refs):
+            return {
+                "EU1-2774": {"mrr_usd": 8319.25, "revenue_prev_year_usd": 7627.48,
+                             "_source": "redshift-live"},
+            }
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(ACCOUNT_METRICS=_FakeMetrics()))
+    try:
+        n = engine.warm_batch_metrics()
+        assert n == 1
+        assert engine._BATCH_METRICS["data"]["EU1-2774"]["revenue_prev_year_usd"] == 7627.48
+        assert engine._BATCH_METRICS["at"] > 0
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_hubspot_company_url_builds_origin_deep_link(monkeypatch):
+    """The account 360 'View in HubSpot' link uses the portal id (env override wins,
+    else resolved from account-info) + company id. Returns None when either is missing,
+    so the UI omits the link rather than render a dead one."""
+    from adapters import sources, config
+
+    hs = sources.HubSpot()
+    sources.HubSpot._portal_id_cache = None  # reset the module-level cache
+
+    # Env override pins the portal without an API call.
+    monkeypatch.setattr(config, "env", lambda k: "6426676" if k == "HUBSPOT_PORTAL_ID" else None)
+    assert hs.portal_id() == "6426676"
+    assert hs.company_url("12345") == "https://app.hubspot.com/contacts/6426676/company/12345"
+    # No company id -> no link (honest omission).
+    assert hs.company_url(None) is None
+
+    # No portal id resolvable -> no link.
+    sources.HubSpot._portal_id_cache = None
+    monkeypatch.setattr(config, "env", lambda k: None)
+    monkeypatch.setattr(hs, "live", lambda: False)
+    assert hs.company_url("12345") is None
+
+    sources.HubSpot._portal_id_cache = None  # leave cache clean for other tests
+
+
+def test_ingestion_status_reports_warming_and_ready(monkeypatch):
+    """The freshness banner's data: 'warming' when warehouse metrics are not yet loaded,
+    'ready' once they are fresh, and enrichment coverage (enriched vs whole book)."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    monkeypatch.setattr(dataaccess, "live_sources",
+                        lambda: ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"])
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"AU1-1": {}, "AU1-2": {}})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def list_all_companies(self, cached_only=False):
+            return [{"account_id": "AU%d-%d" % (i, i), "lifecycle_stage": "customer"}
+                    for i in range(10)]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    # Pin the cache TTL so 'fresh' is deterministic regardless of CS_REPORT_CACHE_TTL
+    # leakage from other tests in the suite.
+    monkeypatch.setattr(engine, "_report_cache_ttl", lambda: 600.0)
+
+    # Cold warehouse cache -> warming.
+    engine._BATCH_METRICS["data"] = {}
+    engine._BATCH_METRICS["at"] = 0.0
+    s = engine.ingestion_status()
+    assert s["state"] == "warming"
+    assert s["enrichment"]["enriched_accounts"] == 2
+    assert s["enrichment"]["book_total_accounts"] == 10
+    assert s["enrichment"]["pct"] == 20
+
+    # Fresh warehouse cache -> ready.
+    engine._BATCH_METRICS["data"] = {"AU1-1": {"mrr_usd": 1}}
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        s = engine.ingestion_status()
+        assert s["state"] == "ready"
+        assert s["warehouse_metrics"]["accounts"] == 1
+        assert s["warehouse_metrics"]["fresh"] is True
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
+
+def test_ingestion_banner_covers_secondary_sources(monkeypatch):
+    """V5 audit follow-up: the degraded banner must reflect ROI AI / Rocket Lane / billing
+    sync. A CONFIGURED-but-not-live secondary source is 'failing' (degrades the banner);
+    an UNCONFIGURED one is 'not_configured' (informational, does not degrade)."""
+    import types
+    import time as _t
+    import engine
+    import dataaccess
+
+    # Core all live + metrics fresh so, absent secondary issues, the state would be 'ready'.
+    monkeypatch.setattr(dataaccess, "live_sources",
+                        lambda: ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"])
+    monkeypatch.setattr(dataaccess, "all_accounts", lambda: {"AU1-1": {}})
+
+    class _FakeRL:
+        def __init__(self, live): self._live = live
+        def live(self): return self._live
+
+    class _FakeHS:
+        def live(self): return True
+        def list_all_companies(self, cached_only=False):
+            return [{"account_id": "AU1-1", "lifecycle_stage": "customer"}]
+
+    monkeypatch.setattr(engine, "_report_cache_ttl", lambda: 600.0)
+    engine._BATCH_METRICS["data"] = {"AU1-1": {"mrr_usd": 1}}
+    engine._BATCH_METRICS["at"] = _t.time()
+    try:
+        # Rocket Lane CONFIGURED but not live -> 'failing' -> banner degraded.
+        monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS(),
+                                                                  ROCKET_LANE=_FakeRL(False)))
+        monkeypatch.setenv("ROCKET_LANE_KEY", "rl-key")
+        monkeypatch.setattr(engine, "roi_ai_configured", lambda: False)
+        s = engine.ingestion_status()
+        by = {x["system"]: x for x in s["secondary_sources"]}
+        assert by["Rocket Lane"]["status"] == "failing"
+        assert "Rocket Lane" in s["secondary_degraded"]
+        assert s["state"] == "degraded"          # a configured secondary failing degrades
+        assert by["ROI AI"]["status"] == "not_configured"   # unconfigured -> informational
+
+        # Rocket Lane now LIVE -> no secondary failure -> state back to ready.
+        monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS(),
+                                                                  ROCKET_LANE=_FakeRL(True)))
+        s2 = engine.ingestion_status()
+        assert s2["secondary_degraded"] == []
+        assert s2["state"] == "ready"
+    finally:
+        engine._BATCH_METRICS["data"] = {}
+        engine._BATCH_METRICS["at"] = 0.0
+
+
+
+def test_book_readiness_is_owner_scoped_and_counts_gaps(monkeypatch):
+    """Per-CSM book readiness: owner-scoped, counts missing required fields + ARR at risk,
+    computes an overall readiness %, and ranks fix-first by gaps then ARR."""
+    import types
+    import engine
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "faizaa@x"})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def company_url(self, cid):
+            return ("https://app.hubspot.com/contacts/6426676/company/" + str(cid)) if cid else None
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                # This CSM's accounts.
+                {"account_id": "AU1-1", "company_id": "c1", "name": "Complete", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 10000, "renewal_date": "2027-01-01",
+                 "segment": "Agency", "subscription_type": "annual"},
+                {"account_id": "AU1-2", "company_id": "c2", "name": "TwoGaps", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 50000, "renewal_date": None,
+                 "segment": "Corporate", "subscription_type": None},
+                {"account_id": "AU1-3", "company_id": "c3", "name": "OneGap", "owner_id": "999",
+                 "lifecycle_stage": "customer", "arr_usd": 20000, "renewal_date": None,
+                 "segment": "Agency", "subscription_type": "annual"},
+                # Churned (excluded) + another owner (excluded).
+                {"account_id": "AU9-9", "company_id": "c9", "name": "Churned", "owner_id": "999",
+                 "lifecycle_stage": "churned"},
+                {"account_id": "AU8-8", "company_id": "c8", "name": "NotHers", "owner_id": "111",
+                 "lifecycle_stage": "customer", "arr_usd": 999},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    try:
+        r = engine.book_readiness()
+        assert r["scope"] == "csm"
+        assert r["total_accounts"] == 3           # churned + other owner excluded
+        assert r["fully_complete"] == 1           # only "Complete"
+        assert r["accounts_with_gaps"] == 2
+        # Renewal date missing on TwoGaps + OneGap = 2; subscription missing on TwoGaps = 1.
+        gaps = {g["field"]: g for g in r["field_gaps"]}
+        assert gaps["Renewal date"]["missing"] == 2
+        assert gaps["Renewal date"]["arr_at_risk_usd"] == 70000   # 50000 + 20000
+        assert gaps["Subscription type"]["missing"] == 1
+        # Fix-first: most gaps first -> TwoGaps (2 gaps) before OneGap (1 gap).
+        assert r["fix_first"][0]["name"] == "TwoGaps"
+        assert r["fix_first"][0]["hubspot_url"].endswith("/company/c2")
+        # 3 accounts x 4 fields = 12 cells; missing = 2 renewal + 1 sub = 3; filled 9 -> 75%.
+        assert r["readiness_pct"] == 75
+    finally:
+        engine.set_principal(None)
+
+
+def test_readiness_leaderboard_groups_by_csm_worst_first(monkeypatch):
+    """Leadership roll-up: groups the whole active book by CSM, resolves owner names,
+    reports per-CSM readiness % + biggest gap + ARR at risk, worst readiness first."""
+    import types
+    import engine
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def _owner_name(self, oid):
+            return {"111": "Alice", "222": "Bob"}.get(str(oid))
+
+        def list_all_companies(self, cached_only=False):
+            return [
+                # Alice: 2 accounts, 1 fully complete, 1 missing renewal (ARR 40k).
+                {"owner_id": "111", "lifecycle_stage": "customer", "arr_usd": 10000,
+                 "renewal_date": "2027-01-01", "segment": "Agency", "subscription_type": "annual"},
+                {"owner_id": "111", "lifecycle_stage": "customer", "arr_usd": 40000,
+                 "renewal_date": None, "segment": "Agency", "subscription_type": "annual"},
+                # Bob: 1 account missing 3 fields (ARR 5k) -> lower readiness.
+                {"owner_id": "222", "lifecycle_stage": "customer", "arr_usd": 5000,
+                 "renewal_date": None, "segment": None, "subscription_type": None},
+                # Churned excluded.
+                {"owner_id": "111", "lifecycle_stage": "churned"},
+            ]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    r = engine.readiness_leaderboard()
+    names = [c["csm"] for c in r["csms"]]
+    assert set(names) == {"Alice", "Bob"}
+    # Bob has the lowest readiness -> listed first.
+    assert r["csms"][0]["csm"] == "Bob"
+    bob = r["csms"][0]
+    # Bob: 1 account x 4 fields = 4 cells; owner set, 3 missing -> 1/4 = 25%.
+    assert bob["readiness_pct"] == 25
+    assert bob["arr_at_risk_usd"] == 5000
+    alice = next(c for c in r["csms"] if c["csm"] == "Alice")
+    # Alice: 2 accounts x 4 = 8 cells; 1 renewal missing -> 7/8 = 88%.
+    assert alice["readiness_pct"] == 88
+    assert alice["fully_complete"] == 1
+    assert alice["arr_at_risk_usd"] == 40000
+    assert alice["top_gap_field"] == "Renewal date"
+    assert r["summary"]["total_accounts"] == 3
+    assert r["summary"]["fully_complete"] == 1
+
+
+def test_book_readiness_full_returns_all_gap_accounts(monkeypatch):
+    """The CSV export uses full=True to get EVERY gap account, not just the display
+    top-15, so the downloaded worklist is complete."""
+    import types
+    import engine
+
+    engine.set_principal({"role": "csm", "owner_id": "999", "email": "x@x"})
+
+    class _FakeHS:
+        def live(self):
+            return True
+
+        def company_url(self, cid):
+            return "https://hs/" + str(cid)
+
+        def list_all_companies(self, cached_only=False):
+            # 20 accounts, all missing the renewal date (all have a gap).
+            return [{"account_id": "AU1-%d" % i, "company_id": "c%d" % i, "name": "Acc%d" % i,
+                     "owner_id": "999", "lifecycle_stage": "customer", "arr_usd": 1000 * i,
+                     "renewal_date": None, "segment": "Agency", "subscription_type": "annual"}
+                    for i in range(20)]
+
+    monkeypatch.setattr(engine, "_src", types.SimpleNamespace(HUBSPOT=_FakeHS()))
+    try:
+        capped = engine.book_readiness(full=False)
+        full = engine.book_readiness(full=True)
+        assert len(capped["fix_first"]) == 15        # display cap
+        assert len(full["fix_first"]) == 20          # complete worklist
+        assert full["accounts_with_gaps"] == 20
+    finally:
+        engine.set_principal(None)

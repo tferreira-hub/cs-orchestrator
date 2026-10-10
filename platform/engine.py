@@ -94,15 +94,423 @@ def _owns(account: dict, owner_id: str | None) -> bool:
     return bool(owner_id) and str(account.get("hubspot", {}).get("csm_owner_id") or "") == str(owner_id)
 
 
-def _scoped_accounts() -> dict:
-    """The account roster visible to the current principal. Admin (or no principal,
-    for legacy/open mode) sees everything; a CSM sees only accounts they own."""
-    accounts = dataaccess.all_accounts()
+# --------------------------------------------------------------------------- #
+# TTL memo cache with stale-while-revalidate for expensive live reports
+# --------------------------------------------------------------------------- #
+# Reports like the payment-risk and onboarding-governance views each fan out to a vendor
+# (Stripe / Rocket Lane), which is slow. We cache the result per (report, scope) for a
+# long TTL (default 600s, matching the roster cache) and serve STALE results instantly
+# while refreshing in the background, so the page is NEVER slow after the initial warm.
+# Keyed by scope so a CSM is never served another's data. CS_REPORT_CACHE_TTL tunes it;
+# set 0 to disable for tests.
+_REPORT_CACHE: dict = {}
+_REPORT_REFRESHING: set = set()
+
+
+def _report_cache_ttl() -> float:
+    try:
+        return float(os.environ.get("CS_REPORT_CACHE_TTL", "600"))
+    except ValueError:
+        return 600.0
+
+
+# Whole-book warehouse metrics (committed/active seats, revenue, NDR inputs) from
+# rpt_account_ndr_monthly, loaded in ONE batched Redshift query rather than a per-account
+# fan-out. Cached module-wide with the roster TTL and refreshed in the background, so the
+# hot portfolio path NEVER blocks on Redshift. {} until the first warm completes (then
+# every account that has a warehouse row gets licence utilisation + NDR inputs).
+_BATCH_METRICS: dict = {"at": 0.0, "data": {}}
+_BATCH_METRICS_REFRESHING: bool = False
+
+# Whole-book churn signal (status/score) from marts.int_ds_account_churn_scoring, loaded in
+# ONE batched Redshift query like the metrics batch above. This makes portfolio HEALTH
+# computable across the whole book (any account with a churn status is scorable), not just
+# the ~50 deeply-enriched accounts. Same TTL + non-blocking background refresh.
+_BATCH_CHURN: dict = {"at": 0.0, "data": {}}
+_BATCH_CHURN_REFRESHING: bool = False
+
+
+def _batch_churn_for() -> dict:
+    """Cached whole-book churn signal keyed by uppercase-hyphen ref, refreshed in the
+    background when stale. Non-blocking: returns whatever is cached now (possibly {}) and
+    never waits on Redshift from a request path. {} when the churn source is not live."""
+    import time
+    import threading
+    global _BATCH_CHURN_REFRESHING
+    try:
+        if not _src.CHURN.live():
+            return {}
+    except Exception:  # noqa: BLE001
+        return {}
+    ttl = _report_cache_ttl()
+    now = time.time()
+    fresh = _BATCH_CHURN["data"] and (now - _BATCH_CHURN["at"]) < ttl
+    if not fresh and not _BATCH_CHURN_REFRESHING:
+        _BATCH_CHURN_REFRESHING = True
+        def _bg():
+            global _BATCH_CHURN_REFRESHING
+            try:
+                data = _src.CHURN.batch_scores()
+                if isinstance(data, dict) and data:
+                    _BATCH_CHURN["data"] = data
+                    _BATCH_CHURN["at"] = time.time()
+            finally:
+                _BATCH_CHURN_REFRESHING = False
+        threading.Thread(target=_bg, daemon=True).start()
+    return _BATCH_CHURN["data"]
+
+
+def warm_batch_churn() -> int:
+    """SYNCHRONOUSLY load the whole-book churn signal into the cache on the boot warm thread
+    so portfolio health scores across the book on the FIRST request after deploy. Returns
+    the number of accounts loaded (0 when not live / on error). Never raises."""
+    import time
+    try:
+        if not _src.CHURN.live():
+            return 0
+        data = _src.CHURN.batch_scores()
+        if isinstance(data, dict) and data:
+            _BATCH_CHURN["data"] = data
+            _BATCH_CHURN["at"] = time.time()
+            return len(data)
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
+
+def _batch_metrics_for(account_ids: list) -> dict:
+    """Return cached whole-book metrics keyed by uppercase-hyphen ref, refreshing in the
+    background when stale. Non-blocking: returns whatever is cached now (possibly {}) and
+    never waits on Redshift from a request path. Disabled when the metrics source is not
+    live, so fixtures/tests are unaffected."""
+    import time
+    import threading
+    global _BATCH_METRICS_REFRESHING
+    try:
+        if not _src.ACCOUNT_METRICS.live():
+            return {}
+    except Exception:  # noqa: BLE001
+        return {}
+    ttl = _report_cache_ttl()
+    now = time.time()
+    fresh = _BATCH_METRICS["data"] and (now - _BATCH_METRICS["at"]) < ttl
+    if not fresh and not _BATCH_METRICS_REFRESHING:
+        _BATCH_METRICS_REFRESHING = True
+        ids = list(account_ids)
+        def _bg():
+            global _BATCH_METRICS_REFRESHING
+            try:
+                data = _src.ACCOUNT_METRICS.batch_metrics(ids)
+                if isinstance(data, dict) and data:
+                    _BATCH_METRICS["data"] = data
+                    _BATCH_METRICS["at"] = time.time()
+            finally:
+                _BATCH_METRICS_REFRESHING = False
+        threading.Thread(target=_bg, daemon=True).start()
+    return _BATCH_METRICS["data"]
+
+
+def warm_batch_metrics() -> int:
+    """SYNCHRONOUSLY load the whole-book warehouse metrics into the cache. Called from the
+    boot warm thread so portfolio NDR / licence utilisation are populated on the FIRST
+    request after deploy, instead of returning 'no data' until the lazy non-blocking warm
+    happens to complete. Returns the number of accounts loaded (0 when not live / on error).
+    """
+    import time
+    try:
+        if not _src.ACCOUNT_METRICS.live():
+            return 0
+        data = _src.ACCOUNT_METRICS.batch_metrics([])
+        if isinstance(data, dict) and data:
+            _BATCH_METRICS["data"] = data
+            _BATCH_METRICS["at"] = time.time()
+            return len(data)
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
+
+def _scope_key() -> str:
+    """Cache key component for the current principal's visibility scope."""
     p = get_principal()
     if not p or p.get("role") == "admin":
-        return accounts
-    owner_id = p.get("owner_id")
-    return {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
+        return "admin"
+    return "csm:" + str(p.get("owner_id") or p.get("email") or "unknown")
+
+
+def _cached_report(name: str, build):
+    """Return build() memoised per (name, scope) for CS_REPORT_CACHE_TTL seconds.
+
+    FULLY NON-BLOCKING: the request never waits for a build, even the very first time.
+
+    - FRESH cache (age < TTL): return instantly.
+    - STALE cache (data exists, age >= TTL): return stale instantly, background refresh.
+    - COLD cache (no data at all): return a {"warming": true} placeholder instantly
+      and kick off a background build. The frontend shows a warming state and polls
+      until the cache is ready (typically 10-30s). This prevents the ALB from timing
+      out on the 156s Stripe pagination cold build.
+
+    TTL<=0 disables caching entirely (tests set this for determinism).
+    """
+    import time
+    import threading
+    ttl = _report_cache_ttl()
+    if ttl <= 0:
+        return build()
+    key = (name, _scope_key())
+    now = time.time()
+    hit = _REPORT_CACHE.get(key)
+
+    # Fresh cache: serve immediately.
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+
+    # Background refresh helper (shared by stale + cold paths).
+    def _start_bg():
+        if key in _REPORT_REFRESHING:
+            return  # already building
+        _REPORT_REFRESHING.add(key)
+        principal = get_principal()
+        def _bg():
+            try:
+                set_principal(principal)
+                result = build()
+                if isinstance(result, dict):
+                    _REPORT_CACHE[key] = (time.time(), result)
+            finally:
+                _REPORT_REFRESHING.discard(key)
+                set_principal(None)
+        threading.Thread(target=_bg, daemon=True).start()
+
+    # Stale cache exists: return it NOW, refresh in the background.
+    if hit and hit[1] is not None:
+        _start_bg()
+        return hit[1]  # stale but instant
+
+    # COLD (no cached data at all): return a warming placeholder immediately and
+    # build in the background. The frontend polls until the real data appears.
+    _start_bg()
+    return {"warming": True, "note": f"{name} is loading for the first time after deploy. It will appear in a few seconds."}
+
+
+def warm_reports():
+    """Synchronously build both TTL-cached reports under the admin scope key so the
+    first admin page load after deploy is instant. Called from the boot warm thread
+    (not from a request handler). MUST NOT use _cached_report (which now returns a
+    warming placeholder on cold miss)."""
+    import time as _t
+    import sys as _sys
+    def _log(msg):
+        print(f"[warm] {msg}", file=_sys.stderr, flush=True)
+    _wt0 = _t.time()
+    _log("warm_reports START")
+    # Bulk-warm the HubSpot owner id->name map in ONE paginated call so the whole-book
+    # build never does per-owner live GETs (that serial fan-out was ~16s cold and worse
+    # under prod throttling). Best-effort.
+    try:
+        if _src.HUBSPOT.live():
+            _s = _t.time(); on = _src.HUBSPOT.warm_owners(); _log(f"owners warm: {on} owners in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"owners warm ERROR {type(exc).__name__}: {exc}")
+    # Synchronously warm the WHOLE-BOOK roster cache so the very first portfolio() render
+    # shows the full customer book (~4,300), not just the deeply-enriched ~50 slice.
+    # portfolio() reads list_all_companies(cached_only=True), which returns [] on a cold
+    # cache (non-blocking by design); without this boot warm the dashboard headline count
+    # and the global filter population would be stuck at the enriched slice until a later
+    # request happened to warm it. Best-effort; never crashes the boot thread.
+    try:
+        if _src.HUBSPOT.live():
+            _s = _t.time()
+            n = len(_src.HUBSPOT.list_all_companies())  # blocking full scan, populates the cache
+            _log(f"roster scan done: {n} rows in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"roster scan ERROR {type(exc).__name__}: {exc}")
+    # Load whole-book warehouse metrics (NDR inputs + licence utilisation) up front so the
+    # first dashboard load shows a real Portfolio NDR instead of "no data" while the lazy
+    # non-blocking cache warms. Best-effort; never crashes the boot thread.
+    try:
+        _s = _t.time(); warm_batch_metrics(); _log(f"batch_metrics done in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"batch_metrics ERROR {type(exc).__name__}: {exc}")
+    # Whole-book churn signal so portfolio health scores across the book on first load.
+    try:
+        _s = _t.time(); warm_batch_churn(); _log(f"batch_churn done in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"batch_churn ERROR {type(exc).__name__}: {exc}")
+    # Prime the portfolio cache SYNCHRONOUSLY (the ~80s whole-book health build) on this
+    # boot thread, so the first /api/portfolio request after deploy is a warm, instant hit
+    # instead of an 85s cold build on the request path (which the edge times out → the
+    # dashboard was stuck on 'Checking sources').
+    try:
+        _s = _t.time(); n = warm_portfolio(); _log(f"warm_portfolio done: {n} accounts in {round(_t.time()-_s,1)}s")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"warm_portfolio ERROR {type(exc).__name__}: {exc}")
+    _log(f"warm_reports COMPLETE in {round(_t.time()-_wt0,1)}s")
+    for name, build in [("onboarding_governance", _onboarding_governance_build),
+                        ("payment_risk_report", _payment_risk_report_build)]:
+        try:
+            result = build()
+            if isinstance(result, dict):
+                _REPORT_CACHE[(name, "admin")] = (_t.time(), result)
+        except Exception:  # noqa: BLE001
+            pass  # boot warm is best-effort; never crash the server
+
+
+def _scoped_accounts() -> dict:
+    """The account roster visible to the current principal. Admin (or no principal,
+    for legacy/open mode) sees everything; a CSM sees only accounts they own.
+
+    Attaches each account's success plans (if any) so the rules engine can fire the
+    success-plan-at-risk rule. Plans are read from the shared JSONL store; accounts
+    without plans are untouched (no key added), so behaviour is unchanged for them."""
+    accounts = dataaccess.all_accounts()
+    p = get_principal()
+    if p and p.get("role") not in (None, "admin"):
+        owner_id = p.get("owner_id")
+        accounts = {aid: a for aid, a in accounts.items() if _owns(a, owner_id)}
+    plans_by_account = _success_plans_all()
+    # Whole-book warehouse metrics (seats + NDR inputs), non-blocking cached batch load.
+    # This makes licence utilisation and portfolio NDR populate across the book, not just
+    # the per-account enriched slice. Keyed by uppercase-hyphen ref.
+    metrics_by_ref = _batch_metrics_for(list(accounts.keys()))
+    churn_by_ref = _batch_churn_for()
+    if plans_by_account or metrics_by_ref or churn_by_ref:
+        from adapters import identity as _id
+        for aid, a in accounts.items():
+            plans = plans_by_account.get(aid) if plans_by_account else None
+            m = None
+            ch = None
+            if metrics_by_ref:
+                m = metrics_by_ref.get(_id.normalise(aid).upper())
+            if churn_by_ref:
+                ch = churn_by_ref.get(_id.normalise(aid).upper())
+            if not plans and not m and not ch:
+                continue
+            # Shallow copy so we never mutate the dataaccess cache in place.
+            a = dict(a)
+            if plans:
+                a["success_plans"] = plans
+            if ch:
+                # Only fill gaps: a per-account live churn read (enriched slice) wins.
+                existing_ch = dict(a.get("churn") or {})
+                for k, v in ch.items():
+                    existing_ch.setdefault(k, v)
+                a["churn"] = existing_ch
+                src = dict(a.get("sources") or {})
+                src.setdefault("churn", "live")
+                a["sources"] = src
+            if m:
+                # Only fill gaps: a per-account live metrics block (enriched slice) wins.
+                existing = dict(a.get("metrics") or {})
+                for k, v in m.items():
+                    existing.setdefault(k, v)
+                a["metrics"] = existing
+                # Flow licence utilisation into usage so the account view + expansion rule
+                # see it (mirrors dataaccess.account()). Only when not already present.
+                util = m.get("user_utilization_pct")
+                if util is not None:
+                    usage = dict(a.get("usage") or {})
+                    usage.setdefault("license_utilization_pct", util)
+                    a["usage"] = usage
+                # Mark the metrics source live so _live_block keeps it (not stripped).
+                src = dict(a.get("sources") or {})
+                src.setdefault("metrics", "live")
+                a["sources"] = src
+            accounts[aid] = a
+    return accounts
+
+
+def _retention_accounts() -> dict:
+    """The account set for portfolio RETENTION metrics (NDR/GRR), scoped to the current
+    principal, spanning the WHOLE book - not just the enriched slice.
+
+    Portfolio NDR is a book-level figure the warehouse (rpt_account_ndr_monthly) carries
+    for ~4,500 accounts, including most of each CSM's book. But _scoped_accounts() only
+    contains the ~50 deeply-enriched accounts, so a CSM whose book sits outside that slice
+    saw "no data" even though the warehouse has their numbers. This helper assembles the
+    cheap whole-book roster (one cached HubSpot scan), keeps it owner-scoped, and attaches
+    the batched warehouse metrics (current + prior-year revenue) so _retention_metrics can
+    compute real NDR/GRR over the CSM's actual book. HubSpot/warehouse-grounded only - no
+    per-account vendor fan-out, nothing fabricated. Used ONLY by the retention computation,
+    so the rules engine and task generation are untouched (no spurious roster-only tasks).
+    """
+    # Start from the enriched slice (already owner-scoped + batch-metric'd).
+    accounts = dict(_scoped_accounts())
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    try:
+        if not _src.HUBSPOT.live():
+            return accounts
+        from adapters import identity as _id
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+        metrics_by_ref = _batch_metrics_for([c.get("account_id") for c in roster if c.get("account_id")])
+        churn_by_ref = _batch_churn_for()
+        for c in roster:
+            aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
+            if aid in accounts:
+                continue  # enriched version already present (keeps its richer signals)
+            if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+                continue  # not this CSM's account
+            lc = str(c.get("lifecycle_stage") or "").lower()
+            ch = churn_by_ref.get(_id.normalise(aid).upper()) if churn_by_ref else None
+            # Churn signal: a HubSpot 'churned' lifecycle, else the warehouse churn status.
+            churn_block = {"churn_status": "churned"} if "churn" in lc else (dict(ch) if ch else {})
+            rec = {
+                "account_id": aid,
+                "sources": {"hubspot": "live", **({"churn": "live"} if churn_block else {})},
+                "hubspot": {
+                    "name": c.get("name"),
+                    "account_id": c.get("account_id"),
+                    "arr_usd": c.get("arr_usd"),
+                    "segment": c.get("segment"),
+                    "segment_label": c.get("segment_label") or c.get("segment"),
+                    "renewal_date": c.get("renewal_date"),
+                    "lifecycle_stage": c.get("lifecycle_stage"),
+                    "csm_owner": c.get("csm_owner"),
+                },
+                "churn": churn_block,
+                "usage": {}, "zendesk": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
+            }
+            m = metrics_by_ref.get(_id.normalise(aid).upper()) if metrics_by_ref else None
+            if m:
+                rec["metrics"] = dict(m)
+                rec["sources"]["metrics"] = "live"
+            accounts[aid] = rec
+    except Exception:  # noqa: BLE001 - retention augmentation is best-effort
+        pass
+    return accounts
+
+
+_SUCCESS_PLANS_FILE = os.environ.get(
+    "CS_SUCCESS_PLANS_FILE",
+    str(Path(__file__).resolve().parents[1] / ".cs-success-plans.jsonl"))
+
+
+def _success_plans_all() -> dict:
+    """Latest success plan per (account_id, plan_id) from the append-only JSONL store,
+    grouped by account_id. Shared file with the server's writer (CS_SUCCESS_PLANS_FILE).
+    Returns {account_id: [plan, ...]}; empty when the file is absent. Never raises."""
+    path = Path(os.environ.get("CS_SUCCESS_PLANS_FILE", _SUCCESS_PLANS_FILE))
+    if not path.exists():
+        return {}
+    latest: dict = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:  # noqa: BLE001
+                continue
+            key = (row.get("account_id"), row.get("plan_id"))
+            if row.get("account_id"):
+                latest[key] = row  # later lines overwrite earlier (edits)
+    except Exception:  # noqa: BLE001
+        return {}
+    by_account: dict = {}
+    for (aid, _pid), plan in latest.items():
+        by_account.setdefault(aid, []).append(plan)
+    return by_account
 
 
 def can_view_account(account_id: str) -> bool:
@@ -173,6 +581,7 @@ _SIGNAL_SOURCE = {
     # Jiminny removed: no live source, was fixture-only ('remove all mock data').
     "churn": "churn",
     "onboarding": "onboarding",
+    "roi_ai": "roi_ai",
 }
 
 # Pendo's live endpoint does not expose these usage metrics (the adapter hardcodes
@@ -187,7 +596,7 @@ _PENDO_UNAVAILABLE_FIELDS = {
 
 def _is_live(sources: dict, block: str) -> bool:
     """True if the source feeding this block is real: either genuinely 'live', or
-    'computed' (transparently derived from live signals — never fixture/sample)."""
+    'computed' (transparently derived from live signals, never fixture/sample)."""
     src_key = _SIGNAL_SOURCE.get(block, block)
     return sources.get(src_key) in ("live", "computed", "live_no_record")
 
@@ -219,6 +628,7 @@ def _live_account(account: dict) -> dict:
         "stripe": _live_block(account, "stripe"),
         "onboarding": _live_block(account, "onboarding"),
         "metrics": _live_block(account, "metrics"),
+        "roi_ai": _live_block(account, "roi_ai"),
         "entitlements": account.get("entitlements", {}) if isinstance(account.get("entitlements"), dict) else {},
         "sources": sources,
     }
@@ -299,7 +709,7 @@ def health_score(account: dict) -> dict:
         reasons.append("Pendo risk advisor: Medium (-8)")
 
     # Live Jiminny conversational intelligence: negative call sentiment is a real
-    # relationship-health signal. Weighted modestly — it colours the score but does
+    # relationship-health signal. Weighted modestly, it colours the score but does
     # not, on its own, dominate hard risk signals like churn or an open Sev-1.
     sentiment = str(jiminny.get("sentiment") or "").lower()
     if sentiment == "negative":
@@ -309,21 +719,108 @@ def health_score(account: dict) -> dict:
         score = min(100.0, score + 3)
         reasons.append("latest call sentiment: positive (+3)")
 
-    if str(churn.get("churn_status") or "").lower() == "churned":
+    # ROI AI adoption telemetry (V5): a modest colour on health. High adoption is a
+    # positive signal; very low adoption is a mild risk. Weighted small so it never
+    # dominates hard signals (churn, Sev-1), matching the Jiminny treatment.
+    roi_ai = account.get("roi_ai", {}) or {}
+    roi_adopt = roi_ai.get("adoption_score")
+    if isinstance(roi_adopt, (int, float)):
+        if roi_adopt >= 75:
+            score = min(100.0, score + 3)
+            reasons.append(f"ROI AI adoption {int(roi_adopt)} (+3)")
+        elif roi_adopt < 25:
+            pen = 8 if roi_adopt < 10 else 5
+            score -= pen
+            reasons.append(f"ROI AI adoption {int(roi_adopt)} (-{pen})")
+
+    # Live warehouse metrics (Redshift rpt_account_ndr_monthly): net-dollar retention
+    # and seat change are hard, deterministic account-health signals available for the
+    # WHOLE book in one batched query (Option B). NDR < 100% is revenue contraction (a
+    # real risk); NDR >= 110% is genuine expansion (a modest positive). A negative
+    # user_change is seat loss. These make 'Not churned' accounts computable from a real
+    # signal rather than staying blank - never a fabricated green.
+    metrics = account.get("metrics", {}) or {}
+    # Warehouse account status (authoritative lifecycle from the NDR mart). A warehouse
+    # 'Churned' is a hard negative that must cap health to red and must suppress the
+    # otherwise-positive 'stable/growing seats' colour (an account churned in the
+    # warehouse is NOT healthy just because its zero seats are 'stable').
+    _rms = str(metrics.get("account_status_rms") or "").strip().lower()
+    _rms_churned = _rms in ("churned", "cancelrequested")
+    if _rms_churned:
+        score -= 40
+        reasons.append(f"warehouse status: {metrics.get('account_status_rms')} (-40)")
+    elif _rms == "paymentrequired":
+        score -= 10
+        reasons.append("warehouse status: PaymentRequired (-10)")
+    ndr = metrics.get("ndr_pct")
+    if isinstance(ndr, (int, float)):
+        if ndr < 100:
+            # Graduated: shallow contraction a light touch, deep contraction material.
+            pen = min(25, round((100 - ndr) * 0.5))
+            if pen > 0:
+                score -= pen
+                reasons.append(f"NDR {int(ndr)}% (revenue contraction) (-{pen})")
+            else:
+                reasons.append(f"NDR {int(ndr)}% (stable)")
+        elif ndr >= 110:
+            score = min(100.0, score + 3)
+            reasons.append(f"NDR {int(ndr)}% (expansion) (+3)")
+        else:
+            # 100-109%: healthy/flat retention. No score change, but cite it so a
+            # computable green always has a traceable reason (never a bare 100).
+            reasons.append(f"NDR {int(ndr)}% (healthy retention)")
+    # Seat movement. The warehouse column is CATEGORICAL ("Growing"/"Stable"/
+    # "Contracting"), though a numeric delta is also supported. Contraction is a real
+    # protect signal; growth a modest positive. Either form makes health computable.
+    # Positive/stable colour is suppressed for a warehouse-churned account (its seats
+    # being 'stable' at zero is not a health signal).
+    uchg = metrics.get("user_change")
+    _uchg_num = isinstance(uchg, (int, float))
+    _uchg_str = str(uchg or "").strip().lower()
+    if _uchg_num and uchg < 0:
+        pen = min(15, round(abs(uchg) * 2))
+        if pen > 0:
+            score -= pen
+            reasons.append(f"seat change {int(uchg)} (contraction) (-{pen})")
+    elif _uchg_str == "contracting":
+        score -= 10
+        reasons.append("seats contracting (-10)")
+    elif _uchg_str == "growing" and not _rms_churned:
+        score = min(100.0, score + 3)
+        reasons.append("seats growing (+3)")
+    elif _uchg_str == "stable" and not _rms_churned:
+        # No score change, but cite it so a 'Stable'-only active account (no NDR) is
+        # computable WITH evidence rather than a bare, unexplained 100.
+        reasons.append("seats stable")
+
+    if str(churn.get("churn_status") or "").lower() == "churned" or _rms_churned:
         score = min(score, 49)
     score = max(0, min(100, round(score)))
     band = "green" if score >= 75 else "amber" if score >= 50 else "red"
     # Computable only if at least one real (live) health input contributed. When no
     # live signal is present, the score is not meaningful and the UI shows "no data".
+    # NOTE on churn_status: only a CHURNED status is a meaningful health input on its own
+    # (it caps the score). A bare "not churned" tells us the account is alive but NOT that
+    # it is healthy, so it must NOT, by itself, make the score computable - otherwise the
+    # whole book would show false green. A real ML churn score always counts.
+    _cs = str(churn.get("churn_status") or "").lower()
     computable = bool(
         churn.get("ml_churn_score") is not None
-        or churn.get("churn_status")
+        or _cs in ("churned", "churn risk", "at risk")
         or zd.get("csat_30d") is not None
         or (zd.get("sev1_open") is not None)
         or usage.get("days_since_last_visit") is not None
         or usage.get("pendo_risk_score")
         or stripe.get("dunning_stage")
         or jiminny.get("sentiment")
+        or roi_ai.get("adoption_score") is not None
+        # Warehouse metrics: NDR or a seat delta is a real, computable health signal.
+        or isinstance(metrics.get("ndr_pct"), (int, float))
+        or isinstance(metrics.get("user_change"), (int, float))
+        or str(metrics.get("user_change") or "").strip().lower() in ("growing", "stable", "contracting")
+        # Warehouse account status is itself an authoritative lifecycle signal.
+        or str(metrics.get("account_status_rms") or "").strip().lower()
+           in ("active", "churned", "cancelrequested", "paymentrequired")
     )
     return {"score": score, "band": band, "reasons": reasons, "computable": computable}
 
@@ -367,7 +864,7 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
     hs = account.get("hubspot", {}) or {}
     churn = account.get("churn", {}) or {}
 
-    if not hs.get("renewal_date"):
+    if not hs.get("renewal_date") or not _renewal_date_is_sane(hs.get("renewal_date")):
         return {"applicable": False, "label": None, "rationale": None, "evidence": []}
 
     band = health.get("band") if isinstance(health, dict) else None
@@ -392,14 +889,14 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
         return {
             "applicable": True,
             "label": "Churn Risk",
-            "rationale": "Churn Risk — " + ", ".join(detail),
+            "rationale": "Churn Risk, " + ", ".join(detail),
             "evidence": churn_signals + reasons,
         }
 
     # --- Expansion (opportunity) ---
     if expansion_qualified:
         detail = reasons[:1] if reasons else []
-        rationale = "Expansion — qualifies for an expansion trigger"
+        rationale = "Expansion, qualifies for an expansion trigger"
         if detail:
             rationale += " (" + ", ".join(detail) + ")"
         return {
@@ -411,9 +908,9 @@ def renewal_forecast(account: dict, health: dict, expansion_qualified: bool = Fa
 
     # --- Renewal (on track) ---
     if computable:
-        rationale = "Renewal — " + (reasons[0] if reasons else f"health {health.get('score')}, on track")
+        rationale = "Renewal, " + (reasons[0] if reasons else f"health {health.get('score')}, on track")
     else:
-        rationale = "Renewal — on track (no adverse signal)"
+        rationale = "Renewal, on track (no adverse signal)"
     return {
         "applicable": True,
         "label": "Renewal",
@@ -434,6 +931,7 @@ def _expansion_qualified(account_id: str, account: dict) -> bool:
         orchestrate.RULE_EXPANSION_UTILIZATION,
         orchestrate.RULE_EXPANSION_API_SURGE,
         orchestrate.RULE_EXPANSION_ADOPTION,
+        orchestrate.RULE_EXPANSION_ROI_AI,
     }
     return any(t.get("rule_id") in expansion_rules for t in tasks)
 
@@ -458,13 +956,31 @@ def adoption_score(account: dict) -> dict:
     if isinstance(au, (int, float)):
         comp("Active users", au, 0.30)
     else:
-        gaps.append("active user %")
+        # No mapped percentage, but the aggregation API gives a REAL distinct-active-user
+        # count (30d). Without a licensed-seat denominator we cannot form a true %, but a
+        # non-zero active-user count is itself strong evidence of adoption. Scale it to a
+        # 0-100 engagement signal (0 users = 0, >=25 active users = full). Honest, live.
+        auc = usage.get("active_users_30d")
+        if isinstance(auc, (int, float)):
+            engaged = min(100, round((auc / 25.0) * 100))
+            comp("Active users (30d)", engaged, 0.30)
+        else:
+            gaps.append("active user %")
     # Feature adoption.
     fa = usage.get("key_feature_adoption_pct")
     if isinstance(fa, (int, float)):
         comp("Feature adoption", fa, 0.25)
     else:
-        gaps.append("feature adoption %")
+        # No mapped percentage, but the Pendo Aggregation API gives a REAL count of
+        # distinct features touched in the last 30 days. Convert feature breadth to a
+        # 0-100 depth signal (0 features = 0, >=50 distinct features = full adoption).
+        # This is a genuine live signal, not a fabricated percentage.
+        feat = usage.get("features_used_30d")
+        if isinstance(feat, (int, float)):
+            breadth = min(100, round((feat / 50.0) * 100))
+            comp("Feature breadth (30d)", breadth, 0.25)
+        else:
+            gaps.append("feature adoption %")
     # Licence utilisation (seats used vs purchased).
     util = ent.get("license_utilization_pct")
     if isinstance(util, (int, float)):
@@ -598,8 +1114,35 @@ def expansion_score(account: dict, segment_median_arr: float | None = None) -> d
                       "utilization, API surge, renewal timing and ARR headroom (not an ML model)"}
 
 
+def _renewal_date_is_sane(renewal_date) -> bool:
+    """Whether a renewal date is plausibly real for an active subscription, rather than a
+    HubSpot data-entry error. We regularly see corrupt values (year 1314/1700, the Unix
+    epoch 1970-01-01, or dates thousands of days in the past) that are clearly not genuine
+    renewals. A sane renewal sits within a sensible window: at most ~2 years overdue and at
+    most ~5 years out. Anything outside that is treated as missing/garbage so it never
+    pollutes the renewal views or the forecast. Honest: we drop obviously-bad data rather
+    than present '260,334 days overdue' as an upcoming renewal."""
+    if not renewal_date:
+        return False
+    from datetime import date, datetime
+    try:
+        rd = datetime.fromisoformat(str(renewal_date)[:10]).date()
+    except (ValueError, TypeError):
+        return False
+    today_env = os.environ.get("CS_TODAY")
+    try:
+        today = datetime.fromisoformat(today_env).date() if today_env else date.today()
+    except ValueError:
+        today = date.today()
+    delta = (rd - today).days
+    # Window: up to ~2 years (730d) overdue, up to ~5 years (1825d) in the future.
+    return -730 <= delta <= 1825
+
+
 def _days_to_renewal(renewal_date) -> int | None:
     if not renewal_date:
+        return None
+    if not _renewal_date_is_sane(renewal_date):
         return None
     from datetime import date, datetime
     try:
@@ -709,7 +1252,7 @@ def churn_risk_matrix(threshold: float | None = None) -> dict:
     threshold (default 70%), grouped by PRIMARY risk driver with the total ARR impact and
     account list per driver. Scoped to the caller (admins all, CSM own book).
 
-    Only genuine ML churn scores count toward the cohort — a computed (signals-based)
+    Only genuine ML churn scores count toward the cohort, a computed (signals-based)
     fallback score is never treated as the ML >70% threshold (same guard as the P1 rule),
     so the matrix cannot over-report. Each account's ARR is the 'impact' it contributes.
     """
@@ -757,9 +1300,515 @@ def churn_risk_matrix(threshold: float | None = None) -> dict:
     }
 
 
+def _onboarding_days_in(start_date: str | None) -> int | None:
+    """Days a project has been in onboarding, from its start_date to today. None when
+    the start date is absent/unparseable (data-gap, never fabricated)."""
+    if not start_date:
+        return None
+    try:
+        start = datetime.fromisoformat(str(start_date)[:10]).date()
+    except (ValueError, TypeError):
+        return None
+    today_env = os.environ.get("CS_TODAY")
+    try:
+        today = datetime.fromisoformat(today_env).date() if today_env else date.today()
+    except ValueError:
+        today = date.today()
+    delta = (today - start).days
+    return delta if delta >= 0 else None
+
+
+def _onboarding_stalled(onboarding: dict) -> tuple[bool, list[str]]:
+    """Mirror the stalled logic in orchestrate.evaluate() so the governance view and the
+    queue agree. Returns (stalled, reasons)."""
+    status = str(onboarding.get("status") or "").lower()
+    health = str(onboarding.get("health") or "").lower()
+    reasons: list[str] = []
+    due = onboarding.get("due_date")
+    past_due_days = None
+    if due:
+        try:
+            d = datetime.fromisoformat(str(due)[:10]).date()
+            today_env = os.environ.get("CS_TODAY")
+            today = (datetime.fromisoformat(today_env).date() if today_env else date.today())
+            past_due_days = (today - d).days
+        except (ValueError, TypeError):
+            past_due_days = None
+    completed_states = {"completed", "complete", "done", "live"}
+    if status in {"stalled", "blocked", "at_risk", "on_hold"}:
+        reasons.append(f"status={onboarding.get('status')}")
+    if health in {"red", "at_risk"}:
+        reasons.append(f"health={onboarding.get('health')}")
+    if isinstance(past_due_days, int) and past_due_days > 0 and status not in completed_states:
+        reasons.append(f"{past_due_days}d past due")
+    return (bool(reasons), reasons)
+
+
+def onboarding_governance() -> dict:
+    """Cached wrapper (short TTL, per scope) over the live Rocket Lane governance build so
+    the page doesn't re-fan-out to Rocket Lane on every load."""
+    return _cached_report("onboarding_governance", _onboarding_governance_build)
+
+
+def _onboarding_governance_build() -> dict:
+    """Rocket Lane implementation & onboarding governance (V5 UC3): active onboarding
+    projects, time-in-onboarding, stalled-before-handoff alerts, and an on-time handoff
+    KPI (target >= 90%).
+
+    SOURCE-FIRST: pulls projects directly from Rocket Lane (like the Payment Risk report
+    pulls from Stripe), so the view is COMPLETE regardless of how the account roster was
+    warmed and without depending on brittle per-account name matching. Each project is
+    joined back to the account roster by normalised company name to attach the CSM owner;
+    unmatched projects still appear (owner shown as unknown). Owner-scoped: an admin sees
+    every project; a scoped CSM sees only projects for accounts they own. HONEST: when
+    Rocket Lane is not connected it returns connected:false and never a fabricated zero."""
+    rocket_live = "Rocket Lane" in set(dataaccess.live_sources())
+    if not rocket_live:
+        return {"connected": False, "active_projects": 0, "stalled_projects": 0,
+                "avg_days_in_onboarding": None, "handoff_on_time_pct": None,
+                "handoff_on_time_target_pct": 90, "handoff_completed": 0,
+                "projects": [], "stalled": [],
+                "note": "Rocket Lane is not connected; onboarding governance is unavailable."}
+
+    try:
+        all_projects = _src.ROCKET_LANE.list_active_projects()
+    except Exception:  # noqa: BLE001
+        all_projects = []
+
+    # Build an owner lookup (normalised company name -> {owner, owner_id, account_id}) from
+    # the FULL lightweight book (not just the enriched slice), so projects match real
+    # accounts and inherit the CSM owner. Falls back to the enriched roster if the cheap
+    # full-book scan is unavailable.
+    from adapters import identity as _id
+    p = get_principal()
+    admin = (not p) or p.get("role") == "admin"
+    my_owner_id = str((p or {}).get("owner_id") or "") if not admin else ""
+    owner_by_name = {}
+    try:
+        book = _src.HUBSPOT.list_all_companies() if (dataaccess._ADAPTERS and _src.HUBSPOT.live()) else []
+    except Exception:  # noqa: BLE001
+        book = []
+    # Resolve owner_id -> name via the adapter's cached owner lookup so rows show the CSM.
+    owner_names = {}
+    try:
+        ids = sorted({str(c.get("owner_id")) for c in book if c.get("owner_id")})
+        for oid in ids:
+            nm = _src.HUBSPOT._owner_name(oid)
+            if nm:
+                owner_names[oid] = nm
+    except Exception:  # noqa: BLE001
+        owner_names = {}
+    for c in book:
+        nm = c.get("name")
+        if not nm:
+            continue
+        oid = str(c.get("owner_id") or "")
+        owner_by_name[_id.normalise(nm)] = {
+            "owner": c.get("csm_owner") or owner_names.get(oid) or ("Unassigned" if not oid else oid),
+            "owner_id": oid,
+            "account_id": c.get("account_id") or ("rl-" + str(c.get("company_id"))),
+        }
+    # Fallback: if the full book was empty, use the enriched slice so we still match some.
+    if not owner_by_name:
+        for aid, a in _scoped_accounts().items():
+            hs = a.get("hubspot", {}) or {}
+            nm = hs.get("name")
+            if nm:
+                owner_by_name[_id.normalise(nm)] = {"owner": hs.get("csm_owner") or "Unassigned",
+                                                     "owner_id": str(hs.get("csm_owner_id") or ""),
+                                                     "account_id": aid}
+
+    projects, stalled = [], []
+    on_time = overdue = 0
+    for pr in all_projects:
+        cname = pr.get("company_name")
+        key = _id.normalise(cname) if cname else None
+        match = owner_by_name.get(key) if key else None
+        # Owner scope: a scoped CSM only sees projects for accounts THEY own (matched by
+        # company name, then owner_id). Admin (or open mode) sees every project.
+        if not admin:
+            if match is None or (my_owner_id and match.get("owner_id") != my_owner_id):
+                continue
+        status = str(pr.get("status") or "").lower()
+        completed = status in {"completed", "complete", "done", "live"}
+        days_in = _onboarding_days_in(pr.get("start_date"))
+        is_stalled, reasons = _onboarding_stalled(pr)
+        due = pr.get("due_date")
+        if completed and due:
+            try:
+                dd = datetime.fromisoformat(str(due)[:10]).date()
+                today_env = os.environ.get("CS_TODAY")
+                today = (datetime.fromisoformat(today_env).date() if today_env else date.today())
+                if today <= dd:
+                    on_time += 1
+                else:
+                    overdue += 1
+            except (ValueError, TypeError):
+                pass
+        row = {
+            "account_id": (match or {}).get("account_id"),
+            "name": cname or (pr.get("project_name") or "Unknown"),
+            "owner": (match or {}).get("owner") or "-",
+            "project_name": pr.get("project_name"),
+            "status": pr.get("status"),
+            "health": pr.get("health"),
+            "start_date": pr.get("start_date"),
+            "due_date": due,
+            "days_in_onboarding": days_in,
+            "completed": completed,
+            "stalled": is_stalled,
+            "stall_reasons": reasons,
+            "matched_account": match is not None,
+        }
+        if not completed:
+            projects.append(row)
+        if is_stalled and not completed:
+            stalled.append(row)
+
+    handoff_denom = on_time + overdue
+    handoff_on_time_pct = round(100 * on_time / handoff_denom) if handoff_denom else None
+    active_days = [r["days_in_onboarding"] for r in projects if isinstance(r["days_in_onboarding"], int)]
+    return {
+        "connected": rocket_live,
+        "active_projects": len(projects),
+        "stalled_projects": len(stalled),
+        "avg_days_in_onboarding": round(sum(active_days) / len(active_days)) if active_days else None,
+        "handoff_on_time_pct": handoff_on_time_pct,
+        "handoff_on_time_target_pct": 90,
+        "handoff_completed": handoff_denom,
+        "projects": sorted(projects, key=lambda r: -(r["days_in_onboarding"] or 0)),
+        "stalled": sorted(stalled, key=lambda r: -(r["days_in_onboarding"] or 0)),
+        "note": None,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Executive Sponsor F2F cadence (V5 UC2)
+# --------------------------------------------------------------------------- #
+# Append-only JSONL log of executive face-to-face touchpoints, following the
+# SUCCESS_PLANS pattern. Latest record per f2f_id wins (so a logged meeting can be
+# edited). CS_F2F_LOG_FILE relocates it (e.g. an EFS mount) so it survives restarts.
+F2F_LOG_FILE = Path(os.environ.get(
+    "CS_F2F_LOG_FILE", str(Path(__file__).resolve().parents[1] / ".cs-f2f-log.jsonl")))
+F2F_CADENCE_DAYS = int(os.environ.get("CS_F2F_CADENCE_DAYS", "90"))
+HIGH_ARR_TIER1 = 100000  # ARR proxy for tier-1 strategic when no explicit customer_tier
+
+
+def _f2f_today() -> date:
+    env = os.environ.get("CS_TODAY")
+    try:
+        return date.fromisoformat(env) if env else date.today()
+    except ValueError:
+        return date.today()
+
+
+def record_f2f(body: dict, principal: dict | None) -> dict:
+    """Log an executive F2F touchpoint. Append-only; latest-wins by f2f_id."""
+    account_id = str(body.get("account_id") or "").strip()
+    met_on = str(body.get("met_on") or "").strip() or _f2f_today().isoformat()
+    if not account_id:
+        raise ValueError("account_id is required")
+    try:
+        date.fromisoformat(met_on[:10])
+    except ValueError:
+        raise ValueError("met_on must be an ISO date (YYYY-MM-DD)")
+    entry = {
+        "f2f_id": body.get("f2f_id") or uuid.uuid4().hex[:12],
+        "account_id": account_id,
+        "met_on": met_on[:10],
+        # Touchpoint type so the quarterly scorecard can split '# meetings / # calls /
+        # # JBRs'. Defaults to 'meeting' (original F2F semantics) when not provided.
+        "interaction_type": (lambda v: v if v in ("meeting", "call", "jbr") else "meeting")(
+            str(body.get("interaction_type") or "meeting").strip().lower()),
+        "attendees": body.get("attendees") if isinstance(body.get("attendees"), list) else [],
+        "cs_leadership": body.get("cs_leadership") if isinstance(body.get("cs_leadership"), list) else [],
+        "notes": str(body.get("notes") or "").strip() or None,
+        "outcome": str(body.get("outcome") or "").strip() or None,
+        "logged_by": (principal or {}).get("email") or (principal or {}).get("name"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    F2F_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with F2F_LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+    # Bi-directional write-back to HubSpot (V5 UC2: Exec Sponsorship F2F synced to CRM so
+    # Sales/CS share one source of truth). Two-gated at the adapter (apply + CS_ALLOW_WRITE);
+    # best-effort so a CRM hiccup never loses the locally-logged touchpoint. apply mirrors
+    # the request (default dry-run), consistent with every other HubSpot write.
+    apply = bool(body.get("apply"))
+    hubspot_writeback = {"synced": False, "mode": "not-connected"}
+    try:
+        if dataaccess._ADAPTERS and _src.HUBSPOT.live():
+            hubspot_writeback = _src.HUBSPOT.set_exec_f2f(
+                account_id, met_on=entry["met_on"], outcome=entry.get("outcome"), apply=apply)
+    except Exception as exc:  # noqa: BLE001 - CRM write is best-effort; local log is source of record
+        hubspot_writeback = {"synced": False, "mode": "error", "detail": type(exc).__name__}
+    entry["hubspot_writeback"] = hubspot_writeback
+    return entry
+
+
+def f2f_log_for(account_id: str) -> list[dict]:
+    """All F2F entries for an account, newest first; latest record per f2f_id wins."""
+    if not F2F_LOG_FILE.exists():
+        return []
+    latest: dict[str, dict] = {}
+    for line in F2F_LOG_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if row.get("account_id") == account_id:
+            latest[row.get("f2f_id")] = row
+    return sorted(latest.values(), key=lambda r: r.get("met_on", ""), reverse=True)
+
+
+def last_f2f(account_id: str) -> str | None:
+    """Most recent F2F met_on date (ISO) for an account, or None (data-gap)."""
+    rows = f2f_log_for(account_id)
+    return rows[0]["met_on"] if rows else None
+
+
+def _is_tier1_strategic(hs: dict) -> bool:
+    """Tier-1 strategic signal: explicit customer_tier == 'tier-1'/'tier 1', else an
+    ARR >= HIGH_ARR_TIER1 proxy on a Strategic account."""
+    if (hs.get("segment") or "") != "Strategic":
+        return False
+    tier = str(hs.get("customer_tier") or "").strip().lower()
+    if tier in ("tier-1", "tier 1", "tier1", "strategic-tier-1"):
+        return True
+    arr = hs.get("arr_usd")
+    return isinstance(arr, (int, float)) and arr >= HIGH_ARR_TIER1
+
+
+def f2f_cadence() -> dict:
+    """Executive F2F cadence KPI (V5 UC2): of the tier-1 strategic accounts in scope, the
+    share that have an exec touchpoint within the cadence window (default 90 days).
+    Target 100%. Owner-scoped. Honest: an account with no F2F logged is simply overdue,
+    never credited with a fabricated meeting."""
+    accounts = _scoped_accounts()
+    today = _f2f_today()
+    tier1 = []
+    in_window = []
+    overdue = []
+    for aid, a in accounts.items():
+        hs = a.get("hubspot", {}) or {}
+        if not _is_tier1_strategic(hs):
+            continue
+        last = last_f2f(aid)
+        row = {"account_id": aid, "name": hs.get("name") or aid,
+               "owner": hs.get("csm_owner") or "Unassigned", "last_f2f": last,
+               "exec_sponsor": next((c.get("name") for c in hs.get("contacts", [])
+                                     if c.get("role") == "Executive Sponsor"), None)}
+        tier1.append(row)
+        within = False
+        if last:
+            try:
+                within = (today - date.fromisoformat(last)).days <= F2F_CADENCE_DAYS
+            except ValueError:
+                within = False
+        (in_window if within else overdue).append(row)
+    denom = len(tier1)
+    pct = round(100 * len(in_window) / denom) if denom else None
+    return {
+        "cadence_window_days": F2F_CADENCE_DAYS,
+        "tier1_strategic_accounts": denom,
+        "with_in_window_touchpoint": len(in_window),
+        "overdue_accounts": sorted(overdue, key=lambda r: (r["last_f2f"] or "")),
+        "tier1_exec_touchpoint_pct": pct,
+        "target_pct": 100,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# ROI AI webhook telemetry (V5): inbound product-adoption signal
+# --------------------------------------------------------------------------- #
+# ROI AI pushes adoption telemetry via a signed webhook (HMAC). We persist each
+# event append-only (CS_ROI_AI_FILE), idempotent on event_id, latest-wins per account
+# by newest metric_date. Honest: no secret configured => the source is "not connected"
+# and the webhook refuses; no stored data for an account => data-gap (no fabrication).
+ROI_AI_FILE = Path(os.environ.get(
+    "CS_ROI_AI_FILE", str(Path(__file__).resolve().parents[1] / ".cs-roi-ai.jsonl")))
+
+
+def roi_ai_configured() -> bool:
+    """True when the ROI AI webhook signing secret is set (source is connectable)."""
+    return bool((os.environ.get("ROI_AI_WEBHOOK_SECRET") or "").strip())
+
+
+def verify_roi_ai_signature(raw_body: bytes, header_sig: str | None) -> bool:
+    """Constant-time HMAC-SHA256 verification of a ROI AI webhook body against the shared
+    secret. Expects header value 'sha256=<hex>'. False when the secret is unset or the
+    signature is missing/invalid."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+    secret = (os.environ.get("ROI_AI_WEBHOOK_SECRET") or "").strip()
+    if not secret or not header_sig:
+        return False
+    provided = header_sig.strip()
+    if provided.startswith("sha256="):
+        provided = provided[len("sha256="):]
+    expected = _hmac.new(secret.encode("utf-8"), raw_body, _hashlib.sha256).hexdigest()
+    return _hmac.compare_digest(provided, expected)
+
+
+def _roi_ai_seen_event(event_id: str) -> bool:
+    if not event_id or not ROI_AI_FILE.exists():
+        return False
+    for line in ROI_AI_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            if json.loads(line).get("event_id") == event_id:
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def record_roi_ai(body: dict) -> dict:
+    """Validate + persist one ROI AI telemetry event. Idempotent on event_id (returns
+    {'duplicate': True} without re-writing when already seen). Raises ValueError on an
+    invalid payload (caller maps to 400). Never partially writes."""
+    event_id = str(body.get("event_id") or "").strip()
+    account_ref = str(body.get("account_ref") or body.get("account_id") or "").strip()
+    metric_date = str(body.get("metric_date") or "").strip()
+    adoption = body.get("adoption_score")
+    if not event_id:
+        raise ValueError("event_id is required")
+    if not account_ref:
+        raise ValueError("account_ref is required")
+    try:
+        date.fromisoformat(metric_date[:10])
+    except ValueError:
+        raise ValueError("metric_date must be an ISO date (YYYY-MM-DD)")
+    if not isinstance(adoption, (int, float)) or not (0 <= adoption <= 100):
+        raise ValueError("adoption_score must be a number between 0 and 100")
+    if _roi_ai_seen_event(event_id):
+        return {"duplicate": True, "event_id": event_id}
+    from adapters import identity as _id
+    entry = {
+        "event_id": event_id,
+        "account_id": _id.normalise(account_ref),
+        "metric_date": metric_date[:10],
+        "adoption_score": adoption,
+        "active_roi_users": body.get("active_roi_users"),
+        "roi_realized_usd": body.get("roi_realized_usd"),
+        "trend": str(body.get("trend") or "").strip().lower() or None,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ROI_AI_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with ROI_AI_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+    return {"duplicate": False, **entry}
+
+
+def roi_ai_for(account_id: str) -> dict:
+    """Latest ROI AI telemetry for an account (newest metric_date wins), or {} when none
+    (data-gap). account_id is matched on the normalised id."""
+    if not ROI_AI_FILE.exists():
+        return {}
+    from adapters import identity as _id
+    want = _id.normalise(account_id)
+    best = None
+    for line in ROI_AI_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if row.get("account_id") == want:
+            if best is None or (row.get("metric_date") or "") >= (best.get("metric_date") or ""):
+                best = row
+    return best or {}
+
+
+_PORTFOLIO_CACHE: dict = {}
+_PORTFOLIO_REFRESHING: set = set()
+
+
 def portfolio() -> dict:
+    """Non-blocking single-pane-of-glass payload.
+
+    The full whole-book build (_portfolio_build) scores health across ~4,300 accounts and
+    can take 60-90s on a COLD container — far longer than the Cloudflare/ALB edge timeout,
+    which left the dashboard stuck on 'Checking sources' for the first user after a deploy.
+    So portfolio() is served from a per-scope cache with background refresh and a cold
+    placeholder, exactly like _cached_report:
+      - FRESH: return instantly.
+      - STALE: return stale instantly + refresh in the background.
+      - COLD: return a tiny {warming:true} payload instantly + build in the background; the
+        UI shows a warming state and re-polls. No request ever blocks on the 80s build.
+    The boot warm (warm_reports) primes this cache so the first real user usually gets a
+    warm hit. CS_REPORT_CACHE_TTL<=0 (tests) bypasses the cache for determinism.
+    """
+    import time as _t
+    import threading as _th
+    ttl = _report_cache_ttl()
+    if ttl <= 0:
+        return _portfolio_build()
+    key = _scope_key()
+    now = _t.time()
+    hit = _PORTFOLIO_CACHE.get(key)
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+
+    def _start_bg():
+        if key in _PORTFOLIO_REFRESHING:
+            return
+        _PORTFOLIO_REFRESHING.add(key)
+        principal = get_principal()
+        def _bg():
+            try:
+                set_principal(principal)
+                built = _portfolio_build()
+                if isinstance(built, dict):
+                    _PORTFOLIO_CACHE[key] = (_t.time(), built)
+            finally:
+                _PORTFOLIO_REFRESHING.discard(key)
+                set_principal(None)
+        _th.Thread(target=_bg, daemon=True).start()
+
+    if hit and hit[1] is not None:
+        _start_bg()
+        return hit[1]
+
+    # Cold: kick off the build and return an instant warming placeholder so the dashboard
+    # paints immediately instead of hanging ~85s (which the edge kills).
+    _start_bg()
+    return {
+        "warming": True,
+        "summary": {"accounts": 0, "warming": True,
+                    "data_mode": "live" if dataaccess.any_live() else "sample",
+                    "live_sources": dataaccess.live_sources(),
+                    "account_scope": ("all" if (not get_principal() or get_principal().get("role") == "admin") else "csm"),
+                    "judge": {"verdict": "UNKNOWN", "violations": []}},
+        "accounts": [], "tasks": [], "suppressed": [], "automations": [],
+        "health_history": [],
+    }
+
+
+def warm_portfolio() -> int:
+    """SYNCHRONOUSLY build + cache the portfolio for the admin scope on the boot warm thread,
+    so the first dashboard request after deploy is a warm hit (not an 85s cold build on the
+    request path). Returns the account count (0 on error). Never raises."""
+    import time as _t
+    try:
+        built = _portfolio_build()
+        if isinstance(built, dict):
+            _PORTFOLIO_CACHE[_scope_key()] = (_t.time(), built)
+            return len(built.get("accounts", []))
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        pass
+    return 0
+
+
+def _portfolio_build() -> dict:
     """The single-pane-of-glass payload: every account with health + segment + ARR +
-    renewal, plus the prioritised task queue and suppressed signals across the book."""
+    renewal, plus the prioritised task queue and suppressed signals across the book.
+    HEAVY (whole-book health scoring) — never call from a request path directly; go through
+    portfolio() which serves it non-blocking."""
     accounts = orchestrate.load_accounts()
     result = orchestrate.orchestrate()
 
@@ -802,11 +1851,16 @@ def portfolio() -> dict:
             "customer_tier": _tier,          # authoritative HubSpot tier when present (e.g. "Pooled")
             "pooled": _pooled,               # True when pooled (tier-authoritative, else segment fallback)
             "pooled_source": ("tier" if hsobj.get("pooled") is not None else "segment"),
+            "pooled_team": hsobj.get("pooled_team"),
             "arr_usd": hsobj.get("arr_usd"),
             "renewal_date": hsobj.get("renewal_date"),
             "subscription_type": hsobj.get("subscription_type"),
             "csm_owner": hsobj.get("csm_owner"),
             "lifecycle_stage": hsobj.get("lifecycle_stage"),
+            # Derived CS lifecycle STAGE (deterministic state machine: Implementation →
+            # Onboarding → Adoption → Value Realisation → Mature, + Renewal / At Risk /
+            # Churned). Distinct from the raw HubSpot lifecycle_stage (Customer/Churned).
+            "cs_lifecycle_stage": lifecycle_state(live).get("stage"),
             "health": h,
             "renewal_forecast": forecast,
             "connected": _connected(a),
@@ -832,7 +1886,29 @@ def portfolio() -> dict:
     book_total = managed_count = pooled_count = 0
     try:
         if _src.HUBSPOT.live():
-            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+            _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+            # Whole-book batched signals (Option B): the churn status/score for the ENTIRE
+            # book is already available in ONE Redshift query (not a per-account fan-out).
+            # Merge it into every roster row below so health is COMPUTABLE across all ~4,300
+            # clients - not just the deeply-enriched ~50 - without any extra vendor calls.
+            # {} when the churn source is not live (rows then stay roster-band, honest).
+            _book_churn = _batch_churn_for() or {}
+            # Whole-book warehouse metrics (NDR / seat change) in ONE batched Redshift
+            # query - the second Option B signal, so 'Not churned' accounts (which a bare
+            # churn status leaves non-computable) still get a real, computable health band
+            # from revenue/seat movement instead of staying blank. {} when not live.
+            _book_metrics = _batch_metrics_for([]) or {}
+            # Resolve the distinct HubSpot owner IDs on the whole-book roster to CSM NAMES
+            # once (there are only ~15-20 CSMs; _owner_name is cached, so this is a handful
+            # of calls). Without this, roster rows carry only the numeric owner_id and the
+            # Owner filter shows IDs ("715230") instead of names for most of the book.
+            _owner_names: dict = {}
+            try:
+                for _oid in {str(c.get("owner_id")) for c in _roster if c.get("owner_id")}:
+                    _owner_names[_oid] = _src.HUBSPOT._owner_name(_oid)
+            except Exception:  # noqa: BLE001
+                _owner_names = {}
+            for c in _roster:
                 lc = str(c.get("lifecycle_stage") or "").lower()
                 is_churned = "churn" in lc
                 book_total += 1
@@ -846,6 +1922,45 @@ def portfolio() -> dict:
                 if is_churned and not include_churned:
                     continue  # active book by default; churned available via filter/env
                 band = _roster_band(c)
+                _rd = c.get("renewal_date") or None
+                # Option B: build a minimal account dict carrying the WHOLE-BOOK batched
+                # signals (churn status/score + warehouse NDR/seat metrics, both keyed by
+                # uppercase-hyphen ref) and run the REAL health score, so this roster row
+                # gets a computable, signal-driven RAG band like the enriched slice - with
+                # no per-account fan-out. Falls back to the neutral roster band only when
+                # the account has NO batched signal at all (honest "not scored yet").
+                _ref_up = str(aid).upper()
+                _churn_sig = _book_churn.get(_ref_up) or {}
+                _metrics_sig = _book_metrics.get(_ref_up) or {}
+                if _churn_sig or _metrics_sig:
+                    _batched_account = {
+                        "hubspot": {"renewal_date": _rd, "arr_usd": c.get("arr_usd")},
+                        "churn": _churn_sig,
+                        "metrics": _metrics_sig,
+                        "zendesk": {}, "usage": {}, "stripe": {}, "jiminny": {},
+                    }
+                    _h = health_score(_batched_account)
+                    health = _h if _h.get("computable") else band
+                else:
+                    health = band
+                # Which batched live signals actually backed this row's health, so the UI
+                # can honestly show them as connected without a per-account fetch.
+                _conn = {}
+                if _churn_sig:
+                    _conn["churn"] = True
+                if _metrics_sig:
+                    _conn["metrics"] = True
+                # Derived CS lifecycle STAGE for the whole-book row, from the batched signals
+                # we have (churn + warehouse metrics + renewal date + HubSpot lifecycle). With
+                # no deep adoption signal lifecycle_state falls back to health/renewal/churn,
+                # which is honest: Churned / At Risk / Renewal / Mature, else "Unknown".
+                _stage_acct = {
+                    "hubspot": {"renewal_date": _rd, "arr_usd": c.get("arr_usd"),
+                                "lifecycle_stage": c.get("lifecycle_stage")},
+                    "churn": _churn_sig, "metrics": _metrics_sig,
+                    "zendesk": {}, "usage": {}, "stripe": {}, "jiminny": {}, "onboarding": {},
+                }
+                _cs_stage = lifecycle_state(_stage_acct).get("stage") if (_churn_sig or _metrics_sig or _rd or is_churned) else "Unknown"
                 rows.append({
                     "account_id": aid,
                     "name": c.get("name"),
@@ -853,17 +1968,25 @@ def portfolio() -> dict:
                     "customer_tier": c.get("customer_tier"),
                     "pooled": (c.get("cohort") == "pooled"),
                     "pooled_source": "roster",
+                    "pooled_team": c.get("pooled_team"),
                     "cohort": c.get("cohort"),
                     "arr_usd": c.get("arr_usd"),
-                    "renewal_date": None,
-                    "subscription_type": None,
-                    "csm_owner": None,
+                    "renewal_date": _rd,
+                    "subscription_type": c.get("subscription_type"),
+                    "csm_owner": _owner_names.get(str(c.get("owner_id"))) if c.get("owner_id") else None,
                     "csm_owner_id": c.get("owner_id"),
+                    "csm_source": c.get("csm_source"),
+                    "record_owner_id": c.get("record_owner_id"),
                     "lifecycle_stage": c.get("lifecycle_stage"),
+                    "cs_lifecycle_stage": _cs_stage,
                     "churned": is_churned,
-                    "health": band,
-                    "renewal_forecast": {"applicable": False, "label": None, "rationale": None, "evidence": []},
-                    "connected": {},
+                    "health": health,
+                    "renewal_forecast": (renewal_forecast({"hubspot": {"renewal_date": _rd}, "arr_usd": c.get("arr_usd")}, health)
+                                         if _rd else
+                                         {"applicable": False, "label": None, "rationale": None, "evidence": []}),
+                    # Batched live signals present on this whole-book row (churn/metrics),
+                    # so the UI can honestly show them as connected without a per-account fetch.
+                    "connected": _conn,
                     "usage_days_since_visit": None,
                     "open_task_count": 0,
                     "enriched": False,
@@ -881,6 +2004,16 @@ def portfolio() -> dict:
     total_arr = sum(r["arr_usd"] or 0 for r in rows)
     at_risk_arr = sum(r["arr_usd"] or 0 for r in rows
                       if r["health"]["computable"] and r["health"]["band"] == "red")
+
+    # Lifecycle-stage distribution across the shown book (count + ARR per derived CS stage),
+    # so the Command Center can show a stage legend and the Lifecycle Stage filter has a
+    # real population. 'Unknown' = no signal to place the account on the curve (honest).
+    _stage_mix: dict[str, dict] = {}
+    for r in rows:
+        _st = r.get("cs_lifecycle_stage") or "Unknown"
+        slot = _stage_mix.setdefault(_st, {"stage": _st, "accounts": 0, "arr_usd": 0})
+        slot["accounts"] += 1
+        slot["arr_usd"] += r.get("arr_usd") or 0
 
     return {
         "summary": {
@@ -904,6 +2037,9 @@ def portfolio() -> dict:
             "book_pooled": pooled_count,
             "enriched_count": len(enriched_ids),
             "churned_included": include_churned,
+            # Derived CS lifecycle-stage distribution (count + ARR per stage) across the
+            # shown book, for the Command Center stage legend + Lifecycle Stage filter.
+            "lifecycle_stage_mix": sorted(_stage_mix.values(), key=lambda s: -s["accounts"]),
         },
         "accounts": rows,
         "tasks": result["tasks"],
@@ -982,6 +2118,48 @@ def _confidence(account: dict, evidence: dict) -> str:
     if live_count >= 1 and evidence:
         return "medium"
     return "low"
+
+
+def daily_focus() -> dict:
+    """Capacity-shaped 'today' slice of the prioritised queue for the current principal.
+
+    Every firing rule becomes a task, so a CSM with a rough book can face a very long
+    P3-P5 tail. This shapes a focused daily list without ever hiding risk:
+      - ALL MUST_PROTECT work (P1/P2) is always in focus - capping churn/revenue
+        protection would be unsafe, so it is never deferred.
+      - The remaining daily capacity (CS_TASK_CAPACITY_PER_CSM, default 20) is filled with
+        the next tasks in queue order (priority, then ARR), i.e. the highest-value
+        Expand/Use work.
+      - Anything beyond capacity is DEFERRED, not dropped - it stays in the full queue and
+        is reported as a count so the CSM knows the tail exists ('+N more this week').
+
+    Owner-scoped via the same account provider, so a CSM sees only their own focus."""
+    result = orchestrate.orchestrate()
+    tasks = result.get("tasks", [])  # already sorted (priority, -ARR, account)
+    capacity = _capacity_per_csm()
+    protect, rest = [], []
+    for t in tasks:
+        (protect if t.get("mandate") == "MUST_PROTECT" else rest).append(t)
+    # Fill remaining capacity after Protect with the top of the Expand/Use tail.
+    remaining = max(0, capacity - len(protect))
+    focus = protect + rest[:remaining]
+    deferred = rest[remaining:]
+    # Deferred breakdown by mandate so the UI can say what is waiting.
+    deferred_by_mandate: dict = {}
+    for t in deferred:
+        m = t.get("mandate", "OTHER")
+        deferred_by_mandate[m] = deferred_by_mandate.get(m, 0) + 1
+    return {
+        "focus": focus,
+        "focus_count": len(focus),
+        "protect_count": len(protect),
+        "deferred_count": len(deferred),
+        "deferred_by_mandate": deferred_by_mandate,
+        "capacity": capacity,
+        "total_tasks": len(tasks),
+        "over_capacity": len(protect) > capacity,  # Protect alone exceeds capacity: a real overload signal
+        "judge": result.get("judge", {}),
+    }
 
 
 def daily_brief() -> dict:
@@ -1134,6 +2312,7 @@ def account_detail(account_id: str) -> dict:
         orchestrate.RULE_EXPANSION_UTILIZATION,
         orchestrate.RULE_EXPANSION_API_SURGE,
         orchestrate.RULE_EXPANSION_ADOPTION,
+        orchestrate.RULE_EXPANSION_ROI_AI,
     }
     expansion_qualified = any(t.get("rule_id") in _expansion_rules for t in tasks)
     return {
@@ -1146,8 +2325,11 @@ def account_detail(account_id: str) -> dict:
             "churn": live.get("churn", {}),
             "stripe": live.get("stripe", {}),
             "metrics": live.get("metrics", {}),
+            "roi_ai": live.get("roi_ai", {}),
         },
         "onboarding": live.get("onboarding", {}),
+        "f2f_log": f2f_log_for(account_id),
+        "f2f_last": last_f2f(account_id),
         "health": h,
         "renewal_forecast": renewal_forecast(live, h, expansion_qualified=expansion_qualified),
         "health_trend": _health_trend_for(account_id),
@@ -1164,6 +2346,467 @@ def account_detail(account_id: str) -> dict:
         "suppressed": suppressed,
         "hubspot_writeback": _writeback_payload(live, h, tasks) if _is_live(a.get("sources", {}), "hubspot") else None,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Account Performance scorecard (CS Day-to-Day -> Accounts)
+#
+# Replicates & improves JobAdder's native 'Account' dashboard: a per-account recruiting
+# performance scorecard driven ONLY by live warehouse + connected systems. Honest about
+# gaps: any signal whose source is not connected is surfaced as not_connected / None rather
+# than fabricated. Assembles:
+#   identity           name/ARR (HubSpot preferred) + warehouse dim (status/type/plan/AI flags)
+#   performance        SUMmed metrics over the trailing window + the prior window + Vs-Prev deltas
+#   benchmark          peer cohort (same icp AND account_type): rank / percentile / peer_avg per metric
+#   feature_usage      best-effort automation usage (AI Generated Ads, Smart Sync, ...)
+#   tickets            Zendesk support signal when connected for the account, else not_connected
+#   signals            new signals: Adder Intelligence Match, AI Float, Enhanced Profile (not_connected),
+#                      event availability for corporates (not_connected)
+# Owner-scoped: raises ForbiddenError when the principal may not view the account.
+# --------------------------------------------------------------------------- #
+
+# New signals whose upstream source is not yet wired. Surfaced honestly rather than faked.
+_ACCT_PERF_UNCONNECTED_NOTE = "Source not found in the warehouse / connected systems."
+
+
+def _acct_perf_deltas(metrics: dict, previous: dict) -> dict:
+    """Per-metric Vs.-Prev delta: {value, previous, delta, pct_change} (pct None when the
+    prior value is absent or zero, to avoid a fabricated/undefined percentage)."""
+    out = {}
+    keys = set(metrics or {}) | set(previous or {})
+    keys.discard("_days_to_close_sum")
+    for k in keys:
+        cur = (metrics or {}).get(k)
+        prv = (previous or {}).get(k)
+        delta = None
+        pct = None
+        if isinstance(cur, (int, float)) and isinstance(prv, (int, float)):
+            delta = round(cur - prv, 2)
+            if prv:
+                try:
+                    pct = round(100.0 * (cur - prv) / abs(prv), 1)
+                except ZeroDivisionError:
+                    pct = None
+        out[k] = {"value": cur, "previous": prv, "delta": delta, "pct_change": pct}
+    return out
+
+
+def account_performance(account_id: str, business_type: str | None = None,
+                        size_band: str | None = None, peer_group: str | None = None) -> dict:
+    """Assemble the per-account performance scorecard. Owner-scoped (ForbiddenError when the
+    principal may not view the account); KeyError when the account id resolves to nothing in
+    any live system. Never fabricates — missing signals are not_connected / None / {}.
+
+    Optional benchmark cohort overrides (all default None => historical behaviour unchanged):
+      business_type  override the account_type the peer cohort is matched on
+      size_band      restrict the cohort to a seat-size band (see AccountPerformance)
+      peer_group     explicit cohort key selecting which auto dimensions to match on
+    The returned dict carries `benchmark_filters` = {applied, options} so the UI can render
+    and reflect the active filter controls."""
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
+
+    ref = account_id
+
+    # --- warehouse dimension (status / type / plan / AI flags) ---------------
+    dim = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            dim = _src.ACCOUNT_PERF.dimension(ref) or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        dim = {}
+
+    # --- HubSpot identity (preferred name/ARR), best-effort --------------------
+    hubspot = {}
+    try:
+        if _ADAPTERS and _src.HUBSPOT.live():
+            hubspot = _src.HUBSPOT.account(ref) or {}
+    except Exception:  # noqa: BLE001
+        hubspot = {}
+
+    # Honest resolution: prefer the warehouse dim / per-account HubSpot. If BOTH miss, the
+    # account may still be a real one that's simply absent from the warehouse (e.g. not yet
+    # provisioned) but present in the whole-book roster the picker is built from. In that
+    # case fall back to the roster row so an account the user can SELECT never dead-ends on
+    # a bare 404 — we render the identity header + an honest 'no warehouse performance data'
+    # note instead. Only a genuinely unknown id (not in any source and not in the roster)
+    # is a 404.
+    roster_only = False
+    if not dim and not hubspot:
+        any_live = False
+        try:
+            any_live = bool(_src.ACCOUNT_PERF.live() or (_ADAPTERS and _src.HUBSPOT.live()))
+        except Exception:  # noqa: BLE001
+            any_live = False
+        row = None
+        try:
+            from adapters import identity as _id
+            norm = _id.normalise(ref)
+            for r in full_roster().get("companies", []):
+                if r.get("account_id") in (ref, norm):
+                    row = r
+                    break
+        except Exception:  # noqa: BLE001
+            row = None
+        if row:
+            # Synthesize a minimal identity from the roster row (name/ARR/segment/type).
+            hubspot = {"name": row.get("name"), "arr_usd": row.get("arr_usd"),
+                       "country": row.get("country")}
+            roster_only = True
+        elif any_live:
+            raise KeyError(account_id)
+
+    # --- performance + previous window + deltas -------------------------------
+    perf = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            perf = _src.ACCOUNT_PERF.performance(ref) or {}
+    except Exception:  # noqa: BLE001
+        perf = {}
+    metrics = perf.get("metrics", {}) or {}
+    previous = perf.get("previous", {}) or {}
+    # Drop the internal derivation helper before it reaches the API surface.
+    metrics.pop("_days_to_close_sum", None)
+    previous.pop("_days_to_close_sum", None)
+    deltas = _acct_perf_deltas(metrics, previous) if (metrics or previous) else {}
+
+    # Accurate provenance: an account can be in the PERFORMANCE table but missing from the
+    # account DIMENSION (status/type/plan + the icp/account_type that drives benchmarking).
+    # Distinguish three honest states so the banner never contradicts what's on screen:
+    #   - has_perf  : performance metrics loaded (even if dim is missing)
+    #   - has_dim   : the warehouse dimension row exists
+    has_perf = bool(perf and (metrics or previous))
+    has_dim = bool(dim)
+    data_note = None
+    if roster_only and not has_perf and not has_dim:
+        data_note = ("This account is in your book but has no live warehouse data yet "
+                     "(not provisioned in the data warehouse). Showing account details only.")
+    elif has_perf and not has_dim:
+        # Perf present, warehouse dimension absent. Profile (status/type/plan) is backfilled
+        # from HubSpot where available; only the peer BENCHMARK genuinely needs the warehouse
+        # dimension, so be precise rather than claiming the profile is unavailable.
+        if hubspot:
+            data_note = ("Peer benchmarking isn't available for this account yet (no "
+                         "warehouse profile row), so rankings are hidden. Account details "
+                         "and performance metrics are live.")
+        else:
+            data_note = ("Performance metrics are live, but this account's warehouse profile "
+                         "(status, type, plan) and peer benchmark aren't provisioned yet, so "
+                         "those fields and rankings are unavailable.")
+        roster_only = False
+
+    # --- peer benchmark -------------------------------------------------------
+    benchmark = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            benchmark = _src.ACCOUNT_PERF.benchmark(
+                ref, business_type=business_type, size_band=size_band,
+                peer_group=peer_group) or {}
+    except Exception:  # noqa: BLE001
+        benchmark = {}
+
+    # --- benchmark filter options (for the UI cohort controls) ----------------
+    # Options come from the live dim (distinct business types) + the fixed size-band /
+    # peer-group vocabularies. Honest {} when the warehouse is not connected.
+    benchmark_filter_options = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            benchmark_filter_options = _src.ACCOUNT_PERF.benchmark_filter_options() or {}
+    except Exception:  # noqa: BLE001
+        benchmark_filter_options = {}
+
+    # What the caller requested vs. what the cohort query actually applied. `applied` is the
+    # adapter's honest record (present only when a cohort was built); `requested` always
+    # echoes the inputs so the UI can keep its controls in sync even for a {} benchmark.
+    applied_filters = (benchmark.get("applied_filters") if isinstance(benchmark, dict) else None) or {}
+
+    # --- feature / automation usage ------------------------------------------
+    feature_usage = {}
+    try:
+        if _src.ACCOUNT_PERF.live():
+            feature_usage = _src.ACCOUNT_PERF.feature_usage(ref) or {}
+    except Exception:  # noqa: BLE001
+        feature_usage = {}
+
+    # --- Zendesk tickets (reuse the existing support signal) ------------------
+    tickets = {"status": "not_connected", "note": "Zendesk is not connected for this account."}
+    try:
+        if _ADAPTERS and _src.ZENDESK.live():
+            t = _src.ZENDESK.tickets(ref) or {}
+            if t:
+                tickets = t
+    except Exception:  # noqa: BLE001 - a missing Zendesk org is a data gap, not a crash
+        tickets = {"status": "not_connected",
+                   "note": "Zendesk connected but no organisation matched this account."}
+
+    # --- warehouse user metrics (active vs committed seats + Vs-Prev change) --
+    # Mirrors JobAdder's native 'Users: 168 (-3)' header: active_users is the latest
+    # max-daily-users-over-month and user_change is the warehouse-computed delta. Honest
+    # {} when the metrics warehouse is not connected (never fabricated).
+    acct_metrics = {}
+    try:
+        if _src.ACCOUNT_METRICS.live():
+            acct_metrics = _src.ACCOUNT_METRICS.metrics(ref) or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        acct_metrics = {}
+
+    # --- identity header ------------------------------------------------------
+    name = (hubspot.get("name") or dim.get("account_name") or account_id)
+    arr_usd = hubspot.get("arr_usd")
+    identity_block = {
+        "account_id": account_id,
+        "name": name,
+        "arr_usd": arr_usd,                              # None when HubSpot not connected
+        # Identity fields prefer the warehouse dimension; when the dim row is missing (an
+        # account not yet in snp_jobadder_all_accounts), fall back to HubSpot so the header
+        # still shows real values instead of "Not available". Honest None only when neither
+        # source has it. account_source records which won, for transparency.
+        "account_status": dim.get("account_status") or hubspot.get("lifecycle_stage"),
+        "account_type": dim.get("account_type") or hubspot.get("segment_label") or hubspot.get("segment"),
+        "account_kind": dim.get("account_kind"),
+        "plan": dim.get("tier_name") or hubspot.get("customer_tier"),
+        "tier": dim.get("tier_name") or hubspot.get("customer_tier"),
+        "account_source": ("warehouse" if dim else ("hubspot" if hubspot else None)),
+        "country": dim.get("country") or hubspot.get("country"),
+        # Users (native-dashboard parity): active = latest max-daily-users-over-month,
+        # change = warehouse Vs-Prev delta. None/{} when the metrics warehouse is not live.
+        "users": ({
+            "active": acct_metrics.get("active_users"),
+            "committed": acct_metrics.get("committed_users"),
+            "change": acct_metrics.get("user_change"),
+            "utilization_pct": acct_metrics.get("user_utilization_pct"),
+        } if acct_metrics else None),
+        "stripe_customer_id": dim.get("stripe_customer_id"),
+        "global_customer_id": dim.get("global_customer_id"),
+        "hubspot_connected": bool(hubspot),
+        "warehouse_connected": bool(dim),
+    }
+
+    # --- new signals ----------------------------------------------------------
+    # Adder Intelligence Match + AI Float come from the warehouse dim booleans; when the dim
+    # is not connected they are honestly not_connected (not assumed off).
+    def _bool_signal(key: str, label: str):
+        if not dim:
+            return {"label": label, "status": "not_connected",
+                    "note": "Warehouse account dimension not connected."}
+        val = dim.get(key)
+        if val is None:
+            return {"label": label, "enabled": None, "status": "unknown"}
+        return {"label": label, "enabled": bool(val),
+                "status": ("enabled" if val else "disabled")}
+
+    signals = {
+        "adder_intelligence_match": _bool_signal("is_ai_matching_enabled", "Adder Intelligence Match"),
+        "ai_float": _bool_signal("is_floats_enabled", "AI Float"),
+        # Enhanced Profile and corporate event availability have no identified upstream source
+        # yet — surfaced honestly as not_connected rather than fabricated.
+        "enhanced_profile": {"label": "Enhanced Profile", "status": "not_connected",
+                             "note": _ACCT_PERF_UNCONNECTED_NOTE},
+        "event_availability": {"label": "Event Availability (Corporates)", "status": "not_connected",
+                               "note": _ACCT_PERF_UNCONNECTED_NOTE},
+    }
+
+    return {
+        "account_id": account_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "identity": identity_block,
+        "performance": {
+            "metrics": metrics,
+            "previous": previous,
+            "deltas": deltas,
+            "window": perf.get("window", {}),
+            "source_efficiency_derived": True,     # label: Source Efficiency is a DERIVED metric
+            "connected": bool(perf),
+        },
+        "benchmark": benchmark,                      # {} when no comparable cohort / not live
+        # Cohort filter controls contract for the UI: `applied` is what actually shaped the
+        # cohort (honest {} when no benchmark built), `requested` echoes the inputs, and
+        # `options` enumerates the selectable values ({} when the warehouse isn't connected).
+        "benchmark_filters": {
+            "applied": applied_filters,
+            "requested": {
+                "business_type": business_type,
+                "size_band": size_band,
+                "peer_group": peer_group,
+            },
+            "options": benchmark_filter_options,
+        },
+        "feature_usage": feature_usage,              # {} when none / not connected
+        "tickets": tickets,                          # Zendesk signal or {status:not_connected}
+        "signals": signals,
+        "dimension": dim,                            # raw dim fields (connected => has _source)
+        "connected": {
+            "warehouse_performance": bool(perf),
+            "warehouse_dimension": bool(dim),
+            "benchmark": bool(benchmark),
+            "feature_usage": bool(feature_usage),
+            "hubspot": bool(hubspot),
+            "zendesk": tickets.get("status") != "not_connected",
+        },
+        # Honest provenance: distinguishes 'no warehouse data at all' from 'performance
+        # present but profile/benchmark missing'. data_note is computed above.
+        "roster_only": roster_only,
+        "has_warehouse_profile": has_dim,
+        "has_warehouse_performance": has_perf,
+        "data_note": data_note,
+    }
+
+
+def account_performance_filter_options() -> dict:
+    """Benchmark cohort filter options for the Accounts page controls (business types from
+    the live dim + the fixed size-band / peer-group vocabularies). Not account-specific, so
+    there is nothing per-account to owner-scope here — the data is the warehouse's distinct
+    account_type set, which the Accounts page is already allowed to browse. Honest {} (no
+    options) when the warehouse is not connected; the UI then hides the cohort controls."""
+    try:
+        if _src.ACCOUNT_PERF.live():
+            return _src.ACCOUNT_PERF.benchmark_filter_options() or {}
+    except Exception:  # noqa: BLE001 - absence is a data gap, not a crash
+        return {}
+    return {}
+
+
+def account_performance_accounts() -> dict:
+    """Cheap picker list for the Accounts page: [{account_id, name}] across the current
+    principal's whole book (owner-scoped). Reuses the lightweight whole-book roster so it
+    does NOT fan out per account. Returns {accounts:[...], count, scope}."""
+    try:
+        roster = full_roster()  # owner-scoped inside
+    except Exception:  # noqa: BLE001
+        roster = {"companies": [], "summary": {"account_scope": "csm"}}
+    seen = set()
+    accounts = []
+    for r in roster.get("companies", []):
+        aid = r.get("account_id")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        accounts.append({"account_id": aid, "name": r.get("name") or aid})
+    accounts.sort(key=lambda a: (a.get("name") or "").lower())
+    return {
+        "accounts": accounts,
+        "count": len(accounts),
+        "scope": roster.get("summary", {}).get("account_scope", "csm"),
+    }
+
+
+# Per-CSM whole-book enrichment cache. Keyed by owner_id (or "admin"), holds the enriched
+# row fields for that book plus progress, so a CSM's My Companies view can fill in health/
+# usage/forecast across their ENTIRE book (not just the enriched-50 slice) without a
+# synchronous fan-out that would hang the request. Populated by a bounded background
+# thread; the UI polls get_book_enrichment() and re-renders as rows land.
+_BOOK_ENRICHMENT: dict = {}          # owner_key -> {"rows": {aid: row}, "done": int, "total": int, "running": bool, "at": float}
+_BOOK_ENRICHMENT_LOCK = __import__("threading").Lock()
+
+
+def _book_owner_key() -> str:
+    p = get_principal()
+    if not p or p.get("role") == "admin":
+        return "admin"
+    return "owner:" + str(p.get("owner_id") or "none")
+
+
+def enrich_my_book(max_accounts: int | None = None) -> dict:
+    """Kick off (or report on) background enrichment of the CURRENT principal's whole book.
+
+    The enriched slice only covers ~50 accounts globally, so a CSM's My Companies view
+    shows "roster / no data" for most of their book even though each account CAN be
+    enriched on demand. This enriches every account the CSM owns - resolved from the cheap
+    whole-book roster - in a bounded background thread (CS_FETCH_WORKERS concurrency),
+    caching the row-level fields per owner. Non-blocking: returns the current progress
+    immediately; the UI polls and re-renders as rows arrive. Honest: an account with no
+    live record is skipped (stays a roster row). Owner-scoped; never fabricates.
+    """
+    import os, time, threading
+    key = _book_owner_key()
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    try:
+        cap = max_accounts if max_accounts is not None else int(os.environ.get("CS_BOOK_ENRICH_MAX", "400"))
+    except (ValueError, TypeError):
+        cap = 400
+
+    with _BOOK_ENRICHMENT_LOCK:
+        state = _BOOK_ENRICHMENT.get(key)
+        # Fresh completed result (within TTL) or an in-flight run: just report progress.
+        ttl = _report_cache_ttl()
+        if state and (state.get("running") or (time.time() - state.get("at", 0)) < ttl):
+            return _book_progress(key)
+        _BOOK_ENRICHMENT[key] = {"rows": {}, "done": 0, "total": 0, "running": True, "at": time.time()}
+
+    # Resolve the owner's book from the cheap roster (real account_id refs only - a
+    # synthetic rl-<id> row has no vendor-resolvable ref, so it stays a roster row).
+    try:
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True) if _src.HUBSPOT.live() else []
+    except Exception:  # noqa: BLE001
+        roster = []
+    ids = []
+    for c in roster:
+        aid = c.get("account_id")
+        if not aid:
+            continue
+        if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+            continue
+        ids.append(_src.identity.normalise(aid))
+    ids = ids[:cap]
+
+    with _BOOK_ENRICHMENT_LOCK:
+        _BOOK_ENRICHMENT[key]["total"] = len(ids)
+
+    principal_snapshot = dict(p) if p else None
+
+    def _worker():
+        from concurrent.futures import ThreadPoolExecutor
+        try:
+            workers = int(os.environ.get("CS_FETCH_WORKERS", "6"))
+        except ValueError:
+            workers = 6
+        # The background threads do not inherit the request's principal context, so each
+        # enrich_one re-asserts it (ownership is re-checked from the enriched record).
+        def _enrich_one(aid):
+            try:
+                set_principal(principal_snapshot)
+                rows = enrich_rows([aid])
+                return rows.get("accounts", {}).get(aid)
+            except Exception:  # noqa: BLE001
+                return None
+        try:
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+                for aid, row in zip(ids, ex.map(_enrich_one, ids)):
+                    with _BOOK_ENRICHMENT_LOCK:
+                        st = _BOOK_ENRICHMENT.get(key)
+                        if st is None:
+                            return
+                        st["done"] += 1
+                        if row:
+                            st["rows"][aid] = row
+                        st["at"] = time.time()
+        finally:
+            with _BOOK_ENRICHMENT_LOCK:
+                st = _BOOK_ENRICHMENT.get(key)
+                if st is not None:
+                    st["running"] = False
+                    st["at"] = time.time()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return _book_progress(key)
+
+
+def _book_progress(key: str) -> dict:
+    with _BOOK_ENRICHMENT_LOCK:
+        st = _BOOK_ENRICHMENT.get(key) or {"rows": {}, "done": 0, "total": 0, "running": False, "at": 0.0}
+        return {
+            "accounts": dict(st["rows"]),
+            "done": st["done"],
+            "total": st["total"],
+            "running": st["running"],
+            "complete": (not st["running"]) and st["total"] > 0 and st["done"] >= st["total"],
+        }
+
+
+def get_book_enrichment() -> dict:
+    """Report current progress of the principal's book enrichment (poll endpoint)."""
+    return _book_progress(_book_owner_key())
 
 
 def enrich_rows(account_ids: list) -> dict:
@@ -1283,6 +2926,12 @@ SEQUENCES = {
         "steps": ["Renewal heads-up", "Success recap", "Renewal confirmation"],
         "trigger": "Renewal within 180 days",
     },
+    "onboarding_welcome": {
+        "label": "Automated onboarding (Tech Touch Pillar 1)",
+        "steps": ["Welcome email", "Feature training drip", "Milestone engagement survey",
+                  "Community workspace invitation"],
+        "trigger": "New customer in onboarding / early lifecycle (scaled tech-touch)",
+    },
 }
 
 
@@ -1309,6 +2958,14 @@ def enrol_sequence(account_id: str, sequence: str = "low_usage_reengage", apply:
         qualifies = dsv is not None and dsv >= 28
         reason = (f"idle {dsv} days" if qualifies else
                   (f"active ({dsv} days since visit)" if dsv is not None else "no usage signal"))
+    elif sequence == "onboarding_welcome":
+        ob = live.get("onboarding", {}) or {}
+        lc = str(hs.get("lifecycle_stage") or "").lower()
+        is_new = lc in ("customer",) and (ob.get("status") or "").lower() in (
+            "new", "onboarding", "in_progress", "kickoff", "implementation", "implementing", "training", "")
+        qualifies = is_new and not str(ob.get("status") or "").lower() in ("completed", "complete", "done", "live")
+        reason = ("new customer in onboarding" if qualifies else
+                  "not in early onboarding phase")
     else:
         qualifies = bool(hs.get("renewal_date"))
         reason = "renewal date set" if qualifies else "no renewal date"
@@ -1386,7 +3043,7 @@ def monthly_digest(account_id: str) -> dict:
     LIVE signals: licence/seat utilisation, active logins, top feature adoption, Zendesk
     tickets resolved, and CSAT. Flags an expansion CTA when licence utilisation >= 85%.
     Identifies the Primary Admin recipient; when none is tagged, flags a data-cleanup need
-    (edge case from the spec). Every field is honest 'no data' when its source is absent —
+    (edge case from the spec). Every field is honest 'no data' when its source is absent,
     nothing is fabricated. Read-only compile; the send is a separate gated action."""
     detail = account_detail(account_id)  # owner-scope enforced inside (raises ForbiddenError)
     hs = detail.get("hubspot", {}) or {}
@@ -1412,6 +3069,8 @@ def monthly_digest(account_id: str) -> dict:
         "days_since_last_visit": usage.get("days_since_last_visit"),
         "tickets_resolved_30d": zd.get("tickets_resolved_30d"),
         "csat_30d": zd.get("csat_30d"),
+        # ROI AI adoption (V5): None when no telemetry for this account (data-gap).
+        "roi_ai_adoption_score": (sig.get("roi_ai", {}) or {}).get("adoption_score"),
     }
     expansion_cta = isinstance(util, (int, float)) and util >= 85
     # Combined, de-duplicated recipient list (Primary Admin + Executive Sponsor), each
@@ -1448,7 +3107,7 @@ def send_digest(account_id: str, apply: bool = False) -> dict:
     copy on the timeline). Two-gate (apply + CS_ALLOW_WRITE), dry-run by default.
     Customer-facing send, so even with both gates it only sends when an outbound email
     capability is connected (CS_EMAIL_PROVIDER); otherwise it honestly reports 'prepared,
-    no email provider connected' — never a fake send. When no Primary Admin is tagged it
+    no email provider connected', never a fake send. When no Primary Admin is tagged it
     refuses and flags the data-cleanup need. The timeline copy is logged only after a
     successful send and never fails the send if the note-log itself fails."""
     digest = monthly_digest(account_id)
@@ -1613,13 +3272,51 @@ def run_monthly_digests(apply: bool = False) -> dict:
 # monthly report per strategic (named) account; 28th-31st the CSM reviews, adds executive
 # comments, and approves; on the 1st approved reports dispatch, and any still-unreviewed
 # auto-send the baseline (edge case: "unreviewed drafts auto-send baseline on the 1st").
-# Review state is keyed by (account_id, period) in an in-process store (survives the month;
-# a durable store can replace it later without changing the workflow).
-_DIGEST_REVIEWS: dict[str, dict] = {}
+# Review state is keyed by (account_id, period) and PERSISTED to an append-only JSONL
+# store (latest-wins), so CSM comments/approvals survive restarts AND are visible to the
+# separate scheduler ECS process that runs the 1st-of-month dispatch. Mirrors the F2F /
+# success-plan / ROI-AI stores. Env CS_DIGEST_REVIEWS_FILE relocates it (EFS in prod).
+_DIGEST_REVIEWS_FILE = os.environ.get(
+    "CS_DIGEST_REVIEWS_FILE",
+    str(Path(__file__).resolve().parents[1] / ".cs-digest-reviews.jsonl"))
 
 
 def _review_key(account_id: str, period: str) -> str:
     return f"{account_id}::{period}"
+
+
+def _review_get(account_id: str, period: str) -> dict | None:
+    """Latest review entry for (account_id, period) from the JSONL store, or None."""
+    path = Path(os.environ.get("CS_DIGEST_REVIEWS_FILE", _DIGEST_REVIEWS_FILE))
+    if not path.exists():
+        return None
+    key = _review_key(account_id, period)
+    found = None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:  # noqa: BLE001
+                continue
+            if _review_key(row.get("account_id", ""), row.get("period", "")) == key:
+                found = row  # later lines win
+    except Exception:  # noqa: BLE001
+        return None
+    return found
+
+
+def _review_put(account_id: str, period: str, entry: dict) -> None:
+    """Append a review entry (latest-wins on read)."""
+    path = Path(os.environ.get("CS_DIGEST_REVIEWS_FILE", _DIGEST_REVIEWS_FILE))
+    row = {"account_id": account_id, "period": period, **entry}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _is_named_account(a: dict) -> bool:
@@ -1648,7 +3345,7 @@ def monthly_review_queue(period: str | None = None) -> dict:
             digest = monthly_digest(aid)
         except Exception:  # noqa: BLE001
             continue
-        rv = _DIGEST_REVIEWS.get(_review_key(aid, period))
+        rv = _review_get(aid, period)
         status = (rv or {}).get("status", "draft")
         counts[status] = counts.get(status, 0) + 1
         rows.append({
@@ -1676,12 +3373,12 @@ def add_review_comment(account_id: str, comment: str, period: str | None = None)
     if not comment:
         raise ValueError("comment text is required")
     p = get_principal() or {}
-    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry = _review_get(account_id, period) or {}
     entry.update({"status": "commented" if entry.get("status") != "approved" else "approved",
                   "comment": comment,
                   "reviewer": p.get("name") or p.get("email"),
                   "updated_at": datetime.now(timezone.utc).isoformat()})
-    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    _review_put(account_id, period, entry)
     return {"account_id": account_id, "period": period, **entry}
 
 
@@ -1689,12 +3386,12 @@ def approve_digest(account_id: str, period: str | None = None) -> dict:
     """Approve a strategic account's monthly report for dispatch on the 1st."""
     period = period or datetime.now(timezone.utc).strftime("%B %Y")
     p = get_principal() or {}
-    entry = _DIGEST_REVIEWS.get(_review_key(account_id, period)) or {}
+    entry = _review_get(account_id, period) or {}
     entry.update({"status": "approved",
                   "reviewer": p.get("name") or p.get("email"),
                   "approved_at": datetime.now(timezone.utc).isoformat(),
                   "updated_at": datetime.now(timezone.utc).isoformat()})
-    _DIGEST_REVIEWS[_review_key(account_id, period)] = entry
+    _review_put(account_id, period, entry)
     return {"account_id": account_id, "period": period, **entry}
 
 
@@ -1870,10 +3567,10 @@ def move_to_pooled(account_ids: list[str] | None = None, clear_owner: bool = Tru
 # --- Weekly time-blocked operating rhythm (WoW §3, UC2) ----------------------
 # Groups the live prioritised task queue into the WoW operating blocks so a CSM sees the
 # week the way the Ways-of-Working framework prescribes, instead of one flat list:
-#   Monday Analytics & Portfolio Review  — the week's review (worst-health + all open tasks count)
-#   Daily P1 Defensive Risk (Must Protect) — ML churn / usage drop / Sev-1 (priority 1-2 PROTECT)
-#   Weekly Renewals & Expansion (Must Expand) — T-cadence + expansion triggers
-#   Weekly Adoption & QBR (Must Use) — adoption / onboarding
+#   Monday Analytics & Portfolio Review , the week's review (worst-health + all open tasks count)
+#   Daily P1 Defensive Risk (Must Protect), ML churn / usage drop / Sev-1 (priority 1-2 PROTECT)
+#   Weekly Renewals & Expansion (Must Expand), T-cadence + expansion triggers
+#   Weekly Adoption & QBR (Must Use), adoption / onboarding
 # Built from engine.portfolio() tasks (rule_id/mandate/priority), owner-scoped already.
 def operating_rhythm() -> dict:
     p = portfolio()
@@ -1938,6 +3635,50 @@ def operating_rhythm() -> dict:
 # so round-robin still distributes before anyone sets presence. A status can carry an
 # optional 'until' epoch (auto-expire back to available) and a short note (e.g. "OOO").
 _CSM_PRESENCE: dict[str, dict] = {}
+_CSM_PRESENCE_LOADED = False
+
+
+def _presence_path() -> Path:
+    """EFS-persisted CSM presence store (append-only JSONL, latest-per-name wins). Keeps
+    OOO status across task restarts and multiple ECS tasks, like the task-events and
+    history stores. Falls back to a repo-local file for tests/dev."""
+    return Path(os.environ.get("CS_PRESENCE_FILE",
+                               str(Path(__file__).resolve().parents[1] / ".cs-presence.jsonl")))
+
+
+def _load_presence() -> None:
+    """Hydrate _CSM_PRESENCE from the JSONL store once per process. Later lines overwrite
+    earlier (edits); never raises."""
+    global _CSM_PRESENCE_LOADED
+    if _CSM_PRESENCE_LOADED:
+        return
+    _CSM_PRESENCE_LOADED = True
+    path = _presence_path()
+    if not path.exists():
+        return
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("name"):
+                _CSM_PRESENCE[row["name"]] = row
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _append_presence(entry: dict) -> None:
+    """Append a presence change to the JSONL store (best-effort; never breaks the write)."""
+    try:
+        path = _presence_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def set_csm_availability(name: str, available: bool, until: int | None = None,
@@ -1953,12 +3694,14 @@ def set_csm_availability(name: str, available: bool, until: int | None = None,
              "note": (note or "").strip() or None,
              "updated_at": datetime.now(timezone.utc).isoformat()}
     _CSM_PRESENCE[name] = entry
+    _append_presence(entry)
     return entry
 
 
 def _presence_for(name: str) -> bool:
     """Resolve current availability for a CSM, honouring an expired 'until' (back to
     available) and defaulting to available when no status has ever been set."""
+    _load_presence()
     e = _CSM_PRESENCE.get(name)
     if not e:
         return True
@@ -2005,11 +3748,73 @@ def pooled_roster(with_availability: bool = True) -> dict:
 # without changing the intake/triage contract. Resolving a ticket (reply/close via the
 # Zendesk writes, or marking handled) sets its status.
 _INBOUND_QUEUE: dict[str, dict] = {}
+_INBOUND_QUEUE_LOADED = False
+
+
+def _inbound_path() -> Path:
+    """EFS-persisted inbound-queue store (append-only JSONL, latest-per-id wins). Keeps the
+    pooled triage queue across task restarts and multiple ECS tasks, exactly like the CSM
+    presence / task-events / history stores. Falls back to a repo-local file for tests/dev.
+    Set CS_INBOUND_FILE to the EFS path in production."""
+    return Path(os.environ.get("CS_INBOUND_FILE",
+                               str(Path(__file__).resolve().parents[1] / ".cs-inbound.jsonl")))
+
+
+def _load_inbound() -> None:
+    """Hydrate _INBOUND_QUEUE from the JSONL store once per process. Later lines overwrite
+    earlier ones for the same ticket id (upserts + status changes + reassignments), so the
+    final state replays correctly. Never raises; a corrupt line is skipped."""
+    global _INBOUND_QUEUE_LOADED
+    if _INBOUND_QUEUE_LOADED:
+        return
+    _INBOUND_QUEUE_LOADED = True
+    path = _inbound_path()
+    if not path.exists():
+        return
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            tid = row.get("id")
+            if tid:
+                _INBOUND_QUEUE[tid] = row
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _append_inbound(row: dict) -> None:
+    """Append a ticket's current full state to the JSONL store (best-effort; never breaks
+    the write path). Append-only + latest-per-id-wins means every upsert, status change and
+    reassignment is replayed on the next boot."""
+    try:
+        path = _inbound_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _live_pooled_load() -> dict[str, int]:
+    """Current OPEN inbound-ticket count per pooled CSM, from the live queue. Seeds the
+    inbound engine's least-loaded assignment so each new batch balances against the real
+    standing workload, not a per-call reset. Only open tickets count toward load."""
+    _load_inbound()
+    load: dict[str, int] = {}
+    for r in _INBOUND_QUEUE.values():
+        if r.get("status") == "open" and r.get("assigned_to"):
+            load[r["assigned_to"]] = load.get(r["assigned_to"], 0) + 1
+    return load
 
 
 def record_inbound(tickets: list[dict]) -> int:
     """Persist triaged tickets into the inbound queue (upsert by id). Returns how many
     were stored/updated. Status defaults to 'open'; existing status is preserved."""
+    _load_inbound()
     n = 0
     for t in tickets or []:
         tid = t.get("id")
@@ -2020,20 +3825,292 @@ def record_inbound(tickets: list[dict]) -> int:
         row["status"] = prev.get("status", "open")
         row["recorded_at"] = prev.get("recorded_at") or datetime.now(timezone.utc).isoformat()
         _INBOUND_QUEUE[tid] = row
+        _append_inbound(row)
         n += 1
     return n
 
 
+def ingest_hubspot_inbound(window_days: int | None = None) -> dict:
+    """PULL recent HubSpot Service Hub tickets, resolve each to an account, triage with the
+    live pooled roster + current load, and persist into the inbound queue.
+
+    This is the Option A ingress for the Tech-Touch pooled queue (UC1): the platform reads
+    the tickets it already has access to via the existing HubSpot token (no webhook, no new
+    credential) and runs them through the SAME triage + least-loaded allocation as the
+    /api/inbound/hubspot webhook seam. Idempotent: record_inbound upserts by id and
+    preserves an existing ticket's status, so re-running does not reopen resolved tickets
+    or duplicate rows.
+
+    Honest no-op when HubSpot is not live: returns zero counts rather than fabricating.
+    Returns a summary {live, fetched, ingested, skipped_no_account, by_intent}.
+    """
+    if not _src.HUBSPOT.live():
+        return {"live": False, "fetched": 0, "ingested": 0, "skipped_no_account": 0,
+                "note": "HubSpot not live; inbound ingest is a no-op."}
+    import inbound as _inbound
+    raw = _src.HUBSPOT.inbound_tickets(window_days=window_days)
+    # Map a ticket's HubSpot company_id -> a CS account_id. Use the WHOLE-BOOK roster
+    # (list_all_companies), not just the deeply-enriched ~50 slice, so tickets for any
+    # pooled/managed customer resolve, not only the handful we fully enrich. The roster is
+    # a cheap cached scan of every customer company.
+    company_to_account: dict[str, str] = {}
+    company_name_by_id: dict[str, str] = {}
+    try:
+        roster_rows = _src.HUBSPOT.list_all_companies()  # synchronous full scan (cached)
+    except Exception:  # noqa: BLE001
+        roster_rows = []
+    for r in roster_rows:
+        cid = r.get("company_id")
+        if not cid:
+            continue
+        company_name_by_id[str(cid)] = r.get("name") or ""
+        if r.get("account_id"):
+            company_to_account[str(cid)] = r["account_id"]
+    items = []
+    managed = pooled_unmatched = no_company = 0
+    for t in raw:
+        cid = str(t.get("company_id")) if t.get("company_id") else None
+        it = {k: v for k, v in t.items() if k not in ("company_id", "company_name")}
+        if cid and cid in company_to_account:
+            # A CS-tracked (managed) account: route to its account_id.
+            it["account_ref"] = company_to_account[cid]
+            managed += 1
+        elif cid:
+            # A real HubSpot company with no CS account tag (a pooled/long-tail customer).
+            # Still queue it so the pooled team sees the ticket - keyed by the company so a
+            # CSM can action it - rather than silently dropping real customer inbound.
+            it["account_ref"] = "hs-company-" + cid
+            it["account_name"] = t.get("company_name") or company_name_by_id.get(cid) or ("Company " + cid)
+            pooled_unmatched += 1
+        else:
+            # No associated company at all: cannot attribute it to a customer; skip.
+            no_company += 1
+            continue
+        items.append(it)
+    roster = pooled_roster().get("roster", [])
+    result = _inbound.triage_inbound(items, roster=roster, current_load=_live_pooled_load())
+    ingested = record_inbound(result.get("tickets", []))
+    return {
+        "live": True,
+        "fetched": len(raw),
+        "ingested": ingested,
+        "matched_managed": managed,
+        "matched_pooled": pooled_unmatched,
+        "skipped_no_company": no_company,
+        "by_intent": result.get("summary", {}).get("by_intent", {}),
+    }
+
+
+def warm_inbound_ingest() -> int:
+    """Best-effort synchronous inbound pull for the boot warm thread, so the pooled queue
+    is populated on the first request after deploy. Returns tickets ingested (0 on
+    not-live / error). Never raises."""
+    try:
+        return int(ingest_hubspot_inbound().get("ingested", 0))
+    except Exception:  # noqa: BLE001 - boot warm is best-effort
+        return 0
+
+
+def _resolve_company_ref(items: list[dict]) -> None:
+    """In place: for inbound items whose account_ref is a HubSpot company id (or missing but
+    carrying a company id), map it to a CS account_id via the cached whole-book roster, with
+    the pooled-company fallback (hs-company-<id>) so untagged long-tail customers still queue.
+    Items that already carry a CS account_ref are left as-is. Best-effort; never raises."""
+    try:
+        if not _src.HUBSPOT.live():
+            return
+        roster_rows = _src.HUBSPOT.list_all_companies(cached_only=True)
+    except Exception:  # noqa: BLE001
+        return
+    company_to_account: dict[str, str] = {}
+    name_by_id: dict[str, str] = {}
+    for r in roster_rows or []:
+        cid = r.get("company_id")
+        if not cid:
+            continue
+        name_by_id[str(cid)] = r.get("name") or ""
+        if r.get("account_id"):
+            company_to_account[str(cid)] = r["account_id"]
+    for it in items:
+        ref = it.get("account_ref")
+        # A ref that already looks like a CS account id (AUx-/EUx-) is kept.
+        if ref and not str(ref).isdigit():
+            continue
+        cid = str(ref) if ref else None
+        if cid and cid in company_to_account:
+            it["account_ref"] = company_to_account[cid]
+        elif cid:
+            it["account_ref"] = "hs-company-" + cid
+            if not it.get("account_name"):
+                it["account_name"] = name_by_id.get(cid) or ("Company " + cid)
+
+
+def ingest_channel_items(channel: str, payloads: list[dict]) -> dict:
+    """Normalise native payloads for ONE inbound channel (zendesk_misroute, slack_call,
+    mailbox, campaign_reply, high_intent_form), resolve account refs against the live book,
+    run the SAME triage + least-loaded round-robin as the HubSpot path, and persist into the
+    pooled queue. Honest: an unknown channel or unparseable payload yields zero ingested
+    (never fabricated). Returns a summary {channel, received, normalised, ingested, by_intent}."""
+    import inbound as _inbound
+    valid = set(_inbound.CHANNEL_ADAPTERS)
+    if channel not in valid:
+        return {"channel": channel, "received": len(payloads or []), "normalised": 0,
+                "ingested": 0, "error": f"unknown channel; expected one of {sorted(valid)}"}
+    items: list[dict] = []
+    for p in (payloads or []):
+        items.extend(_inbound.normalise_channel(channel, p))
+    if not items:
+        return {"channel": channel, "received": len(payloads or []), "normalised": 0,
+                "ingested": 0, "note": "no parseable items in payload"}
+    _resolve_company_ref(items)
+    roster = pooled_roster().get("roster", [])
+    result = _inbound.triage_inbound(items, roster=roster, current_load=_live_pooled_load())
+    ingested = record_inbound(result.get("tickets", []))
+    return {"channel": channel, "received": len(payloads or []), "normalised": len(items),
+            "ingested": ingested, "by_intent": result.get("summary", {}).get("by_intent", {})}
+
+
+# Background inbound-ingest status so the manual trigger can be fire-and-forget: the pull
+# (full-book load + HubSpot ticket fetch + association resolution) can take longer than the
+# edge/ALB request timeout, so a synchronous request would 504. The route starts a daemon
+# thread and returns immediately; the UI polls this status and re-reads /api/inbound/queue.
+_INBOUND_INGEST_STATUS: dict = {"state": "idle", "started_at": None, "finished_at": None,
+                                "summary": None, "error": None}
+_INBOUND_INGEST_LOCK = __import__("threading").Lock()
+
+
+def inbound_ingest_status() -> dict:
+    return dict(_INBOUND_INGEST_STATUS)
+
+
+def start_inbound_ingest(window_days: int | None = None) -> dict:
+    """Kick off a background inbound pull if one is not already running. Returns the current
+    status immediately (never blocks the request). One ingest runs at a time; a concurrent
+    trigger returns the in-flight status rather than starting a second pull."""
+    import threading
+    import time as _t
+    with _INBOUND_INGEST_LOCK:
+        if _INBOUND_INGEST_STATUS["state"] == "running":
+            return {**_INBOUND_INGEST_STATUS, "already_running": True}
+        _INBOUND_INGEST_STATUS.update({"state": "running", "started_at": _t.time(),
+                                       "finished_at": None, "summary": None, "error": None})
+
+    def _bg():
+        import time as _t2
+        principal = get_principal()
+        try:
+            # Ingest is a system/admin task across the whole book; run unscoped so it can
+            # resolve every company to its account.
+            set_principal(None)
+            summary = ingest_hubspot_inbound(window_days=window_days)
+            _INBOUND_INGEST_STATUS.update({"state": "done", "summary": summary,
+                                           "finished_at": _t2.time(), "error": None})
+        except Exception as exc:  # noqa: BLE001
+            _INBOUND_INGEST_STATUS.update({"state": "error", "error": f"{type(exc).__name__}: {exc}",
+                                           "finished_at": _t2.time()})
+        finally:
+            set_principal(principal)
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return {**_INBOUND_INGEST_STATUS, "already_running": False}
+
+
+def _channel_weights_map() -> dict:
+    """Active per-channel prioritisation weights (defaults + any CS_CHANNEL_WEIGHTS
+    override) for the five inbound paths, for the UI/governance to display."""
+    try:
+        import inbound as _inbound
+        return {ch: _inbound.channel_weight(ch) for ch in
+                ("high_intent_form", "slack_call", "zendesk_misroute",
+                 "campaign_reply", "mailbox")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def inbound_queue(status: str | None = None) -> dict:
     """The persisted inbound queue (newest first), optionally filtered by status, with a
-    summary by destination/intent/SLA so the pooled team can work it like an inbox."""
-    rows = sorted(_INBOUND_QUEUE.values(),
-                  key=lambda r: r.get("recorded_at") or "", reverse=True)
+    summary by destination/intent/SLA so the pooled team can work it like an inbox.
+
+    AGEING ON READ: an open ticket's sla_breached and needs_reassign flags are
+    recomputed each read against the CURRENT time and live CSM presence, not frozen at
+    intake. This satisfies UC1's '20h -> auto-reassign' and the 24h SLA: a ticket that
+    crosses the thresholds while sitting in the queue, or whose owner later goes OOO,
+    now needing one without a fresh intake batch."""
+    import time as _t
+    _load_inbound()
+    now = int(_t.time())
+    SLA_H, REASSIGN_H = 24, 20  # mirror inbound.SLA_HOURS / REASSIGN_AFTER_HOURS
+    # Live availability + running load so a reassignment goes to the least-loaded
+    # currently-available pooled CSM (not just flagged as needing one).
+    try:
+        _roster = pooled_roster().get("roster", [])
+    except Exception:  # noqa: BLE001
+        _roster = []
+    _available = sorted([c for c in _roster if c.get("available", True)],
+                        key=lambda c: str(c.get("name", "")))
+    _live_load = _live_pooled_load()
+    for r in _INBOUND_QUEUE.values():
+        if r.get("status") != "open":
+            continue
+        received = r.get("received_at")
+        if not isinstance(received, (int, float)):
+            continue
+        age_h = max(0, (now - received) / 3600.0)
+        sla_due = r.get("sla_due") or (received + SLA_H * 3600)
+        r["sla_breached"] = now > sla_due
+        owner = r.get("assigned_to")
+        owner_ooo = bool(owner) and not _presence_for(owner)
+        stale = (owner is not None) and (not r["sla_breached"]) and \
+            (age_h >= REASSIGN_H or owner_ooo)
+        # Close the loop: actually move a stale/OOO ticket to the least-loaded available
+        # CSM (different from the current owner), rather than only flagging it. The
+        # reassignment is recorded so the UI shows who it moved to and why.
+        if stale and _available:
+            best = min(_available, key=lambda c: (_live_load.get(c["name"], 0), str(c["name"])))
+            if best["name"] != owner:
+                r["reassigned_from"] = owner
+                r["assigned_to"] = best["name"]
+                r["reassigned_reason"] = "owner OOO" if owner_ooo else "stalled >= 20h"
+                r["reassigned_at"] = datetime.now(timezone.utc).isoformat()
+                _live_load[best["name"]] = _live_load.get(best["name"], 0) + 1
+                r["needs_reassign"] = False
+                _append_inbound(r)
+            else:
+                r["needs_reassign"] = True
+        else:
+            r["needs_reassign"] = stale
+    # Order the inbox by the blended per-channel priority (lower priority_score = more
+    # urgent, so a high-intent form sits above a generic mailbox email at the same intent),
+    # SLA-breached first within a tie, then newest. Rows persisted before weighting existed
+    # fall back to their intent priority (then a neutral mid value) so ordering never breaks.
+    def _score(r):
+        ps = r.get("priority_score")
+        if isinstance(ps, (int, float)):
+            return float(ps)
+        pr = r.get("priority")
+        return float(pr) if isinstance(pr, (int, float)) else 3.0
+    # Two-pass stable sort: newest-first first, then by (score, SLA) — so within an equal
+    # score+SLA tie the newest ticket still leads, while the blended priority dominates.
+    rows = sorted(_INBOUND_QUEUE.values(), key=lambda r: r.get("recorded_at") or "", reverse=True)
+    rows.sort(key=lambda r: (_score(r), not r.get("sla_breached")))
     if status:
         rows = [r for r in rows if r.get("status") == status]
     by_dest: dict[str, int] = {}
     by_intent: dict[str, int] = {}
-    breached = open_count = 0
+    breached = open_count = reassign = 0
+    # Response/resolution timing (UC3 queue analytics): first-response time ~ triage
+    # latency (recorded_at - received_at); resolution time = resolved_at - received_at for
+    # closed tickets. Collected in hours and averaged; honest None when no sample.
+    def _iso_to_epoch(v):
+        if not v:
+            return None
+        try:
+            s = str(v).replace("Z", "+00:00")
+            return datetime.fromisoformat(s).timestamp()
+        except (ValueError, TypeError):
+            return None
+    response_hours: list[float] = []
+    resolution_hours: list[float] = []
     for r in rows:
         by_dest[r.get("destination")] = by_dest.get(r.get("destination"), 0) + 1
         by_intent[r.get("intent")] = by_intent.get(r.get("intent"), 0) + 1
@@ -2041,8 +4118,34 @@ def inbound_queue(status: str | None = None) -> dict:
             open_count += 1
         if r.get("sla_breached"):
             breached += 1
+        if r.get("needs_reassign"):
+            reassign += 1
+        received = r.get("received_at")
+        received = received if isinstance(received, (int, float)) else _iso_to_epoch(received)
+        if received is not None:
+            recorded = _iso_to_epoch(r.get("recorded_at"))
+            if recorded is not None and recorded >= received:
+                response_hours.append((recorded - received) / 3600.0)
+            if r.get("status") in ("resolved", "closed", "handed_off"):
+                resolved = _iso_to_epoch(r.get("resolved_at"))
+                if resolved is not None and resolved >= received:
+                    resolution_hours.append((resolved - received) / 3600.0)
+
+    def _avg(xs):
+        return round(sum(xs) / len(xs), 2) if xs else None
+
     return {"count": len(rows), "open": open_count, "sla_breached": breached,
-            "by_destination": by_dest, "by_intent": by_intent, "tickets": rows}
+            "needs_reassign": reassign,
+            "by_destination": by_dest, "by_intent": by_intent,
+            # Average first-response and resolution time in HOURS (None when no sample yet).
+            "avg_first_response_hours": _avg(response_hours),
+            "avg_resolution_hours": _avg(resolution_hours),
+            "response_sample": len(response_hours),
+            "resolution_sample": len(resolution_hours),
+            # The active per-channel prioritisation weights (defaults + any CS_CHANNEL_WEIGHTS
+            # override), so the UI can show how each inbound path is weighted in the queue.
+            "channel_weights": _channel_weights_map(),
+            "tickets": rows}
 
 
 def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
@@ -2050,11 +4153,13 @@ def resolve_inbound(ticket_id: str, status: str = "resolved") -> dict:
     status = (status or "resolved").strip().lower()
     if status not in ("open", "resolved", "handed_off", "closed"):
         raise ValueError(f"invalid status {status!r}")
+    _load_inbound()
     row = _INBOUND_QUEUE.get(ticket_id)
     if not row:
         raise KeyError(ticket_id)
     row["status"] = status
     row["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    _append_inbound(row)
     return row
 
 
@@ -2073,7 +4178,7 @@ def _authorise_ticket_write(ticket_id: str, action: str) -> None:
 
     Admins (or open/legacy mode with no principal) may act on any ticket. A scoped CSM
     may only reply to / close tickets on accounts they own. A ticket with no resolvable
-    account (not in the inbound queue) is denied for a scoped CSM — fail closed — so a
+    account (not in the inbound queue) is denied for a scoped CSM, fail closed, so a
     CSM cannot act on an arbitrary ticket_id outside their book. Raises ForbiddenError
     (-> 403) when not permitted.
     """
@@ -2139,7 +4244,7 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     warehouse monthly ARR series (`rpt_account_ndr_monthly`): dollar-weighted
     current-period revenue (`mrr_usd`) over the same accounts' prior-year revenue
     (`revenue_prev_year_usd`). This captures expansion, contraction, and churn on the
-    existing base — the board metric — NOT unrealised pipeline. Only accounts that have
+    existing base, the board metric, NOT unrealised pipeline. Only accounts that have
     BOTH a current and a prior figure contribute, so the number is never inflated by
     opportunity. `ndr_pct` is an honest None (and `ndr_computable` False) when the
     warehouse has no prior-period revenue for any in-scope account, so the UI shows
@@ -2147,16 +4252,16 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
 
     Expansion PIPELINE is reported SEPARATELY from retention (never folded into NDR):
     the ARR of healthy accounts carrying an active expansion trigger (license
-    utilization / API surge / strong adoption). This is opportunity, not revenue —
+    utilization / API surge / strong adoption). This is opportunity, not revenue,
     labelled as such.
 
     Definitions (annualised, book-level):
       base_arr          = sum of live contract ARR across the book
       churned_arr       = ARR of accounts flagged churned (Redshift status or HubSpot
-                          lifecycle) — revenue lost
+                          lifecycle), revenue lost
       grr_pct           = (base_arr - churned_arr) / base_arr, capped at 100%
       ndr_pct           = sum(current revenue) / sum(prior-year revenue) over accounts
-                          with both figures — realised net retention, or None if none
+                          with both figures, realised net retention, or None if none
       expansion_pipeline_arr = ARR of healthy accounts with an active expansion trigger
                           (pipeline/opportunity, NOT booked expansion)
 
@@ -2167,29 +4272,22 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
     churned_arr = 0
     expansion_pipeline_arr = 0
     expansion_accounts = 0
-    # NDR from the warehouse monthly ARR series (rpt_account_ndr_monthly): dollar-weighted
-    # current-period revenue vs the same accounts' prior-year revenue. This is REALISED
-    # net revenue retention (expansion - contraction - churn on the existing base), the
-    # board metric, not pipeline. Only accounts with BOTH figures contribute.
-    ndr_current = 0.0
-    ndr_prior = 0.0
-    ndr_accounts = 0
+    excluded_test_instances = 0
+    from adapters import identity as _idmod
     for aid, a in accounts.items():
         live = _live_account(a)
         hs = live.get("hubspot", {})
-        m = live.get("metrics", {}) or {}
-        try:
-            cur, prior = m.get("revenue_prev_year_usd"), None
-            # metrics() exposes current revenue as mrr_usd and prior as revenue_prev_year_usd.
-            cur = m.get("mrr_usd"); prior = m.get("revenue_prev_year_usd")
-            if cur not in (None, "") and prior not in (None, "") and float(prior) > 0:
-                ndr_current += float(cur)
-                ndr_prior += float(prior)
-                ndr_accounts += 1
-        except (TypeError, ValueError):
-            pass
         arr = hs.get("arr_usd") or 0
         if not arr:
+            continue
+        # Exclude internal/test instances from corporate ARR & retention reporting
+        # (UC3 edge case + WoW §5: test/sandbox instances must never inflate the book's
+        # revenue numbers). A test instance is identified from the canonical account id
+        # shape (suffix sbx/sandbox/test/dev/uat/staging/demo). Secondary SHARDS of a real
+        # tenant are kept (they are real revenue); only test/sandbox instances are dropped.
+        ref_for_type = hs.get("account_id") or aid
+        if _idmod.instance_type(str(ref_for_type)) == "test":
+            excluded_test_instances += 1
             continue
         base_arr += arr
         churn = live.get("churn", {})
@@ -2207,6 +4305,85 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
             expansion_pipeline_arr += arr
             expansion_accounts += 1
 
+    # NDR from the warehouse monthly ARR series (rpt_account_ndr_monthly), computed
+    # DIRECTLY off the batched whole-book snapshot keyed by uppercase AUx-yyyy ref rather
+    # than relying on each account dict already carrying a metrics block (the roster join
+    # dropped ~99% of accounts, zeroing the prior-year sum and forcing an honest None).
+    # Dollar-weighted current-period revenue (mrr_usd) over the same accounts' prior-year
+    # revenue (revenue_prev_year_usd). This is REALISED net retention (expansion minus
+    # contraction minus churn on the existing base), the board metric, not pipeline. Only
+    # rows with BOTH figures present and a positive prior contribute, so the number is
+    # never inflated. Admin / no-principal scope spans the whole book; a CSM principal is
+    # restricted to their owned refs (the accounts passed in are already owner-scoped by
+    # _retention_accounts). When the warehouse snapshot is unavailable we fall back to any
+    # per-account metrics blocks the caller attached, so the figure stays honest in both
+    # live and fixture paths.
+    ndr_current = 0.0
+    ndr_prior = 0.0
+    ndr_accounts = 0
+
+    def _add_ndr(cur, prior):
+        nonlocal ndr_current, ndr_prior, ndr_accounts
+        if cur in (None, "") or prior in (None, ""):
+            return
+        try:
+            cur_f = float(cur)
+            prior_f = float(prior)
+        except (TypeError, ValueError):
+            return
+        if prior_f > 0:
+            ndr_current += cur_f
+            ndr_prior += prior_f
+            ndr_accounts += 1
+
+    try:
+        from adapters import identity as _id
+        snapshot = _batch_metrics_for([]) or {}
+        # Any per-account metrics the caller already attached (fixture path / enriched slice).
+        inline_metrics = any((a.get("metrics") or {}) for a in accounts.values())
+        if not snapshot and not inline_metrics:
+            # The lazy whole-book cache is non-blocking and empty until the boot warm (or a
+            # prior request) populates it, which would make a cold first request show a false
+            # "no data". Warm it synchronously here so NDR is warehouse-driven and honest on
+            # the first call too. Still a no-op (returns {}) when the source is not live.
+            try:
+                warm_batch_metrics()
+            except Exception:  # noqa: BLE001
+                pass
+            snapshot = _batch_metrics_for([]) or {}
+        if snapshot:
+            p = get_principal()
+            scoped_refs = None
+            if p and p.get("role") not in (None, "admin"):
+                # Owner-scoped: only count this CSM's owned refs. Build the uppercase ref
+                # set from the accounts passed in (already owner-scoped by
+                # _retention_accounts).
+                scoped_refs = set()
+                for a in accounts.values():
+                    ref = (a.get("hubspot", {}) or {}).get("account_id") or a.get("account_id")
+                    if ref:
+                        scoped_refs.add(_id.normalise(str(ref)).upper())
+            for ref, m in snapshot.items():
+                if scoped_refs is not None and str(ref).upper() not in scoped_refs:
+                    continue
+                # Exclude test/sandbox instances from NDR as well (consistent with GRR).
+                if _id.instance_type(str(ref)) == "test":
+                    continue
+                if not isinstance(m, dict):
+                    continue
+                _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
+        else:
+            # Fallback: no warehouse snapshot, use whatever per-account metrics are present.
+            for a in accounts.values():
+                ref = (a.get("hubspot", {}) or {}).get("account_id") or a.get("account_id")
+                if ref and _id.instance_type(str(ref)) == "test":
+                    continue
+                m = a.get("metrics") or {}
+                if isinstance(m, dict) and m:
+                    _add_ndr(m.get("mrr_usd"), m.get("revenue_prev_year_usd"))
+    except Exception:  # noqa: BLE001 - NDR augmentation is best-effort, stay honest on failure
+        pass
+
     ndr_pct = round(100.0 * ndr_current / ndr_prior, 1) if ndr_prior > 0 else None
 
     if not base_arr:
@@ -2214,6 +4391,7 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
                 "ndr_pct": None, "ndr_computable": False, "ndr_accounts": 0,
                 "base_arr_usd": 0, "churned_arr_usd": 0,
                 "expansion_pipeline_arr_usd": 0, "expansion_pipeline_accounts": 0,
+                "excluded_test_instances": excluded_test_instances,
                 "target": {"grr_pct": 92, "ndr_pct": 100},
                 "note": "No live contract ARR available; retention is not computable."}
 
@@ -2232,11 +4410,68 @@ def _retention_metrics(accounts: dict, tasks_by_account: dict) -> dict:
         # Expansion PIPELINE (opportunity), reported separately from retention.
         "expansion_pipeline_arr_usd": expansion_pipeline_arr,
         "expansion_pipeline_accounts": expansion_accounts,
+        # Internal/test instances dropped from ARR & retention (UC3 edge case).
+        "excluded_test_instances": excluded_test_instances,
         "target": {"grr_pct": 92, "ndr_pct": 100},
         "method": "live ARR; GRR from Redshift/HubSpot churned status. NDR from the "
                   "rpt_account_ndr_monthly warehouse series (current vs prior-year revenue, "
                   "dollar-weighted). Expansion pipeline = active expansion-trigger accounts "
                   "(opportunity, separate from retention).",
+    }
+
+
+def _sla_compliance() -> dict:
+    """First-response SLA compliance for the pooled inbound queue (UC1 KPI: >=95% within
+    24h). Computed from the live inbound queue: a ticket is SLA-compliant when it is not
+    flagged sla_breached. Honest None (not a fake 100%) when there are no tickets yet.
+    Target 95%."""
+    _load_inbound()
+    rows = list(_INBOUND_QUEUE.values())
+    total = len(rows)
+    breached = sum(1 for r in rows if r.get("sla_breached"))
+    pct = round(100 * (total - breached) / total, 1) if total else None
+    return {
+        "sla_compliance_pct": pct,
+        "target_pct": 95,
+        "meets_target": (pct is not None and pct >= 95),
+        "tickets": total,
+        "breached": breached,
+        "computable": total > 0,
+        "note": None if total else "No inbound tickets yet; SLA compliance is not computable.",
+    }
+
+
+def _report_delivery_compliance() -> dict:
+    """Monthly performance-report delivery compliance (UC1 KPI: >=98% to Primary Admins).
+    Computed from the dry-run digest run across named/active accounts: an account is
+    'deliverable' when the digest compiles with a Primary Admin recipient; the delivery
+    rate is deliverable / eligible. This measures delivery READINESS from live data; the
+    actual send rate is reconciled once the transactional email template is live. Target
+    98%. Honest None when there are no eligible accounts."""
+    try:
+        run = run_monthly_digests(apply=False)
+    except Exception:  # noqa: BLE001 - best-effort; never break the KPI payload
+        return {"report_delivery_pct": None, "target_pct": 98, "meets_target": False,
+                "computable": False, "note": "Digest run unavailable."}
+    summary = run.get("summary", {}) or {}
+    eligible = summary.get("accounts_in_scope", 0) or 0
+    # 'Deliverable' = the digest compiled WITH a Primary Admin recipient (i.e. it would
+    # send once the email template is live). Accounts missing a Primary Admin or that
+    # errored are NOT deliverable. This measures delivery READINESS from live data; the
+    # actual send rate reconciles once the transactional template is configured.
+    missing_admin = summary.get("missing_primary_admin", 0) or 0
+    errors = summary.get("errors", 0) or 0
+    deliverable = max(0, eligible - missing_admin - errors)
+    pct = round(100 * deliverable / eligible, 1) if eligible else None
+    return {
+        "report_delivery_pct": pct,
+        "target_pct": 98,
+        "meets_target": (pct is not None and pct >= 98),
+        "eligible_accounts": eligible,
+        "deliverable_accounts": deliverable,
+        "missing_primary_admin": missing_admin,
+        "computable": eligible > 0,
+        "note": None if eligible else "No eligible accounts for monthly reporting yet.",
     }
 
 
@@ -2287,7 +4522,12 @@ def kpis() -> dict:
     return {
         "by_csm": sorted(by_csm.values(), key=lambda r: -r["open_tasks"]),
         "mandate_load": mandate_counts,
-        "retention": _retention_metrics(accounts, tasks_by_account),
+        "retention": _retention_metrics(_retention_accounts(), tasks_by_account),
+        # UC1/UC3 operational compliance KPIs vs their targets (first-response SLA >=95%,
+        # monthly report delivery >=98%). Computed from live signals; honest None when not
+        # yet computable (no tickets / no eligible accounts) rather than a fake 100%.
+        "sla": _sla_compliance(),
+        "report_delivery": _report_delivery_compliance(),
         "task_metrics": {key: (sorted(value) if key == "overdue_task_ids" else value)
                  for key, value in task_metrics.items() if key != "status_by_id"},
         "totals": {
@@ -2295,6 +4535,348 @@ def kpis() -> dict:
             "open_tasks": task_metrics["open_tasks"],
             "priority1_tasks": sum(1 for t in active_tasks if t["priority"] == 1),
         },
+    }
+
+
+def _quarter_bounds(today: date) -> tuple:
+    """Return (quarter_start_date, quarter_label) for the calendar quarter containing
+    `today`. e.g. 2026-08-14 -> (2026-07-01, 'Q3 2026')."""
+    q = (today.month - 1) // 3            # 0..3
+    start_month = q * 3 + 1
+    start = date(today.year, start_month, 1)
+    return start, f"Q{q + 1} {today.year}"
+
+
+def quarter_scorecard() -> dict:
+    """'This Quarter' KPI tracker for the personal Dashboard: progress against the CS team's
+    quarterly goals, computed from LIVE data and owner-scoped to the current principal.
+
+    Each KPI is returned as {label, value, target, unit, computable, note} so the UI can
+    show progress honestly — and show 'not tracked yet' rather than a fabricated number
+    where the underlying change-event is not captured. Targets come from CS_QUARTER_TARGETS
+    (JSON) when set; otherwise target is None (no fabricated goal).
+
+    KPIs:
+      mrr_growth_pct        - realised MRR/revenue growth (warehouse NDR proxy). Live.
+      churned               - accounts churned this quarter. Live.
+      m2m_to_fixed          - current Month-to-Month vs fixed-term split (subscription_type).
+                              The in-quarter MOVE count needs a contract-change event we do
+                              not capture, so we report the current split + a note.
+      pro_upgrades          - booked upsell/expansion deals closed-won this quarter
+                              (HubSpot Price-Rise pipeline). A 'Pro tier' label specifically
+                              needs a tier field we do not track; reported as booked upsells.
+      portfolio_met_pct     - % of the owned portfolio with a logged executive F2F this
+                              quarter (F2F log). Jiminny calls add to it when present.
+      client_saves          - at-risk accounts (red health earlier this quarter) that are now
+                              not-red and not churned (a recovery), from the health-history
+                              snapshots. Honest None until enough snapshots exist.
+    """
+    today = _f2f_today()
+    q_start, q_label = _quarter_bounds(today)
+    q_start_iso = q_start.isoformat()
+
+    # Owner-scoped account set (admin = whole book; CSM = own).
+    accounts = {aid: _live_account(a) for aid, a in orchestrate.load_accounts().items()}
+
+    # Operator-configured quarter targets (never fabricated).
+    try:
+        targets = json.loads(os.environ.get("CS_QUARTER_TARGETS", "") or "{}")
+        if not isinstance(targets, dict):
+            targets = {}
+    except (ValueError, TypeError):
+        targets = {}
+
+    def _t(key):
+        v = targets.get(key)
+        return v if isinstance(v, (int, float)) else None
+
+    # --- MRR growth (realised retention proxy) ---------------------------------
+    tasks_by_account: dict = {}
+    for tk in orchestrate.orchestrate().get("tasks", []):
+        tasks_by_account.setdefault(tk.get("account_id"), []).append(tk)
+    retention = _retention_metrics(_retention_accounts(), tasks_by_account)
+    ndr = retention.get("ndr_pct")
+    mrr_growth = (round(ndr - 100, 1) if isinstance(ndr, (int, float)) else None)
+
+    # --- # churned this quarter -----------------------------------------------
+    churned_q = 0
+    churned_computable = False
+    for a in accounts.values():
+        hs = a.get("hubspot", {}) or {}
+        churn = a.get("churn", {}) or {}
+        is_churned = (str(churn.get("churn_status") or "").lower() == "churned"
+                      or str(hs.get("lifecycle_stage") or "").lower() in ("churned", "churned customer"))
+        if not is_churned:
+            continue
+        churned_computable = True
+        # Count as this-quarter when a churn/renewal date falls in-quarter; otherwise it is
+        # a prior churn still on the book, not a this-quarter event.
+        rd = str(hs.get("renewal_date") or "")[:10]
+        if rd and rd >= q_start_iso and rd <= today.isoformat():
+            churned_q += 1
+
+    # --- M2M vs fixed-term split (current state) + in-quarter MOVE count -------
+    def _is_m2m(st: str) -> bool:
+        st = (st or "").lower()
+        return "month to month" in st or st in ("m2m", "monthly")
+
+    m2m = fixed = 0
+    for a in accounts.values():
+        st = str((a.get("hubspot", {}) or {}).get("subscription_type") or "").lower()
+        if not st:
+            continue
+        if _is_m2m(st):
+            m2m += 1
+        elif st:
+            fixed += 1
+    m2m_known = m2m + fixed
+
+    # True in-quarter MOVE count: an account whose subscription_type history shows M2M in
+    # an in-quarter snapshot and fixed-term in a later one (same evidence-based pattern as
+    # client_saves). Honest None until subscription_type snapshots accrue across the quarter.
+    m2m_moves = None
+    try:
+        moves = 0
+        saw_sub_history = False
+        for aid in accounts:
+            hist = _health_history_for(aid) or []
+            inq = [h for h in hist
+                   if str(h.get("date") or h.get("at") or "")[:10] >= q_start_iso
+                   and h.get("subscription_type")]
+            if len(inq) >= 2:
+                saw_sub_history = True
+                seq = [str(h.get("subscription_type")) for h in inq]
+                if _is_m2m(seq[0]) and not _is_m2m(seq[-1]):
+                    moves += 1
+        if saw_sub_history:
+            m2m_moves = moves
+    except Exception:  # noqa: BLE001
+        pass
+
+    # --- Pro upgrades / booked upsell this quarter -----------------------------
+    pro_upgrades = None
+    pro_note = "Booked upsells need HubSpot deal access; not readable here."
+    try:
+        hs_adapter = _src.HUBSPOT
+        if hs_adapter.live():
+            # Precise in-quarter count: HubSpot's authoritative total for closed-won
+            # upsell deals with closedate >= quarter start (no capped-list inference).
+            exact = hs_adapter.upsell_count_since(q_start_iso)
+            if exact is not None:
+                pro_upgrades = exact
+                pro_note = ("%d upsell/expansion deals closed-won this quarter (HubSpot "
+                            "Price-Rise pipeline). A 'Pro tier'-specific split needs a deal "
+                            "tier field we don't track; this counts all booked expansions." % exact)
+            else:
+                # Fallback: the capped top-10 list (older behaviour) with an honest note.
+                booked = hs_adapter.revenue_motion_deals() or {}
+                ups = booked.get("upsell") or {}
+                deals = ups.get("deals") or []
+                total = ups.get("count")
+                truncated = bool(total is not None and total > len(deals))
+                if deals and not truncated:
+                    inq = [d for d in deals if str(d.get("closed") or "")[:10] >= q_start_iso]
+                    pro_upgrades = len(inq)
+                    pro_note = "Booked upsell/expansion deals closed this quarter (HubSpot Price-Rise pipeline)."
+                elif total is not None:
+                    pro_upgrades = None
+                    pro_note = f"{total} booked upsells in the rolling window; a clean per-quarter count was not readable."
+    except Exception:  # noqa: BLE001
+        pass
+
+    # --- % portfolio met with + touchpoint-type breakdown (F2F this quarter) ---
+    # Count in-quarter touchpoints from the F2F log, split by interaction_type so the
+    # scorecard shows '# meetings / # calls / # JBRs' (the components of 'met with'), not
+    # just a single %. Entries logged before the type field existed default to 'meeting'
+    # (the original F2F semantics). accounts_met + met_pct are preserved for back-compat.
+    total_accts = len(accounts)
+    met = 0
+    tp_meetings = tp_calls = tp_jbrs = 0
+    for aid in accounts:
+        account_met_in_q = False
+        for e in f2f_log_for(aid):
+            if str(e.get("met_on") or "")[:10] < q_start_iso:
+                continue
+            account_met_in_q = True
+            kind = str(e.get("interaction_type") or "meeting").strip().lower()
+            if kind in ("jbr", "qbr", "review", "business_review"):
+                tp_jbrs += 1
+            elif kind in ("call", "phone", "video_call"):
+                tp_calls += 1
+            else:
+                tp_meetings += 1
+        if account_met_in_q:
+            met += 1
+    met_pct = round(100 * met / total_accts, 1) if total_accts else None
+    met_breakdown = {"meetings": tp_meetings, "calls": tp_calls, "jbrs": tp_jbrs,
+                     "touchpoints": tp_meetings + tp_calls + tp_jbrs, "accounts_met": met}
+
+    # --- # client saves (at-risk -> recovered this quarter) --------------------
+    saves = None
+    saves_note = "A 'save' = an at-risk account that recovered this quarter; needs health-history snapshots across the quarter."
+    try:
+        saves_count = 0
+        saw_history = False
+        for aid, a in accounts.items():
+            hist = _health_history_for(aid) or []
+            inq = [h for h in hist if str(h.get("date") or h.get("at") or "")[:10] >= q_start_iso]
+            if len(inq) >= 2:
+                saw_history = True
+                bands = [str(h.get("band") or "").lower() for h in inq]
+                churn = a.get("churn", {}) or {}
+                now_churned = str(churn.get("churn_status") or "").lower() == "churned"
+                if "red" in bands and bands[-1] != "red" and not now_churned:
+                    saves_count += 1
+        if saw_history:
+            saves = saves_count
+            saves_note = None
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _kpi(label, value, unit, target_key, computable, note=None, breakdown=None):
+        k = {"label": label, "value": value, "unit": unit,
+             "target": _t(target_key), "computable": bool(computable), "note": note}
+        if breakdown is not None:
+            k["breakdown"] = breakdown
+        return k
+
+    return {
+        "quarter": q_label,
+        "quarter_start": q_start_iso,
+        "as_of": today.isoformat(),
+        "scope": ("all" if (not get_principal() or get_principal().get("role") == "admin") else "csm"),
+        "kpis": [
+            _kpi("MRR growth", mrr_growth, "%", "mrr_growth_pct", mrr_growth is not None,
+                 "Realised net revenue retention vs the prior period (warehouse). Drives the quarterly bonus."
+                 if mrr_growth is not None else "No warehouse revenue series available for the owned book."),
+            _kpi("Churned", churned_q if churned_computable else None, "accounts", "churned", churned_computable,
+                 "Accounts churned this quarter (churn status / lifecycle with an in-quarter date)."),
+            _kpi("M2M → fixed-term", m2m_moves, "moved this quarter", "m2m_to_fixed", m2m_moves is not None,
+                 (("%d account(s) moved Month-to-Month → fixed-term this quarter. Current book split: %d M2M, %d fixed-term (of %d with a known type)." % (m2m_moves, m2m, fixed, m2m_known)) if m2m_moves is not None
+                  else ("No in-quarter move detected yet — needs subscription_type history across the quarter (now being captured). Current split: %d M2M, %d fixed-term (of %d known)." % (m2m, fixed, m2m_known) if m2m_known else "subscription_type is not populated on the owned book.")),
+                 breakdown={"m2m": m2m, "fixed": fixed, "known": m2m_known, "moved_this_quarter": m2m_moves}),
+            _kpi("Pro upgrades", pro_upgrades, "deals", "pro_upgrades", pro_upgrades is not None, pro_note),
+            _kpi("Portfolio met with", met_pct, "%", "portfolio_met_pct", met_pct is not None,
+                 ("%d of %d owned accounts met this quarter · %d meetings, %d calls, %d JBRs logged. Log a touchpoint's interaction_type (meeting/call/jbr) to split it here." % (met, total_accts, tp_meetings, tp_calls, tp_jbrs)) if total_accts else "No accounts in scope.",
+                 breakdown=met_breakdown),
+            _kpi("Client saves", saves, "accounts", "client_saves", saves is not None, saves_note),
+        ],
+    }
+
+
+def _csm_targets() -> dict:
+    """Per-CSM weekly targets for the leaderboard, as a {csm_name: {outreach, completion_pct}}
+    map. Sourced from the CS_CSM_TARGETS env JSON (operator-configured), e.g.
+    '{"Jane Doe": {"outreach": 15, "completion_pct": 90}}'. When unset or a CSM has no
+    target, that CSM's target is a data-gap (None), never a fabricated number."""
+    raw = os.environ.get("CS_CSM_TARGETS", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def leaderboard() -> dict:
+    """Gamified team-performance leaderboard (V5 UC1/UC3). Ranks pooled/named CSMs on
+    real, already-computed KPI data (reuses kpis().by_csm, single source, no drift):
+    week-ending completion rate, open load, overdue, priority-1 load, and proactive
+    outreach vs an operator-set target. Surfaces a weekly target-compliance KPI
+    (target >= 90%).
+
+    Owner-scoped and privacy-aware: an admin sees every CSM named; a scoped CSM sees
+    their own row named with real numbers and peers ANONYMISED ("CSM 2", ...) so the
+    ranking is visible without exposing a colleague's book. Honest: a CSM with no target
+    shows target/compliance as a data-gap, not 0.
+    """
+    k = kpis()
+    rows = [r for r in k.get("by_csm", []) if r.get("csm") not in ("Unassigned",)]
+    targets = _csm_targets()
+
+    p = get_principal()
+    is_admin = (not p) or p.get("role") == "admin"
+    me = (p or {}).get("name") or (p or {}).get("email")
+
+    board = []
+    compliant = measurable = 0
+    for r in rows:
+        csm = r.get("csm")
+        completed = r.get("completed_tasks", 0)
+        open_t = r.get("open_tasks", 0)
+        denom = completed + open_t
+        completion_pct = round(100 * completed / denom) if denom else None
+        tgt = targets.get(csm) or {}
+        outreach_target = tgt.get("outreach")
+        completion_target = tgt.get("completion_pct", 90)  # default weekly target
+        # Compliance measurable only where we have a completion rate.
+        meets = None
+        if completion_pct is not None:
+            measurable += 1
+            meets = completion_pct >= (completion_target or 90)
+            if meets:
+                compliant += 1
+        board.append({
+            "csm": csm,
+            "accounts": r.get("accounts", 0),
+            "arr_usd": r.get("arr_usd", 0),
+            "open_tasks": open_t,
+            "completed_tasks": completed,
+            "overdue_tasks": r.get("overdue_tasks", 0),
+            "priority1_tasks": r.get("priority1_tasks", 0),
+            "capacity_utilization_pct": r.get("capacity_utilization_pct", 0),
+            "completion_rate_pct": completion_pct,          # week-ending completion
+            "outreach_target": outreach_target,              # None => data-gap (target not set)
+            "completion_target_pct": completion_target,
+            "meets_target": meets,                           # None when not measurable
+        })
+
+    # Rank by completion rate desc (None last), then fewest overdue, then most completed.
+    # Ranking basis: completion ranking is only meaningful once CSMs have actually
+    # COMPLETED tasks in-platform. A 0% rate derived purely from open tasks is not
+    # completion data. So fall back to a WORKLOAD ranking (most open+overdue first) until
+    # at least one task has been completed anywhere, so the board is useful day one.
+    any_completion = any((b["completed_tasks"] or 0) > 0 for b in board)
+    if any_completion:
+        ranking_basis = "completion"
+        board.sort(key=lambda b: (
+            -(b["completion_rate_pct"] if b["completion_rate_pct"] is not None else -1),
+            b["overdue_tasks"],
+            -b["completed_tasks"],
+        ))
+    else:
+        ranking_basis = "workload"
+        board.sort(key=lambda b: (
+            -(b["open_tasks"] + b["overdue_tasks"]),
+            -b["overdue_tasks"],
+            -(b["accounts"] or 0),
+        ))
+    for i, b in enumerate(board, 1):
+        b["rank"] = i
+
+    # Privacy projection for a scoped CSM: keep own row named, anonymise peers.
+    if not is_admin:
+        anon = 0
+        for b in board:
+            if b["csm"] != me:
+                anon += 1
+                b["csm"] = f"CSM {b['rank']}"
+                # Hide peer book size/ARR; keep rank + completion for the ladder.
+                b["accounts"] = None
+                b["arr_usd"] = None
+
+    weekly_target_compliance_pct = round(100 * compliant / measurable) if measurable else None
+    return {
+        "leaderboard": board,
+        "ranking_basis": ranking_basis,
+        "weekly_target_compliance_pct": weekly_target_compliance_pct,
+        "weekly_target_compliance_target_pct": 90,
+        "measurable_csms": measurable,
+        "targets_configured": bool(targets),
+        "note": (None if targets else
+                 "Per-CSM outreach targets are not configured (set CS_CSM_TARGETS); "
+                 "completion-rate ranking is shown and compliance uses the default 90% target."),
     }
 
 
@@ -2326,7 +4908,10 @@ def _capacity_per_csm() -> int:
 
 def _task_metrics(tasks: list[dict]) -> dict:
     events = _load_task_events()
-    today = date.today()
+    # Use the SAME business-date anchor (CS_TODAY) the tasks' created_on/due_on were
+    # stamped with, so overdue counts, SLA adherence and task age never skew when the
+    # platform runs on an anchored date. (_f2f_today honours CS_TODAY, else date.today.)
+    today = _f2f_today()
     completed = in_progress = overdue = 0
     ages = []
     overdue_ids = set()
@@ -2394,10 +4979,19 @@ def revenue_motion() -> dict:
     paying customers, churn, at-risk, retention, ARR distribution). Live data only; every
     figure traces to HubSpot ARR / lifecycle and Redshift churn status. Nothing invented."""
     accounts = orchestrate.load_accounts()
-    scoped = [_live_account(a) for a in accounts.values()]
+    # Exclude internal/test instances from the executive revenue snapshot (UC3 edge case:
+    # test/sandbox instances must not inflate corporate ARR / churn / at-risk figures).
+    from adapters import identity as _idmod
+    scoped = [_live_account(a) for aid, a in accounts.items()
+              if _idmod.instance_type(str((a.get("hubspot", {}) or {}).get("account_id") or aid)) != "test"]
     tasks_by_account: dict = {}
     for t in orchestrate.orchestrate().get("tasks", []):
         tasks_by_account.setdefault(t.get("account_id"), []).append(t)
+    # Retention (NDR/GRR) is a whole-book figure: compute it over the owner-scoped whole
+    # book + warehouse metrics, not just the enriched slice, so a CSM sees real NDR for
+    # their actual book (the warehouse carries it) instead of "no data".
+    retention_accounts = _retention_accounts()
+    _retention = _retention_metrics(retention_accounts, tasks_by_account)
 
     def _is_churned(la):
         stage = str(la.get("hubspot", {}).get("lifecycle_stage") or "").lower()
@@ -2422,10 +5016,19 @@ def revenue_motion() -> dict:
           "days_since_visit": (la.get("usage") or {}).get("days_since_last_visit")}
          for la in churned],
         key=lambda r: -r["arr_usd"])
+    # Health band mix. Counts only computable accounts (health_score returns a neutral
+    # green for a no-signal account, so counting those would paint the book false-green).
+    # Over the enriched slice: with only churn status + revenue for the long tail, almost
+    # all roster accounts have no health-meaningful signal beyond "not churned", so the
+    # honest scored set is the enriched slice. The whole-book churned cohort is still
+    # scored per-account (Risk views / account pages) via the batched churn merge.
     bands = {"green": 0, "amber": 0, "red": 0}
     at_risk_arr = 0
     for la in paying:
-        b = health_score(la).get("band")
+        h = health_score(la)
+        if not h.get("computable"):
+            continue
+        b = h.get("band")
         if b in bands:
             bands[b] += 1
         if b in ("red", "amber"):
@@ -2465,7 +5068,7 @@ def revenue_motion() -> dict:
         "churned_arr_usd": sum(_arr(la) for la in churned),
         "at_risk_arr_usd": at_risk_arr,
         "health_mix": bands,
-        "retention": _retention_metrics(accounts, tasks_by_account),
+        "retention": _retention,
         "by_segment": sorted(by_segment.values(), key=lambda r: -r["arr_usd"]),
         "by_state": sorted([s for s in by_state.values() if s["arr_usd"] > 0], key=lambda r: -r["arr_usd"]),
         "churned_detail": churned_detail,
@@ -2475,8 +5078,8 @@ def revenue_motion() -> dict:
         # upsell/downgrade requires ARR-change history (prior-period ARR or HubSpot deal /
         # Stripe subscription-change events), which is not connected. We never invent these.
         "revenue_change": {
-            "expansion_pipeline_accounts": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_accounts", 0),
-            "expansion_pipeline_arr_usd": (_retention_metrics(accounts, tasks_by_account) or {}).get("expansion_pipeline_arr_usd", 0),
+            "expansion_pipeline_accounts": (_retention or {}).get("expansion_pipeline_accounts", 0),
+            "expansion_pipeline_arr_usd": (_retention or {}).get("expansion_pipeline_arr_usd", 0),
             "upsell_computable": bool(booked.get("upsell")),
             "upsell_count": (booked.get("upsell") or {}).get("count"),
             "upsell_arr_usd": (booked.get("upsell") or {}).get("arr_usd"),
@@ -2496,7 +5099,11 @@ def expansion_opportunities() -> dict:
     the caller (admins see all; CSMs see their own book via the scoped account provider).
     Evidence-grounded: only accounts with a computable score and real drivers appear."""
     accounts = orchestrate.load_accounts()
-    scoped = [_live_account(a) for a in accounts.values()]
+    # Exclude internal/test instances from expansion reporting (consistent with revenue
+    # & retention: test/sandbox instances are not real expansion opportunities).
+    from adapters import identity as _idmod
+    scoped = [_live_account(a) for aid, a in accounts.items()
+              if _idmod.instance_type(str((a.get("hubspot", {}) or {}).get("account_id") or aid)) != "test"]
     # Segment median ARR for the headroom driver.
     from statistics import median
     seg_arr: dict[str, list] = {}
@@ -2562,6 +5169,15 @@ def lifecycle_state(account: dict) -> dict:
     # Forward maturity from adoption + health.
     ad = adoption_score(account)
     ascore = ad.get("score") if ad.get("computable") else None
+    # Renewal stage: inside the T-90 window a healthy/established account is in its renewal
+    # motion (takes precedence over Mature/Value Realisation so the stage reflects where the
+    # relationship actually is in its cycle). At-risk/churned were already handled above.
+    try:
+        _dtr = _days_to_renewal(hs.get("renewal_date"))
+    except Exception:  # noqa: BLE001
+        _dtr = None
+    if _dtr is not None and 0 <= _dtr <= 90:
+        return {"stage": "Renewal", "reason": f"Renewal is {_dtr} days away (T-90 window); the account is in its renewal cycle.", "flow": "forward"}
     if ascore is not None:
         if ascore >= 70 and band == "green":
             return {"stage": "Value Realisation", "reason": f"Strong adoption ({ascore}) and healthy relationship.", "flow": "forward"}
@@ -2612,19 +5228,31 @@ def integrations() -> dict:
             liveset.add("Tableau")
     except Exception:  # noqa: BLE001
         pass
+    # ROI AI is "live" once the inbound webhook signing secret is configured (the vendor
+    # can then post signed telemetry). Mirrors the Tableau config-driven liveness check.
+    if roi_ai_configured():
+        liveset.add("ROI AI")
     # Precise, honest status. Three distinct states instead of a vague "not connected":
-    #   connected (live)      — the source is authenticated and returning data
-    #   configuration required — we have access but a specific env value is missing
-    #   access pending        — JobAdder does not have API access to this vendor yet
+    #   connected (live)     , the source is authenticated and returning data
+    #   configuration required, we have access but a specific env value is missing
+    #   access pending       , JobAdder does not have API access to this vendor yet
     import os as _os
     def _missing(*names):
         return [n for n in names if not (_os.environ.get(n) or "").strip()]
 
-    ACCESS_PENDING = {"Jiminny", "Rocket Lane"}
+    # Jiminny and Rocket Lane access IS granted and their keys are live (verified against
+    # both vendor APIs: Rocket Lane returns projects, Jiminny returns call activities on the
+    # EU host). They are reported via live_sources() like every other keyed source, so they
+    # resolve to "connected (live)" when live and "configured, awaiting data" otherwise -
+    # no vendor access is pending. ACCESS_PENDING is kept only for genuinely-pending vendors.
+    ACCESS_PENDING: set = set()
     CONFIG_REQS = {
         "Zendesk": ("ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_TOKEN"),
         "Churn Model": ("REDSHIFT_DATABASE", "REDSHIFT_CHURN_TABLE"),
         "Entitlements": ("ENTITLEMENTS_API_URL", "ENTITLEMENTS_KEY"),
+        "ROI AI": ("ROI_AI_WEBHOOK_SECRET",),
+        "Jiminny": ("JIMINNY_KEY",),
+        "Rocket Lane": ("ROCKET_LANE_KEY",),
     }
     def status_for(name):
         if name in liveset:
@@ -2686,11 +5314,289 @@ def integrations() -> dict:
              "direction": "read-only", "access": "read-only",
              **status_for("Entitlements"),
              "pulls": ["licensed seats", "active seats", "license utilization %"], "pushes": []},
+            {"system": "ROI AI", "category": "Product Telemetry · webhook",
+             "direction": "inbound webhook (signed)", "access": "read-only",
+             **status_for("ROI AI"),
+             "pulls": ["ROI AI adoption score", "active ROI users", "ROI realized", "trend"],
+             "pushes": []},
             {"system": "Tableau", "category": "Analytics / Reporting", "direction": "embed (SSO)",
              "access": "read-only", **status_for("Tableau"),
              "pulls": ["embedded dashboards (Revenue, NDR, Billing, Stripe)"],
              "pushes": ["signed-in CSM identity (Connected App JWT)"]},
         ]
+    }
+
+
+def ingestion_status() -> dict:
+    """Data-ingestion health for the whole platform: which sources are live, how fresh the
+    warehouse metrics are, and how much of the book has been deeply enriched vs is still
+    the lightweight roster. Powers the dashboard freshness banner so the team can see at a
+    glance what's ready to use now vs still filling in (answers 'when is it fully
+    ingested'). Live/warehouse-grounded only; never fabricated."""
+    import time
+    try:
+        live = set(dataaccess.live_sources())
+    except Exception:  # noqa: BLE001
+        live = set()
+    core = ["HubSpot", "Stripe", "Zendesk", "Pendo", "Churn Model"]
+    sources = [{"system": s, "live": s in live} for s in core]
+
+    # Secondary ingestion sources the V5 spec explicitly names for the degraded banner:
+    # ROI AI webhook telemetry, Rocket Lane onboarding, and the Stripe billing sync. These
+    # are tracked separately from core because the degraded signal must distinguish
+    # "configured but FAILING" (expected live, isn't -> warn) from "not configured yet /
+    # access pending" (nothing to warn about). Only a configured-but-not-live secondary
+    # source raises the banner; an unconfigured one is reported as informational.
+    def _secondary(system: str, configured: bool, is_live: bool) -> dict:
+        if not configured:
+            status = "not_configured"   # access pending / not wired yet - not a failure
+        elif is_live:
+            status = "live"
+        else:
+            status = "failing"          # expected to be live but isn't -> degraded
+        return {"system": system, "configured": configured, "live": is_live, "status": status}
+
+    try:
+        roi_configured = roi_ai_configured()
+    except Exception:  # noqa: BLE001
+        roi_configured = False
+    try:
+        rl_configured = bool((os.environ.get("ROCKET_LANE_KEY") or "").strip())
+        rl_live = _src.ROCKET_LANE.live()
+    except Exception:  # noqa: BLE001
+        rl_configured = rl_live = False
+    try:
+        stripe_configured = bool((os.environ.get("STRIPE_KEY") or "").strip())
+    except Exception:  # noqa: BLE001
+        stripe_configured = False
+    secondary = [
+        _secondary("ROI AI", roi_configured, "ROI AI" in live or roi_configured),
+        _secondary("Rocket Lane", rl_configured, rl_live),
+        _secondary("Billing Sync (Stripe)", stripe_configured, "Stripe" in live),
+    ]
+    secondary_degraded = [s["system"] for s in secondary if s["status"] == "failing"]
+
+    # Warehouse metrics freshness + coverage (NDR / licence utilisation).
+    bm = _BATCH_METRICS.get("data") or {}
+    bm_at = _BATCH_METRICS.get("at") or 0
+    metrics_age_s = (time.time() - bm_at) if bm_at else None
+    metrics_fresh = bool(bm) and metrics_age_s is not None and metrics_age_s < _report_cache_ttl()
+
+    # Enrichment coverage: deeply-enriched slice vs the whole active book.
+    try:
+        enriched = len(dataaccess.all_accounts())
+    except Exception:  # noqa: BLE001
+        enriched = 0
+    book_total = 0
+    try:
+        if _src.HUBSPOT.live():
+            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+                if "churn" not in str(c.get("lifecycle_stage") or "").lower():
+                    book_total += 1
+    except Exception:  # noqa: BLE001
+        book_total = 0
+
+    core_live = all(s["live"] for s in sources if s["system"] in ("HubSpot",))
+    degraded = [s["system"] for s in sources if not s["live"]]
+    # Overall state: ready (core live + metrics fresh), warming (metrics loading), or
+    # degraded (a core source is down, OR a CONFIGURED secondary source is failing — a
+    # wired ROI AI / Rocket Lane / billing sync that stops delivering must surface).
+    if not core_live or secondary_degraded:
+        state = "degraded"
+    elif not metrics_fresh:
+        state = "warming"
+    else:
+        state = "ready"
+
+    return {
+        "state": state,
+        "sources": sources,
+        "degraded": degraded,
+        # Secondary sources (ROI AI / Rocket Lane / billing sync) + the subset that is
+        # configured-but-failing (what the banner should actually warn about).
+        "secondary_sources": secondary,
+        "secondary_degraded": secondary_degraded,
+        "warehouse_metrics": {
+            "accounts": len(bm),
+            "fresh": metrics_fresh,
+            "age_seconds": int(metrics_age_s) if metrics_age_s is not None else None,
+        },
+        "enrichment": {
+            "enriched_accounts": enriched,
+            "book_total_accounts": book_total,
+            "pct": (round(100 * enriched / book_total) if book_total else None),
+        },
+    }
+
+
+def book_readiness(full: bool = False) -> dict:
+    """Per-CSM 'your book readiness' summary: for the CURRENT principal's owned accounts,
+    how complete is the data that drives the platform? Reports the count + ARR of accounts
+    missing each required HubSpot field (renewal date, owner, segment, subscription), an
+    overall readiness %, and the top accounts to fix first (highest ARR with the most
+    gaps). Owner-scoped and HubSpot-grounded (cheap roster scan, no per-account fan-out);
+    honest - it reflects exactly what is set in HubSpot, nothing inferred.
+
+    This gives each CSM a personal, actionable cleanup list and makes the 'shared effort'
+    on data hygiene concrete rather than abstract.
+    """
+    p = get_principal()
+    owner_id = p.get("owner_id") if (p and p.get("role") not in (None, "admin")) else None
+    fields = [
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("segment", "Segment (ICP)"),
+        ("subscription_type", "Subscription type"),
+    ]
+    rows = []
+    try:
+        if _src.HUBSPOT.live():
+            for c in _src.HUBSPOT.list_all_companies(cached_only=True):
+                if "churn" in str(c.get("lifecycle_stage") or "").lower():
+                    continue  # active book only
+                if owner_id and str(c.get("owner_id") or "") != str(owner_id):
+                    continue  # this CSM's book only (admin sees all)
+                rows.append(c)
+    except Exception:  # noqa: BLE001
+        rows = []
+
+    total = len(rows)
+    field_missing = {label: {"count": 0, "arr_usd": 0.0} for _, label in fields}
+    per_account = []
+    def _hs_url(cid):
+        try:
+            return _src.HUBSPOT.company_url(cid) if cid else None
+        except Exception:  # noqa: BLE001
+            return None
+    for c in rows:
+        arr = c.get("arr_usd") or 0
+        missing = []
+        for key, label in fields:
+            if c.get(key) in (None, ""):
+                missing.append(label)
+                field_missing[label]["count"] += 1
+                field_missing[label]["arr_usd"] += arr if isinstance(arr, (int, float)) else 0
+        if missing:
+            per_account.append({
+                "account_id": c.get("account_id") or ("rl-" + str(c.get("company_id"))),
+                "name": c.get("name"),
+                "arr_usd": arr if isinstance(arr, (int, float)) else 0,
+                "missing": missing,
+                "missing_count": len(missing),
+                "hubspot_url": _hs_url(c.get("company_id")),
+            })
+
+    # Overall readiness = fraction of (account x required-field) cells that are populated.
+    cells = total * len(fields)
+    filled = cells - sum(v["count"] for v in field_missing.values())
+    readiness_pct = round(100 * filled / cells) if cells else None
+
+    # Top accounts to fix first: most gaps, then highest ARR.
+    per_account.sort(key=lambda r: (-r["missing_count"], -(r["arr_usd"] or 0)))
+    fully_complete = total - len(per_account)
+
+    return {
+        "scope": ("csm" if owner_id else "all"),
+        "total_accounts": total,
+        "fully_complete": fully_complete,
+        "accounts_with_gaps": len(per_account),
+        "readiness_pct": readiness_pct,
+        "field_gaps": [
+            {"field": label, "missing": field_missing[label]["count"],
+             "arr_at_risk_usd": round(field_missing[label]["arr_usd"])}
+            for _, label in fields
+        ],
+        "fix_first": per_account if full else per_account[:15],
+    }
+
+
+def readiness_leaderboard() -> dict:
+    """Team-wide data-readiness roll-up for leadership: for EVERY CSM, how complete is the
+    required HubSpot data on their book. Admin-only in effect (a CSM would only see their
+    own owner id resolve); groups the whole active book by owner, resolves owner ids to CSM
+    names, and reports per-CSM readiness % + the biggest gap and ARR at risk. Lets
+    leadership target the data-hygiene effort where it moves the needle most. HubSpot-
+    grounded (cheap roster scan); honest - reflects exactly what is set, nothing inferred.
+    """
+    fields = [
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("segment", "Segment (ICP)"),
+        ("subscription_type", "Subscription type"),
+    ]
+    try:
+        roster = _src.HUBSPOT.list_all_companies(cached_only=True) if _src.HUBSPOT.live() else []
+    except Exception:  # noqa: BLE001
+        roster = []
+
+    # Resolve the distinct owner ids to CSM names once (cached, ~15-20 CSMs).
+    owner_names: dict = {}
+    try:
+        for oid in {str(c.get("owner_id")) for c in roster if c.get("owner_id")}:
+            owner_names[oid] = _src.HUBSPOT._owner_name(oid)
+    except Exception:  # noqa: BLE001
+        owner_names = {}
+
+    by_owner: dict = {}
+    for c in roster:
+        if "churn" in str(c.get("lifecycle_stage") or "").lower():
+            continue
+        oid = str(c.get("owner_id") or "")
+        name = owner_names.get(oid) or ("Unassigned" if not oid else oid)
+        rec = by_owner.setdefault(name, {
+            "csm": name, "accounts": 0, "fully_complete": 0, "cells_filled": 0,
+            "cells_total": 0, "field_missing": {label: 0 for _, label in fields},
+            "arr_at_risk_usd": 0.0,
+        })
+        rec["accounts"] += 1
+        arr = c.get("arr_usd") or 0
+        arr = arr if isinstance(arr, (int, float)) else 0
+        missing_here = 0
+        for key, label in fields:
+            rec["cells_total"] += 1
+            if c.get(key) in (None, ""):
+                rec["field_missing"][label] += 1
+                missing_here += 1
+            else:
+                rec["cells_filled"] += 1
+        if missing_here == 0:
+            rec["fully_complete"] += 1
+        else:
+            rec["arr_at_risk_usd"] += arr
+
+    out = []
+    for rec in by_owner.values():
+        pct = round(100 * rec["cells_filled"] / rec["cells_total"]) if rec["cells_total"] else None
+        # Biggest single gap (field with the most missing) to name the top action.
+        top_field, top_missing = None, 0
+        for label, cnt in rec["field_missing"].items():
+            if cnt > top_missing:
+                top_field, top_missing = label, cnt
+        out.append({
+            "csm": rec["csm"],
+            "accounts": rec["accounts"],
+            "fully_complete": rec["fully_complete"],
+            "readiness_pct": pct,
+            "accounts_with_gaps": rec["accounts"] - rec["fully_complete"],
+            "top_gap_field": top_field,
+            "top_gap_missing": top_missing,
+            "arr_at_risk_usd": round(rec["arr_at_risk_usd"]),
+        })
+    # Worst readiness first (most to gain), then by account volume.
+    out.sort(key=lambda r: (r["readiness_pct"] if r["readiness_pct"] is not None else 101,
+                            -r["accounts"]))
+
+    total_accts = sum(r["accounts"] for r in out)
+    total_complete = sum(r["fully_complete"] for r in out)
+    return {
+        "csms": out,
+        "summary": {
+            "csm_count": len([r for r in out if r["csm"] not in ("Unassigned",)]),
+            "total_accounts": total_accts,
+            "fully_complete": total_complete,
+            "overall_readiness_pct": (round(100 * total_complete / total_accts)
+                                      if total_accts else None),
+        },
     }
 
 
@@ -2713,7 +5619,13 @@ def datagaps() -> dict:
     totals = {"zendesk": 0, "stripe": 0, "usage": 0, "hubspot": 0}
     field_missing = {label: 0 for _, label in HS_FIELDS}
     roles_missing_accounts = 0
+
+    # --- Enriched slice: full per-account source coverage + role tagging. -------------
+    # These accounts have been through deep enrichment so we genuinely know whether each
+    # vendor returned a record and which contact roles are tagged.
+    enriched_ids = set()
     for aid, a in accounts.items():
+        enriched_ids.add(aid)
         src = a.get("sources", {})
         hs = a.get("hubspot", {}) if _is_live(src, "hubspot") else {}
         coverage = {
@@ -2749,25 +5661,139 @@ def datagaps() -> dict:
         rows.append({
             "account_id": aid,
             "name": hs.get("name") or aid,
+            "hubspot_url": hs.get("hubspot_url"),
             "coverage": coverage,
             "coverage_status": coverage_status,
             "missing_systems": missing_systems,
             "missing_fields": missing_fields,
             "missing_roles": missing_roles,
             "gap_count": len(missing_systems) + len(missing_fields) + (1 if missing_roles else 0),
+            "enriched": True,
         })
+
+    # --- Whole-book roster rows: HubSpot required-field gaps for EVERY active customer. -
+    # The five required HubSpot fields come straight from the cheap whole-book roster scan,
+    # so we report them honestly for all 4,300+ active customers (not just the enriched 50).
+    # Source-system coverage and contact roles are marked "not_checked" for these rows -
+    # the connectors are live but we have NOT pulled a per-account record, which is distinct
+    # from "no record". We never claim a vendor has/lacks an account we did not check.
+    book_roster_field_map = [
+        ("segment", "Segment (ICP)"),
+        ("arr_usd", "ARR"),
+        ("renewal_date", "Renewal date"),
+        ("owner_id", "CSM owner"),
+        ("subscription_type", "Subscription type"),
+    ]
+    book_total = 0
+    def _hs_company_url(cid):
+        try:
+            return _src.HUBSPOT.company_url(cid) if cid else None
+        except Exception:  # noqa: BLE001
+            return None
+    try:
+        if _src.HUBSPOT.live():
+            _roster = _src.HUBSPOT.list_all_companies(cached_only=True)
+            for c in _roster:
+                lc = str(c.get("lifecycle_stage") or "").lower()
+                if "churn" in lc:
+                    continue  # active book only, consistent with the coverage matrix
+                aid = c.get("account_id") or ("rl-" + str(c.get("company_id")))
+                if aid in enriched_ids:
+                    continue  # already represented with full coverage above
+                book_total += 1
+                roster_missing = []
+                for key, label in book_roster_field_map:
+                    if c.get(key) in (None, ""):
+                        roster_missing.append(label)
+                        field_missing[label] += 1
+                rows.append({
+                    "account_id": aid,
+                    "name": c.get("name") or aid,
+                    "hubspot_url": _hs_company_url(c.get("company_id")),
+                    "coverage": {"hubspot": True, "zendesk": False, "stripe": False, "usage": False},
+                    # not_checked: connector live but no per-account lookup done for this row.
+                    "coverage_status": {"hubspot": "live", "zendesk": "not_checked",
+                                        "stripe": "not_checked", "usage": "not_checked"},
+                    "missing_systems": [],      # unknown, not fabricated
+                    "missing_fields": roster_missing,
+                    "missing_roles": [],        # unknown until enriched
+                    "gap_count": len(roster_missing),
+                    "enriched": False,
+                })
+    except Exception:  # noqa: BLE001
+        book_total = book_total
+
     rows.sort(key=lambda r: -r["gap_count"])  # worst-coverage first
     n = len(rows) or 1
+    book_total_all = len(enriched_ids) + book_total
+
     return {
         "accounts": rows,
         "summary": {
             "total_accounts": len(rows),
-            "coverage_pct": {k: round(100 * v / n) for k, v in totals.items()},
-            "not_in_zendesk": len(rows) - totals["zendesk"],
-            "not_in_stripe": len(rows) - totals["stripe"],
-            "not_in_pendo": len(rows) - totals["usage"],
-            "hubspot_field_gaps": field_missing,
+            # coverage_pct is over the enriched slice only (the only accounts for which we
+            # genuinely checked each vendor); the UI labels it accordingly.
+            "coverage_pct": {k: round(100 * v / (len(enriched_ids) or 1)) for k, v in totals.items()},
+            "not_in_zendesk": len(enriched_ids) - totals["zendesk"],
+            "not_in_stripe": len(enriched_ids) - totals["stripe"],
+            "not_in_pendo": len(enriched_ids) - totals["usage"],
+            "hubspot_field_gaps": field_missing,     # now whole-book
             "accounts_missing_roles": roles_missing_accounts,
+            "enriched_accounts": len(enriched_ids),
+            "book_total_accounts": book_total_all,
+        },
+    }
+
+
+def admin_coverage_matrix() -> dict:
+    """Admin Coverage Matrix (UC3 governance): the book-level roll-up of required contact
+    role coverage. For each of the three WoW roles (Executive Sponsor, Primary Champion /
+    Admin, Finance Contact) report how many active accounts have it tagged, the coverage %,
+    and the ARR sitting at risk because the role is missing. Owner-scoped. Live HubSpot only.
+    Complements datagaps() (which is per-account) with the leadership-level matrix the spec
+    names."""
+    accounts = _scoped_accounts()
+    roles = list(REQUIRED_CONTACT_ROLES)
+    per_role = {r: {"role": r, "covered": 0, "missing": 0, "arr_at_risk_usd": 0.0} for r in roles}
+    total = 0
+    fully_covered = 0
+    arr_total = 0.0
+    for aid, a in accounts.items():
+        if not _is_live(a.get("sources", {}), "hubspot"):
+            continue
+        hs = a.get("hubspot", {}) or {}
+        # Active book only: a churned account's missing roles are not actionable coverage.
+        lc = str(hs.get("lifecycle_stage") or "").lower()
+        if lc in ("churned", "churned customer"):
+            continue
+        total += 1
+        arr = hs.get("arr_usd") or 0
+        arr_total += arr
+        have = {c.get("role") for c in hs.get("contacts", []) if c.get("role")}
+        missing_here = 0
+        for r in roles:
+            if r in have:
+                per_role[r]["covered"] += 1
+            else:
+                per_role[r]["missing"] += 1
+                per_role[r]["arr_at_risk_usd"] += arr
+                missing_here += 1
+        if missing_here == 0:
+            fully_covered += 1
+    n = total or 1
+    matrix = []
+    for r in roles:
+        pr = per_role[r]
+        pr["coverage_pct"] = round(100 * pr["covered"] / n)
+        pr["arr_at_risk_usd"] = round(pr["arr_at_risk_usd"])
+        matrix.append(pr)
+    return {
+        "roles": matrix,
+        "summary": {
+            "active_accounts": total,
+            "fully_covered": fully_covered,
+            "fully_covered_pct": round(100 * fully_covered / n),
+            "total_arr_usd": round(arr_total),
         },
     }
 
@@ -2815,6 +5841,12 @@ def _payment_thresholds() -> dict:
 
 
 def payment_risk_report() -> dict:
+    """Cached wrapper (short TTL, per scope) over the live Payment Risk build so the page
+    doesn't re-query Stripe on every load."""
+    return _cached_report("payment_risk_report", _payment_risk_report_build)
+
+
+def _payment_risk_report_build() -> dict:
     """Payment Risk Report (live). Buckets the owner-scoped book into pages driven by live
     Stripe dunning (days past due) plus configurable access/cancellation thresholds:
 
@@ -2826,7 +5858,7 @@ def payment_risk_report() -> dict:
     Each row carries the fields the manual report tracks, all from live sources: customer
     name, JobAdder id, billing contact (Finance Contact or Stripe email), CSM owner, the
     Stripe customer dashboard link, and the derived JobAdder admin link. Honest empty when
-    Stripe is not connected — no data is fabricated."""
+    Stripe is not connected, no data is fabricated."""
     th = _payment_thresholds()
     suspend_at, cancel_at = th["access_suspend_days"], th["cancel_days"]
     stripe_live = "Stripe" in set(dataaccess.live_sources())

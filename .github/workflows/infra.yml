@@ -39,6 +39,11 @@ env:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    # Only the canonical JobAdder repo can run Terraform: it holds the GitHub OIDC trust
+    # and TF_DEPLOY_ROLE_ARN_TOOLING for the Tooling AWS account. On a fork these are
+    # absent, so the AWS credentials step would always fail; skip the whole job there
+    # instead of showing a spurious red X.
+    if: github.repository == 'JobAdder/cs-orchestrator'
     defaults:
       run:
         working-directory: ${{ env.WORKDIR }}

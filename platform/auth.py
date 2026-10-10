@@ -33,7 +33,22 @@ from typing import Any
 import rbac
 
 SESSION_COOKIE = "cs_session"
-SESSION_TTL_S = 8 * 60 * 60  # 8 hours, matching ja-observe
+
+
+def _session_ttl_s() -> int:
+    """Session lifetime in seconds. Default 12h (was 8h, which logged active users out
+    mid-session). Override with CS_SESSION_TTL_HOURS (e.g. 8, 12, 24). Clamped to a sane
+    1h..24h range so a typo can't create a never-expiring or instantly-expiring session."""
+    raw = os.environ.get("CS_SESSION_TTL_HOURS", "").strip()
+    try:
+        hours = float(raw) if raw else 12.0
+    except (TypeError, ValueError):
+        hours = 12.0
+    hours = max(1.0, min(24.0, hours))
+    return int(hours * 60 * 60)
+
+
+SESSION_TTL_S = _session_ttl_s()  # 12 hours by default (CS_SESSION_TTL_HOURS override)
 
 
 # --------------------------------------------------------------------------- #

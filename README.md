@@ -76,7 +76,7 @@ This is not an AI that guesses. The WoW rules are encoded as deterministic code,
 | CS stack as agent tools (HubSpot, Zendesk, Pendo, Stripe, Jiminny, Redshift) | Tools / MCP | `plugins/cs-orchestrator/mcp-servers/cs_stack_server.py` |
 | `cs-orchestrator` orchestrator + 4 specialist agents (`risk-analyst`, `renewal-planner`, `outreach-drafter`, `cs-playbook-judge`) | Custom agents (multi-agent, subagent loops, self-correction) | `plugins/cs-orchestrator/agents/*.agent.md` |
 | WoW rules (Three Mandates, routing, thresholds, cadence, payment) | Automatic skill | `plugins/cs-orchestrator/skills/cs-playbook/SKILL.md` |
-| Multi-instance suppression + grounding gate + deterministic playbook judge | Enforcement hooks + feedback sensor | `plugins/cs-orchestrator/hooks/`, `plugins/cs-orchestrator/playbook_judge.py` |
+| Multi-instance suppression + grounding gate + deterministic playbook judge | Enforcement + feedback sensors (invoked in-process; the hook scripts live in `hooks/`, `hooks.json` is intentionally empty) | `plugins/cs-orchestrator/hooks/`, `plugins/cs-orchestrator/playbook_judge.py` |
 
 ### Feedforward and feedback
 
@@ -87,8 +87,8 @@ Following Fowler/Böckeler's model, a harness is Guides (feedforward) + Sensors 
 | `cs-playbook` SKILL.md + `copilot-instructions.md` + agent definitions | inferential | feedforward |
 | `orchestrate.py` deterministic rules engine | computational | feedforward |
 | `suppression.py` multi-instance filter | computational | feedback |
-| `grounding-gate.py` (Stop hook) | computational | feedback |
-| `pytest` (93 tests) | computational | feedback |
+| `grounding-gate.py` (final-answer check, invoked in-process) | computational | feedback |
+| `pytest` (402 tests) | computational | feedback |
 | `playbook_judge.py` (queue checker keyed on stable `rule_id`, returns PASS / NEEDS_CHANGES, wired into `orchestrate()`) | computational | feedback |
 | `cs-playbook-judge` agent (LLM-as-judge, semantic review on top of the code checks) | inferential | feedback |
 
@@ -125,7 +125,7 @@ python3 plugins/cs-orchestrator/mcp-servers/cs_stack_server.py
 pip install -r requirements-dev.txt
 python3 -m pytest plugins/cs-orchestrator/tests/ -v
 ```
-93 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
+402 tests covering rules, adapters, MCP, agent contracts, and the API/UI.
 
 **As a Copilot plugin:**
 
@@ -142,7 +142,22 @@ Ask for today's actions. Northwind comes back as a Priority-1 churn risk (ML chu
 
 ## Docs
 
-- [Docs/HARNESS.md](Docs/HARNESS.md): end-to-end harness story, feedforward/feedback breakdown, install instructions, live data verification, and remaining production dependencies.
+**Product & features**
+- [Docs/USER-GUIDE.md](Docs/USER-GUIDE.md): **end-user guide** — per-role, click-by-click walkthrough of every page (start here).
 - [Docs/CS-PLATFORM-GUIDE.md](Docs/CS-PLATFORM-GUIDE.md): full CS Platform feature guide.
-- [Docs/DATA-ACCESS.md](Docs/DATA-ACCESS.md): live-only data access policy and adapter contracts.
-- [Docs/CHURN-MODEL-CONTRACT.md](Docs/CHURN-MODEL-CONTRACT.md): churn model interface contract (ML vs computed score).
+- [Docs/CSM-QUICK-OVERVIEW.md](Docs/CSM-QUICK-OVERVIEW.md): day-to-day quick start for CSMs.
+- [Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md](Docs/FEATURE-EXPLAINER-POOLED-AND-DAILY-TASKS.md): how pooled round-robin + the daily task queue work, end to end.
+- [Docs/HARNESS.md](Docs/HARNESS.md): the agent-harness story (feedforward/feedback), install, and live-data verification.
+
+**Architecture & integrations**
+- [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md): end-to-end request flow, auth, deploy pipeline, and graceful degradation.
+- [Docs/DATA-ACCESS.md](Docs/DATA-ACCESS.md): live-only data-access policy and adapter contracts.
+- [Docs/CHURN-MODEL-CONTRACT.md](Docs/CHURN-MODEL-CONTRACT.md): churn model interface (ML vs computed score).
+- [Docs/AUTH-SETUP.md](Docs/AUTH-SETUP.md): SSO / Cognito / RBAC setup.
+
+**Requirements & go-live**
+- [Docs/REQUIREMENTS-COVERAGE-SCORECARD.md](Docs/REQUIREMENTS-COVERAGE-SCORECARD.md): requirement-by-requirement coverage vs the V5 spec (source-verified).
+- [Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md](Docs/REVOPS-HANDOFF-EXTERNAL-BLOCKERS.md): the only not-live items (all external) and how to switch each on.
+- [Docs/PROVISIONING-CHECKLIST.md](Docs/PROVISIONING-CHECKLIST.md): the go-live provisioning steps and owners.
+- [Docs/INBOUND-OPTIONS-SCENARIOS.md](Docs/INBOUND-OPTIONS-SCENARIOS.md): inbound design — 5 native paths + per-channel prioritisation weighting (platform is the help desk; no Service Hub Pro).
+- [Docs/SECURITY-ROTATION-RUNBOOK.md](Docs/SECURITY-ROTATION-RUNBOOK.md): Stripe/Tableau key-rotation runbook.

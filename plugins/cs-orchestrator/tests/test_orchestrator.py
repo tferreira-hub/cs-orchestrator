@@ -141,6 +141,60 @@ def test_onboarding_not_matched_or_completed_does_not_fire():
     assert not [t for t in t2 if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
 
 
+def test_onboarding_stagnation_judge_passes():
+    """MUST_USE at P3 is intentionally elevated in RULE_PRIORITY. The judge must
+    honour the rule's own declared priority rather than imposing the blanket
+    MUST_USE >=P5 mandate floor, so this should PASS with no priority_ordering
+    violation. Regression test for the latent judge/engine contract mismatch."""
+    from playbook_judge import judge
+    account = {
+        "hubspot": {"name": "Stall Judge", "segment": "Scaled", "contacts": []},
+        "usage": {}, "churn": {}, "zendesk": {}, "stripe": {},
+        "onboarding": {"_matched": True, "status": "on_hold", "health": "red",
+                       "project_name": "Impl X", "due_date": "2026-01-01",
+                       "archived": False},
+    }
+    tasks, _ = orchestrate.evaluate("au1-ob-judge", account)
+    stag = [t for t in tasks if t["rule_id"] == orchestrate.RULE_ONBOARDING_STAGNATION]
+    assert stag, "stagnation task should fire"
+    verdict = judge(tasks, {"au1-ob-judge": account})
+    prio_viol = [v for v in verdict["violations"] if v["rule"] == "priority_ordering"
+                 and "MUST_USE at priority 3" in v.get("detail", "")]
+    assert not prio_viol, f"judge should not flag P3 MUST_USE stagnation: {prio_viol}"
+    assert verdict["verdict"] == "PASS", f"expected PASS: {verdict['violations']}"
+
+def test_success_plan_at_risk_fires_and_judge_passes():
+    """A committed success plan that is off-track or past its deadline must raise a
+    P2 MUST_PROTECT task; a healthy/on-track plan must not. Judge PASSES either way."""
+    from playbook_judge import judge
+    base_hs = {"name": "Plan Co", "segment": "Strategic", "contacts": [],
+               "renewal_date": "2027-06-01"}
+    base = {"hubspot": base_hs, "usage": {"days_since_last_visit": 2},
+            "churn": {}, "zendesk": {}, "stripe": {}}
+    # Off-track plan -> fires.
+    acct = {**base, "success_plans": [
+        {"plan_id": "p1", "goal": "Activate SSO", "status": "off_track", "deadline": "2027-01-01"}]}
+    tasks, _ = orchestrate.evaluate("au1-plan1", acct)
+    sp = [t for t in tasks if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    assert sp and sp[0]["priority"] == 2 and sp[0]["mandate"] == "MUST_PROTECT"
+    assert "Activate SSO" in sp[0]["evidence"]["goals"]
+    assert judge(tasks, {"au1-plan1": acct})["verdict"] == "PASS"
+    # Overdue deadline (past due vs CS_TODAY 2026-09-23) -> fires.
+    acct2 = {**base, "success_plans": [
+        {"plan_id": "p2", "goal": "Hit 80% adoption", "status": "on_track", "deadline": "2026-01-01"}]}
+    t2, _ = orchestrate.evaluate("au1-plan2", acct2)
+    assert [t for t in t2 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    # On-track, future deadline -> does NOT fire.
+    acct3 = {**base, "success_plans": [
+        {"plan_id": "p3", "goal": "Expand seats", "status": "on_track", "deadline": "2027-12-01"}]}
+    t3, _ = orchestrate.evaluate("au1-plan3", acct3)
+    assert not [t for t in t3 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+    # No plans at all -> does NOT fire (unchanged behaviour).
+    t4, _ = orchestrate.evaluate("au1-plan4", base)
+    assert not [t for t in t4 if t["rule_id"] == orchestrate.RULE_SUCCESS_PLAN_AT_RISK]
+
+
+
 def test_protect_suppresses_duplicate_adoption_and_hygiene_tasks():
     account = {
         "hubspot": {"name": "At Risk Adoption Gap", "segment": "Strategic", "contacts": []},
@@ -377,8 +431,12 @@ def test_churn_live_requires_database_and_target():
     from adapters import sources
 
     keys = ("REDSHIFT_DATABASE", "REDSHIFT_WORKGROUP", "REDSHIFT_CLUSTER_ID",
-            "REDSHIFT_CHURN_TABLE", "REDSHIFT_CHURN_MODE")
+            "REDSHIFT_CHURN_TABLE", "REDSHIFT_CHURN_MODE", "CS_USE_LIVE")
     prev = {k: os.environ.pop(k, None) for k in keys}
+    # This test exercises the liveness-DETECTION logic itself, so the master
+    # live switch must be on (the suite-wide conftest sets CS_USE_LIVE=0 to block
+    # real network calls; no network is made here — only .live() config checks).
+    os.environ["CS_USE_LIVE"] = "1"
     try:
         assert sources.CHURN.live() is False, "must be False with no config"
         os.environ["REDSHIFT_DATABASE"] = "analytics"
@@ -677,3 +735,118 @@ if __name__ == "__main__":
             print(f"FAIL {fn.__name__}: {exc}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     raise SystemExit(1 if failed else 0)
+
+
+def test_daily_queue_orders_by_arr_within_priority_band():
+    """Within one priority band the daily queue must list the highest-ARR account first,
+    so a CSM working top-down hits the most valuable revenue first. Same priority + same
+    rule, different ARR -> higher ARR ranks first; account name is the final tie-break."""
+    import orchestrate as orch
+    # Two Strategic accounts that both fire the SAME P2 overdue-renewal rule, differing
+    # only in ARR, plus a low-ARR one to confirm ordering across the band.
+    def _acct(name, arr):
+        return {
+            "hubspot": {"name": name, "segment": "Strategic", "arr_usd": arr,
+                        "renewal_date": "2026-01-01", "lifecycle_stage": "Customer",
+                        "contacts": []},
+            "zendesk": {}, "usage": {}, "churn": {}, "stripe": {}, "jiminny": {},
+            "onboarding": {}, "metrics": {}, "sources": {"hubspot": "live"},
+        }
+    accounts = {"AU1-low": _acct("Low ARR Co", 5000),
+                "AU1-high": _acct("High ARR Co", 500000),
+                "AU1-mid": _acct("Mid ARR Co", 50000)}
+    prev = orch._ACCOUNT_PROVIDER
+    orch.set_account_provider(lambda: accounts)
+    try:
+        tasks = orch.orchestrate()["tasks"]
+        # Overdue-renewal P2 rows, in queue order.
+        p2 = [t["account"] for t in tasks
+              if t["rule_id"] == orch.RULE_OVERDUE_RENEWAL]
+        assert p2[:3] == ["High ARR Co", "Mid ARR Co", "Low ARR Co"], p2
+    finally:
+        orch.set_account_provider(prev)
+
+
+def test_daily_focus_keeps_all_protect_and_caps_the_tail(monkeypatch):
+    """daily_focus must keep EVERY must-protect task in focus (never cap risk) and fill
+    the rest of a small capacity with the top Expand/Use tail, deferring (not dropping)
+    the remainder."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+    import engine
+    import orchestrate as orch
+
+    def _acct(name, arr, churned=False):
+        return {
+            "hubspot": {"name": name, "segment": "Strategic", "arr_usd": arr,
+                        "renewal_date": "2026-01-01",  # overdue -> P2 protect
+                        "lifecycle_stage": "Churned Customer" if churned else "Customer",
+                        "contacts": []},
+            "zendesk": {}, "usage": {}, "churn": {"churn_status": "churned"} if churned else {},
+            "stripe": {}, "jiminny": {}, "onboarding": {}, "metrics": {},
+            "sources": {"hubspot": "live"},
+        }
+    # 3 protect-generating accounts (overdue renewals) + several contact-hygiene P5 tails.
+    accounts = {f"AU1-{i}": _acct(f"Co{i}", 10000 + i) for i in range(6)}
+    monkeypatch.setenv("CS_TASK_CAPACITY_PER_CSM", "4")
+    prev = orch._ACCOUNT_PROVIDER
+    orch.set_account_provider(lambda: accounts)
+    try:
+        f = engine.daily_focus()
+        # Every protect task is in focus.
+        protect_in_focus = [t for t in f["focus"] if t["mandate"] == "MUST_PROTECT"]
+        assert len(protect_in_focus) == f["protect_count"]
+        # Focus never silently exceeds capacity unless protect alone does.
+        if not f["over_capacity"]:
+            assert f["focus_count"] <= f["capacity"]
+        # Nothing is lost: focus + deferred == total.
+        assert f["focus_count"] + f["deferred_count"] == f["total_tasks"]
+    finally:
+        orch.set_account_provider(prev)
+
+
+# --------------------------------------------------------------------------- #
+# V5 UC2 edge case: missing Executive Sponsor at T-90 -> urgent data-gap task
+# --------------------------------------------------------------------------- #
+def _renewal_account(contacts, renewal="2026-12-12", segment="Strategic"):
+    return {
+        "hubspot": {"name": "Renewing Co", "segment": segment, "arr_usd": 200000,
+                    "renewal_date": renewal, "contacts": contacts},
+        "usage": {}, "churn": {}, "zendesk": {}, "stripe": {}, "onboarding": {},
+    }
+
+
+def test_t90_without_exec_sponsor_fires_urgent_data_gap_task():
+    """A Strategic account inside T-90 (<=90 days) with NO Executive Sponsor tagged must
+    raise an urgent P2 MUST_PROTECT data-gap task (plus the normal P4 cadence task)."""
+    # renewal 2026-12-12 is ~80 days from CS_TODAY=2026-09-23 -> inside T-90.
+    account = _renewal_account(contacts=[{"role": "Finance Contact", "name": "Fin"}])
+    tasks, _ = orchestrate.evaluate("au1-renew", account)
+    gap = [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+    assert gap, "expected a renewal_exec_sponsor_gap task at T-90 with no Exec Sponsor"
+    assert gap[0]["priority"] == 2 and gap[0]["mandate"] == "MUST_PROTECT"
+    assert gap[0]["evidence"]["missing_role"] == "Executive Sponsor"
+    # The normal cadence task still fires alongside it.
+    assert any(t["rule_id"] == orchestrate.RULE_RENEWAL_CADENCE for t in tasks)
+
+
+def test_t90_with_exec_sponsor_does_not_fire_gap():
+    account = _renewal_account(contacts=[{"role": "Executive Sponsor", "name": "Eve"}])
+    tasks, _ = orchestrate.evaluate("au1-renew2", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+
+
+def test_sponsor_gap_only_inside_t90_window():
+    """Outside the T-90 window (e.g. T-120) the urgent gap task must NOT fire yet."""
+    # renewal ~2027-01-15 is ~114 days out -> T-120 band, not yet T-90.
+    account = _renewal_account(contacts=[], renewal="2027-01-15")
+    tasks, _ = orchestrate.evaluate("au1-renew3", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]
+
+
+def test_sponsor_gap_not_for_scaled():
+    """The urgent sponsor-gap is a Strategic renewal-motion concern; Scaled is exception-based."""
+    account = _renewal_account(contacts=[], segment="Scaled")
+    tasks, _ = orchestrate.evaluate("au1-renew4", account)
+    assert not [t for t in tasks if t["rule_id"] == orchestrate.RULE_RENEWAL_SPONSOR_GAP]

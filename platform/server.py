@@ -296,7 +296,10 @@ def _playbook_summary() -> dict:
             "review_decisions": ["request_changes", "approve_for_implementation", "reject", "archive"]}
 
 
-def _record_playbook_proposal(body: dict) -> dict:
+def _record_playbook_proposal(body: dict, principal: dict | None = None) -> dict:
+    # Proposer identity comes from the authenticated session, not free text, so the
+    # segregation-of-duties check at review time cannot be bypassed by typing a name.
+    requested_by_id = (principal or {}).get("email") or (principal or {}).get("name") or "unknown"
     proposal = {
         "proposal_id": hashlib.sha256((datetime.now(timezone.utc).isoformat() + str(body)).encode()).hexdigest()[:12],
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -315,6 +318,7 @@ def _record_playbook_proposal(body: dict) -> dict:
         "title": str(body.get("title") or "")[:160],
         "rationale": str(body.get("rationale") or "")[:1000],
         "requested_by": str(body.get("requested_by") or "CS team")[:100],
+        "requested_by_id": requested_by_id[:120],
         "current_behavior": str(body.get("current_behavior") or "")[:1000],
         "proposed_behavior": str(body.get("proposed_behavior") or "")[:1000],
         "consumer_context": str(body.get("consumer_context") or "")[:1000],
@@ -329,15 +333,21 @@ def _record_playbook_proposal(body: dict) -> dict:
     return proposal
 
 
-def _record_playbook_review(proposal_id: str, body: dict) -> dict:
+def _record_playbook_review(proposal_id: str, body: dict, principal: dict | None = None) -> dict:
     decision = str(body.get("decision") or "").strip().lower()
     allowed = {"request_changes", "approve_for_implementation", "reject", "archive"}
     if decision not in allowed:
         raise ValueError("decision must be request_changes, approve_for_implementation, reject, or archive")
-    reviewer = str(body.get("reviewed_by") or "").strip()
-    review_note = str(body.get("review_note") or "").strip()
+    # GOVERNANCE: the reviewer is the AUTHENTICATED principal, never free text. A Ways-of-
+    # Working change is a signed-config change, so only CS Leadership (admin role) may
+    # review/approve - a CSM cannot approve a playbook change.
+    role = (principal or {}).get("role")
+    if role not in (None, "admin"):
+        raise PermissionError("playbook review is restricted to CS Leadership (admin)")
+    reviewer = ((principal or {}).get("email") or (principal or {}).get("name") or "").strip()
     if not reviewer:
-        raise ValueError("reviewed_by is required")
+        raise PermissionError("an authenticated reviewer is required")
+    review_note = str(body.get("review_note") or "").strip()
     if not review_note:
         raise ValueError("review_note is required")
     checklist = body.get("review_checklist") or {}
@@ -348,6 +358,14 @@ def _record_playbook_review(proposal_id: str, body: dict) -> dict:
     proposal = next((item for item in summary["proposals"] if item.get("proposal_id") == proposal_id), None)
     if not proposal:
         raise ValueError(f"unknown proposal {proposal_id}")
+    # SEGREGATION OF DUTIES: the proposer cannot approve/reject their own change. Compared
+    # on the authenticated proposer id captured at proposal time (not the editable display
+    # name). Requesting changes on your own proposal is allowed (it is not a sign-off).
+    if decision in ("approve_for_implementation", "reject"):
+        proposer_id = str(proposal.get("requested_by_id") or "").strip().lower()
+        if proposer_id and proposer_id == reviewer.strip().lower():
+            raise PermissionError(
+                "segregation of duties: you cannot approve or reject your own playbook proposal")
     status = {
         "request_changes": "changes_requested",
         "approve_for_implementation": "approved_for_implementation",
@@ -586,6 +604,10 @@ class Handler(BaseHTTPRequestHandler):
 
             # /api/me is the UI's "who am I" — returns principal or unauthenticated.
             if path == "/api/me":
+                import sys as _ps
+                print(f"[auth] /api/me authenticated={bool(principal)} "
+                      f"email={(principal or {}).get('email') if principal else None}",
+                      file=_ps.stderr, flush=True)
                 if principal:
                     self._json(200, {"authenticated": True, "email": principal.get("email"),
                                      "name": principal.get("name"), "role": principal.get("role"),
@@ -596,6 +618,11 @@ class Handler(BaseHTTPRequestHandler):
 
             # --- Auth gate: unauthenticated requests are turned away --------- #
             if auth.auth_required() and not principal:
+                if path.startswith("/api/"):
+                    import sys as _ps
+                    print(f"[auth] 401 no/invalid session for {path} "
+                          f"cookie={'yes' if self.headers.get('Cookie') else 'none'}",
+                          file=_ps.stderr, flush=True)
                 if path == "/" or not path.startswith("/api/"):
                     self._redirect("/login"); return
                 self._json(401, {"error": "authentication required", "login": "/login"}); return
@@ -604,7 +631,7 @@ class Handler(BaseHTTPRequestHandler):
                 if UI_PATH.exists():
                     self._send(200, UI_PATH.read_bytes(), "text/html; charset=utf-8")
                 else:
-                    self._send(200, b"<h1>CS Platform</h1><p>UI not found.</p>", "text/html")
+                    self._send(200, b"<h1>The CIA</h1><p>UI not found.</p>", "text/html")
                 return
             # --- Tableau embedding (Connected App direct-trust SSO) --------- #
             # Config describes which dashboards to embed and where; it never returns
@@ -635,7 +662,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/portfolio":
-                self._json(200, engine.portfolio()); return
+                import time as _pt, sys as _ps
+                _p0 = _pt.time()
+                _pf = engine.portfolio()
+                _warm = bool(isinstance(_pf, dict) and _pf.get("summary", {}).get("warming"))
+                _n = len(_pf.get("accounts", [])) if isinstance(_pf, dict) else 0
+                print(f"[req] /api/portfolio warming={_warm} accounts={_n} "
+                      f"took={round(_pt.time()-_p0,2)}s", file=_ps.stderr, flush=True)
+                self._json(200, _pf); return
             if path == "/api/roster":
                 # Tier-1 whole-book roster (all customers, Managed vs Pooled/Scaled).
                 # ?cohort=managed|pooled|all. Scoped to the principal (admin=all).
@@ -653,6 +687,10 @@ class Handler(BaseHTTPRequestHandler):
                 # The persisted inbound queue (Option A channels -> triaged tickets).
                 st = (query.get("status") or [None])[0]
                 self._json(200, engine.inbound_queue(status=st)); return
+            if path == "/api/inbound/ingest-status":
+                # Status of the background HubSpot inbound pull (idle|running|done|error),
+                # so the UI can poll after triggering /api/inbound/ingest-hubspot.
+                self._json(200, engine.inbound_ingest_status()); return
             if path == "/api/strategic/review-queue":
                 # Strategic monthly draft/review/approve queue (28th-31st window).
                 period = (query.get("period") or [None])[0]
@@ -667,6 +705,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, engine.portfolio()["accounts"]); return
             if path == "/api/tasks":
                 self._json(200, engine.portfolio()["tasks"]); return
+            if path == "/api/daily-focus":
+                # Capacity-shaped 'today' slice: all Protect work + top-N Expand/Use,
+                # with the rest deferred (not dropped). Owner-scoped.
+                self._json(200, engine.daily_focus()); return
             if path == "/api/suppressed":
                 self._json(200, engine.portfolio()["suppressed"]); return
             if path == "/api/revenue-motion":
@@ -679,18 +721,88 @@ class Handler(BaseHTTPRequestHandler):
                 # UC3 ML Churn Risk Matrix: the >=70% ML-churn cohort grouped by primary
                 # risk driver with ARR impact. Owner-scoped inside the engine.
                 self._json(200, engine.churn_risk_matrix()); return
+            if path == "/api/onboarding-governance":
+                # UC3 Rocket Lane implementation/onboarding governance (active projects,
+                # time-in-onboarding, stalled-before-handoff, on-time handoff KPI).
+                self._json(200, engine.onboarding_governance()); return
+            if path == "/api/f2f-cadence":
+                # V5 Executive Sponsor F2F cadence KPI (tier-1 strategic touchpoints).
+                self._json(200, engine.f2f_cadence()); return
+            if path == "/api/account-performance/accounts":
+                # Cheap picker list for the Accounts page: [{account_id,name}] across the
+                # principal's whole book (owner-scoped inside the engine).
+                self._json(200, engine.account_performance_accounts()); return
+            if path == "/api/account-performance/filter-options":
+                # Benchmark cohort filter options (business types from the live dim + fixed
+                # size-band / peer-group vocabularies). Honest {} when the warehouse is not
+                # connected (the UI then hides the cohort controls).
+                self._json(200, engine.account_performance_filter_options()); return
+            if path == "/api/account-performance":
+                # Per-account performance scorecard (CS Day-to-Day -> Accounts). Owner-scoped:
+                # ForbiddenError -> 403, unknown account -> 404. Optional benchmark cohort
+                # overrides (business_type/size_band/peer_group) reshape the peer cohort.
+                account_id = (query.get("account_id") or [""])[0].strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                business_type = (query.get("business_type") or [""])[0].strip() or None
+                size_band = (query.get("size_band") or [""])[0].strip() or None
+                peer_group = (query.get("peer_group") or [""])[0].strip() or None
+                try:
+                    self._json(200, engine.account_performance(
+                        account_id, business_type=business_type, size_band=size_band,
+                        peer_group=peer_group))
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "forbidden", "account_id": account_id})
+                except KeyError:
+                    self._json(404, {"error": "account not found", "account_id": account_id})
+                return
+            if path == "/api/f2f-log":
+                account_id = (query.get("account_id") or [""])[0].strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                if not engine.can_view_account(account_id):
+                    self._json(403, {"error": "forbidden", "account_id": account_id}); return
+                self._json(200, {"account_id": account_id, "entries": engine.f2f_log_for(account_id),
+                                 "last_f2f": engine.last_f2f(account_id)}); return
             if path == "/api/audit":
                 self._json(200, _audit_read()); return
             if path == "/api/kpis":
                 self._json(200, engine.kpis()); return
+            if path == "/api/quarter-scorecard":
+                # 'This Quarter' KPI tracker for the personal Dashboard: owner-scoped
+                # progress against the CS team's quarterly goals, live-computed + honest.
+                self._json(200, engine.quarter_scorecard()); return
+            if path == "/api/leaderboard":
+                # V5 team performance leaderboard: per-CSM completion/outreach ranking +
+                # weekly target-compliance KPI. Owner-scoped (admin all named; CSM self +
+                # anonymised peers) inside the engine.
+                self._json(200, engine.leaderboard()); return
             if path == "/api/task-events":
                 self._json(200, {"events": list(engine._load_task_events().values())}); return
             if path == "/api/lifecycle":
                 self._json(200, engine.lifecycle()); return
             if path == "/api/integrations":
                 self._json(200, engine.integrations()); return
+            if path == "/api/ingestion-status":
+                self._json(200, engine.ingestion_status()); return
+            if path == "/api/book-readiness":
+                # Per-CSM 'your book readiness': owner-scoped data-completeness summary.
+                # ?full=1 returns every gap account (used by the CSV export).
+                _full = str((query.get("full") or ["0"])[0]).lower() in ("1", "true", "yes")
+                self._json(200, engine.book_readiness(full=_full)); return
             if path == "/api/datagaps":
                 self._json(200, engine.datagaps()); return
+            if path == "/api/my-book/progress":
+                # Poll endpoint: current progress of the CSM's whole-book enrichment.
+                self._json(200, engine.get_book_enrichment()); return
+            if path == "/api/admin-coverage":
+                self._json(200, engine.admin_coverage_matrix()); return
+            if path == "/api/readiness-leaderboard":
+                # Leadership tool: team-wide per-CSM data readiness. Admin only (it exposes
+                # every CSM's book); a CSM uses /api/book-readiness for their own.
+                if principal and principal.get("role") not in (None, "admin"):
+                    self._json(403, {"error": "admin only"}); return
+                self._json(200, engine.readiness_leaderboard()); return
             if path == "/api/payment-risk":
                 # Live Payment Risk Report (Stripe dunning + HubSpot billing/CSM + derived
                 # JobAdder admin link), owner-scoped. Honest empty when Stripe not connected.
@@ -743,6 +855,33 @@ class Handler(BaseHTTPRequestHandler):
                 form = urllib.parse.parse_qs(raw.decode("utf-8", "replace"))
                 self._handle_dev_login({"email": (form.get("email") or [""])[0]}); return
 
+            # ROI AI telemetry webhook (V5). Machine-to-machine: authenticated by an HMAC
+            # signature over the RAW body (NOT the user cookie), so it is handled BEFORE the
+            # auth gate. 503 when unconfigured; 401 bad signature; 400 invalid payload;
+            # idempotent on event_id. Never fabricates and never partially writes.
+            if path == "/api/webhooks/roi-ai":
+                if not engine.roi_ai_configured():
+                    self._json(503, {"error": "roi_ai_not_configured",
+                                     "detail": "ROI AI webhook secret is not set; ingestion is disabled."})
+                    return
+                sig = self.headers.get("X-RoiAi-Signature")
+                if not engine.verify_roi_ai_signature(raw, sig):
+                    self._json(401, {"error": "invalid_signature"}); return
+                try:
+                    payload = json.loads(raw or b"{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("body must be a JSON object")
+                except (ValueError, TypeError):
+                    self._json(400, {"error": "invalid_json"}); return
+                try:
+                    result = engine.record_roi_ai(payload)
+                except ValueError as exc:
+                    self._json(400, {"error": "invalid_payload", "detail": str(exc)}); return
+                if result.get("duplicate"):
+                    self._json(200, {"status": "duplicate", "event_id": result.get("event_id")}); return
+                self._json(200, {"status": "accepted", "event_id": result.get("event_id"),
+                                 "account_id": result.get("account_id")}); return
+
             body = json.loads(raw or b"{}") if raw else {}
             if not isinstance(body, dict):
                 body = {}
@@ -758,6 +897,12 @@ class Handler(BaseHTTPRequestHandler):
                 ids = body.get("ids") if isinstance(body.get("ids"), list) else []
                 self._json(200, engine.enrich_rows([str(i) for i in ids if i]))
                 return
+            if path == "/api/my-book/enrich":
+                # Kick off (or report) background enrichment of the CSM's WHOLE book, so
+                # My Companies fills in health/usage/forecast across every owned account,
+                # not just the enriched-50 slice. Non-blocking; the UI polls progress.
+                self._json(200, engine.enrich_my_book())
+                return
             # Scaled Tech-Touch inbound triage + round-robin (Use Case 1). Accepts a batch
             # of already-normalised inbound items and an optional roster of pooled CSMs
             # ({name, available}); returns classified/routed tickets with round-robin
@@ -770,7 +915,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not roster:
                     # Live pooled roster with real availability (presence feed).
                     roster = engine.pooled_roster().get("roster", [])
-                self._json(200, _inbound.triage_inbound(items, roster=roster))
+                self._json(200, _inbound.triage_inbound(items, roster=roster,
+                                                        current_load=engine._live_pooled_load()))
                 return
             if path == "/api/inbound/hubspot":
                 # Option A intake seam: a HubSpot Service Hub ticket (or batch) lands here,
@@ -808,13 +954,65 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:  # noqa: BLE001
                     pass
                 roster = engine.pooled_roster().get("roster", [])
-                result = _inbound.triage_inbound(items, roster=roster)
+                result = _inbound.triage_inbound(items, roster=roster,
+                                                 current_load=engine._live_pooled_load())
                 # Persist the routed tickets so the pooled team sees a live queue.
                 try:
                     engine.record_inbound(result.get("tickets", []))
                 except Exception:  # noqa: BLE001
                     pass
                 self._json(200, result)
+                return
+            if path.startswith("/api/inbound/channel/"):
+                # Per-channel ingress (Tech Touch V3 UC1, 5-channel ingestion). The external
+                # system (Zendesk webhook, Slack workflow, mailbox connector, campaign reply,
+                # website form) posts its NATIVE payload to /api/inbound/channel/<channel>;
+                # the engine normalises it to the inbound-item shape, resolves the account,
+                # triages + round-robins, and persists into the pooled queue. Accepts a single
+                # payload or a list in 'payloads'/'items'. Honest no-op on an unknown channel
+                # or unparseable body (zero ingested, never fabricated).
+                channel = path[len("/api/inbound/channel/"):].strip("/")
+                VALID = {"zendesk_misroute", "slack_call", "mailbox",
+                         "campaign_reply", "high_intent_form"}
+                if channel not in VALID:
+                    self._json(404, {"error": "unknown channel",
+                                     "detail": f"expected one of {sorted(VALID)}"})
+                    return
+                payloads = (body.get("payloads") if isinstance(body.get("payloads"), list)
+                            else body.get("items") if isinstance(body.get("items"), list)
+                            else [body])
+                try:
+                    record_audit("inbound_channel", principal,
+                                 {"channel": channel, "count": len(payloads)})
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    self._json(200, engine.ingest_channel_items(channel, payloads))
+                except Exception as exc:  # noqa: BLE001
+                    self._json(500, {"error": str(exc)})
+                return
+            if path == "/api/inbound/ingest-hubspot":
+                # Option A PULL trigger: read recent HubSpot Service Hub tickets via the
+                # existing token, resolve to accounts, triage + round-robin, and persist
+                # into the pooled queue. Admin-only (it ingests across the whole book).
+                # FIRE-AND-FORGET: the pull can exceed the 60s edge timeout (full-book load
+                # + ticket fetch + association resolution), so we start it in the background
+                # and return 202 immediately; the UI polls /api/inbound/ingest-status and
+                # re-reads the queue. Also runs on boot warm.
+                if principal and principal.get("role") not in (None, "admin"):
+                    self._json(403, {"error": "admin only"}); return
+                try:
+                    wd = body.get("window_days")
+                    wd = int(wd) if wd is not None else None
+                except (TypeError, ValueError):
+                    wd = None
+                status = engine.start_inbound_ingest(window_days=wd)
+                try:
+                    record_audit("inbound_ingest_hubspot", principal,
+                                 {"window_days": wd, "already_running": status.get("already_running")})
+                except Exception:  # noqa: BLE001
+                    pass
+                self._json(202, status)
                 return
             if path == "/api/inbound/resolve":
                 tid = str(body.get("ticket_id") or body.get("id") or "").strip()
@@ -890,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/playbook/proposals":
                 try:
-                    self._json(201, _record_playbook_proposal(body))
+                    self._json(201, _record_playbook_proposal(body, principal))
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
@@ -900,10 +1098,43 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
+            if path == "/api/f2f-log":
+                # Log an executive F2F touchpoint. Owner-scoped (you can only log F2F on
+                # accounts you own); audited. This is an internal CS record (append-only),
+                # not an outbound action, so it writes on a valid request (no apply gate),
+                # but is still owner-scoped + audited like other mutations.
+                account_id = (body.get("account_id") or "").strip()
+                if not account_id:
+                    self._json(400, {"error": "account_id is required"}); return
+                if not engine.can_write_account(account_id):
+                    self._json(403, {"error": "forbidden",
+                                     "detail": "You can only log F2F meetings on accounts you own."})
+                    return
+                try:
+                    entry = engine.record_f2f(body, principal)
+                    try:
+                        record_audit("f2f_logged", principal,
+                                     {"account_id": account_id, "f2f_id": entry.get("f2f_id"),
+                                      "met_on": entry.get("met_on")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(201, entry)
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
             if path.startswith("/api/playbook/proposals/") and path.endswith("/review"):
                 proposal_id = path[len("/api/playbook/proposals/"):-len("/review")].strip("/")
                 try:
-                    self._json(200, _record_playbook_review(proposal_id, body))
+                    result = _record_playbook_review(proposal_id, body, principal)
+                    try:
+                        record_audit("playbook_review", principal,
+                                     {"proposal_id": proposal_id, "decision": result.get("decision"),
+                                      "status": result.get("status")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(200, result)
+                except PermissionError as exc:
+                    self._json(403, {"error": "forbidden", "detail": str(exc)})
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
@@ -1182,8 +1413,18 @@ def main() -> int:
     # Warm the live account cache in the background so the first request never waits on
     # the cold ~30s vendor fan-out (a slow origin response can make the edge time out).
     def _warm():
+        # Warm the whole-book roster + batched churn/metrics + TTL reports FIRST, so the
+        # subsequent portfolio() render finds a warm cache and shows the full customer book
+        # (not just the enriched ~50) and real health on the very first request.
+        engine.warm_reports()
         try:
             engine.portfolio()
+        except Exception:  # noqa: BLE001
+            pass
+        # Pull HubSpot Service Hub tickets into the pooled queue so the inbound inbox
+        # is populated on the first load after deploy (Option A). Best-effort.
+        try:
+            engine.warm_inbound_ingest()
         except Exception:  # noqa: BLE001
             pass
     import threading as _thr

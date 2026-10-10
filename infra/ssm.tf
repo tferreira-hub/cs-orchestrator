@@ -10,15 +10,16 @@
 
 locals {
   secret_params = {
-    "auth/session-secret"        = "AUTH_SECRET — session cookie HMAC key (openssl rand -base64 32)"
-    "auth/cognito-client-secret" = "AUTH_COGNITO_SECRET — Cognito app client secret"
-    "sources/hubspot-token"      = "HUBSPOT_TOKEN — HubSpot private app token"
-    "sources/stripe-key"         = "STRIPE_KEY — Stripe restricted read-only key (rk_live_...)"
-    "sources/pendo-key"          = "PENDO_KEY — Pendo integration key"
-    "sources/zendesk-token"      = "ZENDESK_TOKEN — Zendesk API token"
-    "sources/rocket-lane-key"    = "ROCKET_LANE_KEY — Rocket Lane CS Platform API key"
-    "sources/jiminny-key"        = "JIMINNY_KEY — Jiminny CS Platform API key"
-    "tableau/ca-secret-value"    = "TABLEAU_CA_SECRET_VALUE — Tableau connected-app secret (JWT signing key)"
+    "auth/session-secret"           = "AUTH_SECRET — session cookie HMAC key (openssl rand -base64 32)"
+    "auth/cognito-client-secret"    = "AUTH_COGNITO_SECRET — Cognito app client secret"
+    "sources/hubspot-token"         = "HUBSPOT_TOKEN — HubSpot private app token"
+    "sources/stripe-key"            = "STRIPE_KEY — Stripe restricted read-only key (rk_live_...)"
+    "sources/pendo-key"             = "PENDO_KEY — Pendo integration key"
+    "sources/zendesk-token"         = "ZENDESK_TOKEN — Zendesk API token"
+    "sources/rocket-lane-key"       = "ROCKET_LANE_KEY — Rocket Lane CS Platform API key"
+    "sources/jiminny-key"           = "JIMINNY_KEY — Jiminny CS Platform API key"
+    "tableau/ca-secret-value"       = "TABLEAU_CA_SECRET_VALUE — Tableau connected-app secret (JWT signing key)"
+    "sources/roi-ai-webhook-secret" = "ROI_AI_WEBHOOK_SECRET — shared HMAC secret for the ROI AI telemetry webhook"
   }
 }
 

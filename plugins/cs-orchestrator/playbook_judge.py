@@ -103,9 +103,18 @@ def judge(tasks: list[dict], accounts: dict[str, dict], suppressed: list[dict] |
             "sort the queue by priority ascending")
     for t in tasks:
         mn = MANDATE_MIN_PRIORITY.get(t.get("mandate"))
-        if mn is not None and t.get("priority", 99) < mn:
+        # The per-mandate minimum is a sanity floor, but a rule may be intentionally
+        # elevated above its band in the authoritative RULE_PRIORITY contract (e.g.
+        # onboarding_stagnation is MUST_USE yet runs at P3 because a stalled
+        # implementation is time-sensitive). Defer to the rule's own declared
+        # priority when it is stricter (lower) than the band floor, so the engine
+        # and judge never drift on an intentional elevation.
+        rid = t.get("rule_id")
+        declared = RULE_PRIORITY.get(rid)
+        effective_min = min(mn, declared) if (mn is not None and declared is not None) else mn
+        if effective_min is not None and t.get("priority", 99) < effective_min:
             add("priority_ordering", t.get("account"),
-                f"{t.get('mandate')} at priority {t.get('priority')} (min expected {mn})",
+                f"{t.get('mandate')} at priority {t.get('priority')} (min expected {effective_min})",
                 "align priority to the mandate band")
 
         trig = (t.get("trigger") or "").lower()

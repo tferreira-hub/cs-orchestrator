@@ -55,8 +55,34 @@ def _user_groups() -> list[str]:
     return [g.strip() for g in raw.split(",") if g.strip()]
 
 
+def _parse_groups(groups: str | None) -> list[str]:
+    """Tokenise the SSO `groups` claim into individual group names/ids.
+
+    The claim arrives from Cognito as either a bracketed, comma-separated string
+    (e.g. "[CS-Platform-Admins, CS-Users]") or a bare comma-separated list. We strip
+    the surrounding brackets and split on commas so each group is matched as a WHOLE
+    token — never as a raw substring of the concatenated claim."""
+    if not groups:
+        return []
+    s = groups.strip()
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1]
+    return [g.strip() for g in s.split(",") if g.strip()]
+
+
 def _in_any(groups: str | None, names: list[str]) -> bool:
-    return bool(groups) and any(n and n in groups for n in names)
+    """True if any configured `names` entry equals one of the user's groups.
+
+    Matching is on whole tokens (case-insensitive), NOT a raw substring of the
+    claim. Substring matching would over-grant: a configured admin group
+    "CS-Platform-Admins" would otherwise also match a user who is only in a
+    distinct group like "CS-Platform-Admins-ReadOnly". Both the Identity Center
+    group NAME and its UUID arrive as separate tokens, so exact-token matching
+    still handles the name-or-id case that ja-observe relies on."""
+    if not groups or not names:
+        return False
+    user_groups = {g.lower() for g in _parse_groups(groups)}
+    return any(n and n.strip().lower() in user_groups for n in names)
 
 
 def has_cs_access(email: str | None, groups: str | None = None) -> bool:
@@ -79,8 +105,8 @@ def has_cs_access(email: str | None, groups: str | None = None) -> bool:
 def resolve_role(email: str | None, groups: str | None = None) -> Role:
     """Resolve the CS role of a user who HAS access (call has_cs_access first).
     Admin group / break-glass email -> admin (all accounts); otherwise -> csm
-    (own book). Matched by substring like ja-observe (name and id both appear in
-    the SAML assertion)."""
+    (own book). Matched by whole-token group membership (name and id both appear
+    as separate tokens in the SAML assertion)."""
     if _in_any(groups, _admin_groups()):
         return ADMIN
     if email and email.strip().lower() in _admin_emails():

@@ -46,6 +46,22 @@ locals {
     CS_USER_GROUPS           = var.cs_user_group_ids
     AUTH_ADMIN_EMAILS        = var.auth_admin_emails
     REDSHIFT_ASSUME_ROLE_ARN = var.redshift_assume_role_arn
+    # Persist append-only state on the EFS volume mounted at /data so it survives
+    # task restarts/deploys (health history must accumulate for trend detection).
+    CS_HISTORY_FILE     = "/data/.cs-health-history.jsonl"
+    CS_F2F_LOG_FILE     = "/data/.cs-f2f-log.jsonl"
+    CS_ROI_AI_FILE      = "/data/.cs-roi-ai.jsonl"
+    CS_TASK_EVENTS_FILE = "/data/.cs-task-events.jsonl"
+    # Success plans + monthly-digest review state must also persist (the review workflow
+    # spans the 28th-1st and the 1st dispatch runs in a separate scheduler process).
+    CS_SUCCESS_PLANS_FILE  = "/data/.cs-success-plans.jsonl"
+    CS_DIGEST_REVIEWS_FILE = "/data/.cs-digest-reviews.jsonl"
+    # Pooled-CSM presence (OOO/available) must persist so the inbound round-robin and
+    # auto-reassignment keep working across task restarts and >1 ECS task.
+    CS_PRESENCE_FILE = "/data/.cs-presence.jsonl"
+    # Inbound/triage queue must persist so the pooled Inbox + Escalations survive restarts
+    # and multiple ECS tasks (append-only JSONL, latest-per-ticket-id wins on replay).
+    CS_INBOUND_FILE = "/data/.cs-inbound.jsonl"
   })
 
   container_environment = [for k, v in local.computed_env : { name = k, value = tostring(v) }]
@@ -60,6 +76,7 @@ locals {
     { name = "ROCKET_LANE_KEY", valueFrom = aws_ssm_parameter.secrets["sources/rocket-lane-key"].arn },
     { name = "JIMINNY_KEY", valueFrom = aws_ssm_parameter.secrets["sources/jiminny-key"].arn },
     { name = "TABLEAU_CA_SECRET_VALUE", valueFrom = aws_ssm_parameter.secrets["tableau/ca-secret-value"].arn },
+    { name = "ROI_AI_WEBHOOK_SECRET", valueFrom = aws_ssm_parameter.secrets["sources/roi-ai-webhook-secret"].arn },
   ]
 }
 
@@ -81,6 +98,7 @@ resource "aws_ecs_task_definition" "app" {
       portMappings    = [{ containerPort = var.container_port, protocol = "tcp" }]
       environment     = local.container_environment
       secrets         = local.container_secrets
+      mountPoints     = [{ sourceVolume = "data", containerPath = "/data", readOnly = false }]
       linuxParameters = { initProcessEnabled = true }
       logConfiguration = {
         logDriver = "awslogs"
@@ -99,6 +117,20 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+
+  # EFS-backed volume for persistent append-only state (see efs.tf). Uses the
+  # access point so the non-root container user owns the files, with TLS in transit.
+  volume {
+    name = "data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.data.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.data.id
+        iam             = "ENABLED"
+      }
+    }
+  }
 
   tags = local.tags
 }

@@ -36,7 +36,7 @@ def _today() -> date:
 
     Reads CS_TODAY (the demo/business-date anchor) when set, otherwise the real
     current date. This mirrors engine.py's date handling exactly, so the rules
-    engine and the platform's renewal forecast always agree on "today" — a module
+    engine and the platform's renewal forecast always agree on "today", a module
     constant resolved at import time would freeze the date for the life of a
     long-running server and, with CS_TODAY unset, silently use a stale default.
     """
@@ -76,10 +76,15 @@ RULE_CHURNED_RECOVERY = "churned_account_recovery"       # P2 MUST_PROTECT (Stra
 RULE_SCALED_EXCEPTION = "scaled_exception_escalation"    # P2 MUST_PROTECT (Scaled exception)
 RULE_DAY15_PAYMENT = "day15_payment_strategic"           # P2 MUST_PROTECT (Day-15 high-ARR Strategic)
 RULE_OVERDUE_RENEWAL = "overdue_renewal_escalation"      # P2 MUST_PROTECT (renewal past due)
+RULE_RENEWAL_SPONSOR_GAP = "renewal_exec_sponsor_gap"    # P2 MUST_PROTECT (T-90 window, no Exec Sponsor)
+RULE_SEAT_CONTRACTION = "seat_user_contraction"          # P2 MUST_PROTECT (sudden >20% seat/user drop, 14d)
+RULE_SUCCESS_PLAN_AT_RISK = "success_plan_at_risk"       # P2 MUST_PROTECT (committed goal off-track/overdue)
 RULE_EXPANSION_UTILIZATION = "expansion_license_utilization"   # P3 MUST_EXPAND
 RULE_EXPANSION_API_SURGE = "expansion_api_surge"              # P3 MUST_EXPAND
 RULE_EXPANSION_ADOPTION = "expansion_strong_adoption"        # P3 MUST_EXPAND
+RULE_EXPANSION_ROI_AI = "expansion_roi_ai_spike"             # P3 MUST_EXPAND (ROI AI adoption spike)
 RULE_RENEWAL_CADENCE = "proactive_renewal_cadence"       # P4 MUST_EXPAND (T-120/90/60/30)
+RULE_EXEC_F2F_CADENCE = "exec_sponsor_f2f_cadence"       # P4 MUST_EXPAND (tier-1 strategic exec F2F)
 RULE_ADOPTION_INTERVENTION = "adoption_onboarding_intervention"  # P5 MUST_USE
 RULE_ONBOARDING_STAGNATION = "onboarding_stagnation"     # P3 MUST_USE (stalled onboarding)
 RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategic)
@@ -88,17 +93,45 @@ RULE_CONTACT_HYGIENE = "contact_hygiene"                 # P5 MUST_USE (Strategi
 RULE_PRIORITY = {
     RULE_PREDICTIVE_RISK: 1,
     RULE_CHURNED_RECOVERY: 2,
+    RULE_SEAT_CONTRACTION: 2,
     RULE_SCALED_EXCEPTION: 2,
     RULE_DAY15_PAYMENT: 2,
     RULE_OVERDUE_RENEWAL: 2,
+    RULE_RENEWAL_SPONSOR_GAP: 2,
+    RULE_SUCCESS_PLAN_AT_RISK: 2,
     RULE_EXPANSION_UTILIZATION: 3,
     RULE_EXPANSION_API_SURGE: 3,
     RULE_EXPANSION_ADOPTION: 3,
+    RULE_EXPANSION_ROI_AI: 3,
     RULE_RENEWAL_CADENCE: 4,
+    RULE_EXEC_F2F_CADENCE: 4,
     RULE_ADOPTION_INTERVENTION: 5,
     RULE_ONBOARDING_STAGNATION: 3,
     RULE_CONTACT_HYGIENE: 5,
 }
+
+
+def _last_f2f_date(account_id: str) -> str | None:
+    """Most recent executive F2F date (ISO) for an account, read directly from the
+    append-only F2F log (CS_F2F_LOG_FILE) so the rules engine stays decoupled from the
+    platform engine (no circular import) and the judge's recompute reads identical state.
+    Returns None when there is no logged touchpoint (data-gap)."""
+    path = os.environ.get("CS_F2F_LOG_FILE") or str(
+        Path(__file__).resolve().parents[1] / ".cs-f2f-log.jsonl")
+    p = Path(path)
+    if not p.exists():
+        return None
+    latest: dict = {}
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("account_id") == account_id and row.get("f2f_id"):
+                latest[row["f2f_id"]] = row
+    except Exception:  # noqa: BLE001
+        return None
+    return max((r.get("met_on") for r in latest.values() if r.get("met_on")), default=None)
 
 
 def payment_disposition(segment: str, arr: int, stage: str) -> str:
@@ -214,7 +247,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
             drivers.append(churn_source)
         # A computed score (derived from live signals when no ML model is connected) is
         # NOT an ML churn prediction. It must not fire the Priority-1 Predictive Risk
-        # Playbook on its own — that threshold is calibrated for the ML model output.
+        # Playbook on its own, that threshold is calibrated for the ML model output.
         # Computed scores still contribute to other drivers (Pendo risk, Sev-1, etc.)
         # and to the health score, so the account remains visible when other signals fire.
         if score >= CHURN_RISK and churn_is_ml:
@@ -287,6 +320,72 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
             f"Hi {(_first_contact(hs,'Finance Contact') or f'{name} Finance team')}, our records show an invoice about {stripe.get('days_past_due')} days past due. I want to make sure there's no disruption to your service. Could you point me to the right person to resolve it?")
     # Scaled day_15_plus => auto-suspend, NO task (intentionally omitted)
 
+    # --- MUST_PROTECT: sudden seat/user contraction (V5 UC1/UC2) ---
+    # A sharp drop in active users (logins) or seats within a rolling 14-day window is a
+    # genuine churn-risk signal INDEPENDENT of the renewal date. Deterministic, computed
+    # from the health-history snapshots (logins from live Pendo today; seats from
+    # Entitlements when connected). Honest: fires only on real history; a data-gap yields
+    # no task. Not churned (that has its own recovery rule).
+    if churn_status != "churned":
+        contraction = None
+        try:  # guarded: history lives in platform/; absent in the bare dry-run CLI
+            import history as _history  # noqa: E402
+            contraction = _history.usage_contraction(account_id, window_days=14, drop_pct=20)
+        except Exception:  # noqa: BLE001
+            contraction = None
+        if contraction and contraction.get("contracted"):
+            risk_fired = True
+            drv = contraction.get("driver")
+            parts = []
+            if contraction.get("logins_pct_change") is not None and drv in ("logins", "both"):
+                parts.append(f"logins {contraction['logins_from']}->{contraction['logins_to']} ({contraction['logins_pct_change']}%)")
+            if contraction.get("seats_pct_change") is not None and drv in ("seats", "both"):
+                parts.append(f"seats {contraction['seats_from']}->{contraction['seats_to']} ({contraction['seats_pct_change']}%)")
+            add(RULE_SEAT_CONTRACTION, 2, "MUST_PROTECT",
+                "Sudden seat/user contraction (14d)",
+                {"driver": drv, "window_days": contraction.get("window_days"),
+                 "threshold_pct": contraction.get("threshold_pct"),
+                 "logins_pct_change": contraction.get("logins_pct_change"),
+                 "seats_pct_change": contraction.get("seats_pct_change"),
+                 "detail": "; ".join(parts),
+                 "_source": "entitlements-seats" if drv == "seats" else ("pendo-logins" if drv == "logins" else "pendo-logins+entitlements-seats")},
+                "Investigate the drop: confirm with the Primary Champion / Admin whether seats or "
+                "usage were intentionally reduced, assess renewal/churn risk, and log the finding.")
+
+    # --- MUST_PROTECT: success plan at risk (WoW: a committed customer goal that is
+    # off-track or past its deadline is a defensive signal). Reads the plans the engine
+    # attached to the account (engine._scoped_accounts). Not churned (own recovery rule).
+    if churn_status != "churned":
+        plans = a.get("success_plans") or []
+        at_risk = []
+        for sp in plans:
+            if not isinstance(sp, dict):
+                continue
+            status = str(sp.get("status") or "").strip().lower()
+            deadline = sp.get("deadline")
+            overdue_days = None
+            if deadline:
+                try:
+                    overdue_days = -_days_to(str(deadline)[:10])  # positive when past due
+                except Exception:  # noqa: BLE001
+                    overdue_days = None
+            is_off_track = status in ("off_track", "off track", "at_risk", "at risk", "behind", "red")
+            is_overdue = isinstance(overdue_days, int) and overdue_days > 0 and status not in ("done", "complete", "completed", "achieved")
+            if is_off_track or is_overdue:
+                reason = "status=" + (status or "unknown") if is_off_track else f"{overdue_days}d past deadline"
+                at_risk.append({"goal": sp.get("goal"), "metric": sp.get("metric"),
+                                "status": status or None, "deadline": deadline,
+                                "overdue_days": overdue_days if is_overdue else None, "reason": reason})
+        if at_risk:
+            risk_fired = True
+            goals = ", ".join([a["goal"] for a in at_risk if a.get("goal")][:3]) or f"{len(at_risk)} plan(s)"
+            add(RULE_SUCCESS_PLAN_AT_RISK, 2, "MUST_PROTECT",
+                "Success plan at risk",
+                {"plans_at_risk": len(at_risk), "goals": goals, "detail": "; ".join(a["reason"] for a in at_risk),
+                 "at_risk": at_risk, "_source": "cs-success-plans"},
+                "A committed success-plan goal is off-track or past its deadline: review the plan with "
+                "the Primary Champion / Admin, re-baseline or escalate, and update the plan status.")
+
     # --- MUST_EXPAND: expansion triggers (healthy only) ---
     healthy = score < 0.4 and not sev1 and churn_status != "churned"
     if segment == "Strategic" and healthy:
@@ -310,6 +409,18 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
                 {"pendo_adoption": usage.get("pendo_adoption"),
                  "days_since_last_visit": dsv},
                 "High product adoption on a healthy account, explore upsell / additional seats.")
+        else:
+            # ROI AI adoption spike (V5): high + rising ROI AI adoption on a healthy
+            # Strategic account is a genuine upsell cue. Only when the telemetry is present
+            # (data-gap otherwise).
+            roi = a.get("roi_ai", {}) or {}
+            roi_adopt = roi.get("adoption_score")
+            if (isinstance(roi_adopt, (int, float)) and roi_adopt >= 75
+                    and str(roi.get("trend") or "").lower() == "up"):
+                add(RULE_EXPANSION_ROI_AI, 3, "MUST_EXPAND", "Expansion trigger (ROI AI adoption spike)",
+                    {"roi_ai_adoption_score": roi_adopt, "roi_ai_trend": roi.get("trend"),
+                     "metric_date": roi.get("metric_date"), "_source": "roi-ai-webhook"},
+                    "ROI AI adoption is high and rising, explore upsell / additional modules.")
 
     # --- MUST_USE: adoption and onboarding ---
     adoption_drivers = []
@@ -330,7 +441,7 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
     # Protect is the owning intervention when the same inactivity signal is also
     # driving churn risk. Keep the queue actionable instead of duplicating work.
     # This block is Strategic-only (guarded below), so the task is always P5 with the
-    # Strategic adoption action — no Scaled branch is reachable here.
+    # Strategic adoption action, no Scaled branch is reachable here.
     if adoption_drivers and segment == "Strategic" and not risk_fired and stage != "day_15_plus":
         adoption_priority = 5
         adoption_action = ("Initiate the adoption playbook: review activation blockers, contact the Primary Champion / Admin, "
@@ -400,6 +511,52 @@ def evaluate(account_id: str, a: dict) -> tuple[list[dict], list[dict]]:
         if milestone and segment == "Strategic" and churn_status != "churned":
             add(RULE_RENEWAL_CADENCE, 4, "MUST_EXPAND", f"Proactive renewal {milestone[0]}",
                 {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"]}, milestone[1])
+            # UC2 edge case: a Strategic account inside the T-90 window (<=90 days to
+            # renewal, including overdue) MUST have an Executive Sponsor tagged. If not,
+            # fire an URGENT (P2 MUST_PROTECT) data-gap task — you cannot run an executive
+            # renewal motion with no economic buyer identified. Fires alongside the cadence
+            # task (different concern: the cadence is the motion, this is the data gap).
+            if dtr <= 90:
+                have_roles = {c.get("role") for c in hs.get("contacts", [])}
+                if "Executive Sponsor" not in have_roles:
+                    add(RULE_RENEWAL_SPONSOR_GAP, 2, "MUST_PROTECT",
+                        "Renewal at T-90 with no Executive Sponsor",
+                        {"days_to_renewal": dtr, "renewal_date": hs["renewal_date"],
+                         "milestone": milestone[0], "missing_role": "Executive Sponsor"},
+                        "Urgent: this Strategic account is within the T-90 renewal window with no "
+                        "Executive Sponsor (economic buyer) tagged. Identify and tag the Executive "
+                        "Sponsor in the CRM now so the renewal motion can run.")
+
+    # --- MUST_EXPAND: Executive Sponsor F2F cadence (V5 UC2) ---
+    # Tier-1 strategic accounts should have a periodic executive face-to-face. Fire when
+    # the account is tier-1 strategic (explicit customer_tier or a high-ARR proxy) and no
+    # F2F has been logged within the cadence window. Strategic-only + MUST_EXPAND keeps it
+    # consistent with the judge's segment_routing (Scaled MUST_EXPAND is a violation).
+    if segment == "Strategic" and churn_status != "churned":
+        _tier = str(hs.get("customer_tier") or "").strip().lower()
+        is_tier1 = _tier in ("tier-1", "tier 1", "tier1", "strategic-tier-1") or (arr or 0) >= HIGH_ARR
+        if is_tier1:
+            try:
+                cadence_days = int(os.environ.get("CS_F2F_CADENCE_DAYS", "90"))
+            except ValueError:
+                cadence_days = 90
+            last = _last_f2f_date(account_id)
+            overdue = True
+            if last:
+                try:
+                    overdue = (_today() - date.fromisoformat(last)).days > cadence_days
+                except ValueError:
+                    overdue = True
+            if overdue:
+                sponsor = _first_contact(hs, "Executive Sponsor")
+                add(RULE_EXEC_F2F_CADENCE, 4, "MUST_EXPAND", "Executive Sponsor F2F due",
+                    {"last_f2f": last, "cadence_days": cadence_days,
+                     "executive_sponsor": sponsor,
+                     "_source": "f2f-log", "has_sponsor": bool(sponsor)},
+                    (f"Coordinate and log an executive face-to-face with {sponsor} (CS leadership "
+                     "involved) for this tier-1 strategic account." if sponsor else
+                     "Tag an Executive Sponsor and coordinate an executive face-to-face for this "
+                     "tier-1 strategic account; log the meeting outcome."))
 
     # --- MUST_USE: contact hygiene gate (WoW §5: roles maintained on ALL accounts) ---
     have = {c.get("role") for c in hs.get("contacts", [])}
@@ -434,7 +591,16 @@ def orchestrate(account_ids: list[str] | None = None) -> dict:
         payment = payment_automation_status(aid, account)
         if payment:
             automations.append(payment)
-    all_tasks.sort(key=lambda t: t["priority"])
+    # Daily queue order: priority band first (P1 Protect ... P5 Use), then within a band
+    # the highest-ARR account first so a CSM working top-down hits the most valuable /
+    # most-at-risk revenue first. Account name is the final tie-break for stable, testable
+    # ordering (two equal-ARR tasks never reorder between runs).
+    def _arr_of(t):
+        try:
+            return float(accounts.get(t.get("account_id"), {}).get("hubspot", {}).get("arr_usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    all_tasks.sort(key=lambda t: (t["priority"], -_arr_of(t), str(t.get("account", ""))))
     result = {"reviewed": len(ids), "tasks": all_tasks, "suppressed": all_suppressed,
               "automations": automations}
     # Feedback sensor: judge the produced queue against the WoW rules.

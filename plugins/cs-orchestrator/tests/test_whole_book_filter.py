@@ -90,6 +90,10 @@ def _patch_portfolio(monkeypatch, roster, *, live=True):
         def list_all_companies(self, limit=None, cached_only=False):
             return list(roster)
 
+        def _owner_name(self, oid):
+            # Mirror the live adapter: resolve a HubSpot owner id to a CSM name.
+            return {"owner-1": "Owner One", "owner-2": "Owner Two"}.get(str(oid))
+
     monkeypatch.setattr(engine._src, "HUBSPOT", _FakeHS())
     engine.set_principal(None)  # open mode -> no owner scoping narrows the enriched slice
     return engine
@@ -117,6 +121,11 @@ def test_merge_adds_roster_rows_and_dedupes_enriched(monkeypatch):
     assert by_id["au1-enriched"]["enriched"] is True
     assert by_id["au1-managed"]["enriched"] is False
     assert by_id["au1-pooled"]["enriched"] is False
+    # Roster rows resolve the HubSpot owner id to a CSM NAME (not the numeric id), so the
+    # Owner filter shows names. owner-2 -> "Owner Two"; a null owner stays None.
+    assert by_id["au1-managed"]["csm_owner"] == "Owner Two"
+    assert by_id["au1-managed"]["csm_owner_id"] == "owner-2"
+    assert by_id["au1-pooled"]["csm_owner"] is None
     # Roster rows carry a cohort for the global filter.
     assert by_id["au1-managed"]["cohort"] == "managed"
     assert by_id["au1-pooled"]["cohort"] == "pooled"
@@ -223,4 +232,49 @@ def test_cached_only_serves_warm_cache(monkeypatch):
     out = hs.list_all_companies(cached_only=True)
     assert out == warm_rows
     assert calls["http"] == 0
+    delattr(sources.HubSpot, "_full_roster_cache")
+
+
+def test_scan_fetches_active_stage_before_churned(monkeypatch):
+    """The Tier-1 scan must page the ACTIVE 'customer' stage fully BEFORE the churned
+    '20251280' stage, so active accounts are never crowded out of a bounded/partial
+    roster by the much larger churned bucket. We mock http_post per stage and assert
+    (a) each stage is queried with an EQ filter in order, and (b) under a tight limit
+    the active rows win and churned is truncated."""
+    from adapters import sources
+
+    hs = sources.HubSpot()
+    monkeypatch.setattr(hs, "live", lambda: True)
+    monkeypatch.delenv("CS_HUBSPOT_LIFECYCLE_STAGES", raising=False)
+    if hasattr(sources.HubSpot, "_full_roster_cache"):
+        delattr(sources.HubSpot, "_full_roster_cache")
+
+    stage_order = []
+
+    def _post(url, headers, body, *a, **k):
+        f = body["filterGroups"][0]["filters"][0]
+        assert f["operator"] == "EQ"          # one stage at a time, never IN
+        stage = f["value"]
+        if not body.get("after"):
+            stage_order.append(stage)
+        # 3 'customer' rows, then (would-be) 3 churned rows, single page each.
+        if stage == "customer":
+            return {"results": [{"id": f"c{i}", "properties": {"lifecyclestage": "customer",
+                     "account_id": f"AU1-{i}", "name": f"Active {i}"}} for i in range(3)]}
+        return {"results": [{"id": f"x{i}", "properties": {"lifecyclestage": "20251280",
+                 "name": f"Churned {i}"}} for i in range(3)]}
+
+    monkeypatch.setattr(sources.config, "http_post", _post)
+
+    # Full scan: active first, then churned.
+    rows = hs.list_all_companies(limit=5000)
+    assert stage_order == ["customer", "20251280"]       # active queried first
+    assert [r["lifecycle_stage"] for r in rows[:3]] == ["Customer", "Customer", "Customer"]
+    delattr(sources.HubSpot, "_full_roster_cache")
+
+    # Tight limit: active fills it, churned is truncated out entirely.
+    stage_order.clear()
+    rows = hs.list_all_companies(limit=3)
+    assert len(rows) == 3
+    assert all(r["lifecycle_stage"] == "Customer" for r in rows)   # churned crowded OUT, not active
     delattr(sources.HubSpot, "_full_roster_cache")

@@ -216,6 +216,21 @@ variable "app_environment" {
     CS_PENDO_ACTIVITY   = "1"
     CS_STALE_REVALIDATE = "1"
     CS_CACHE_TTL        = "600"
+    # Log source-adapter failures (e.g. Redshift permission-denied, vendor errors) to
+    # stderr/CloudWatch. Default ON: a silent data-source failure is otherwise invisible
+    # and was the reason a missing warehouse GRANT took so long to diagnose (every account
+    # scorecard rendered empty with no error anywhere). Cheap, non-sensitive (no payloads).
+    CS_LOG_SOURCE_ERRORS = "1"
+    # Enriched/health-scored roster size: how many accounts get the full multi-vendor
+    # fan-out + a computable health score. The cold-cache build is SYNCHRONOUS on the
+    # first request (all_accounts()), so this value directly bounds first-load latency:
+    # each account = ~8 live vendor calls at CS_FETCH_WORKERS concurrency. 150 made the
+    # cold build too slow and the dashboard hung on "Checking sources"; 50 keeps real
+    # coverage well above the old default of 25 while cold-start stays responsive.
+    CS_ROSTER_LIMIT = "50"
+    # Parallelism for the per-account vendor fan-out (cold build + refresh). Raised from
+    # the code default of 6 to shorten build time without hammering vendor rate limits.
+    CS_FETCH_WORKERS = "10"
     # Stripe is accessed with the live SECRET key currently in SSM; permit it until a
     # restricted read-only key (rk_...) is issued. Needed by the Payment Risk Report and
     # any live dunning signals. SECURITY: prefer rotating STRIPE_KEY to an rk_ key and

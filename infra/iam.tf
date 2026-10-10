@@ -76,6 +76,23 @@ data "aws_iam_policy_document" "task" {
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
     resources = ["arn:aws:ssm:${var.region}:${var.account_id}:parameter/${local.name}/*"]
   }
+
+  # Mount + read/write the EFS data volume (persistent append-only state), scoped to
+  # this file system and only via its access point (transit encryption enforced).
+  statement {
+    sid = "EfsDataAccess"
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.data.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "elasticfilesystem:AccessPointArn"
+      values   = [aws_efs_access_point.data.arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {

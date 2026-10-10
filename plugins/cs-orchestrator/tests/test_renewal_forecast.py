@@ -46,7 +46,7 @@ def test_forecast_churn_risk_from_ml_score():
     fc = engine.renewal_forecast(acct, health, expansion_qualified=False)
     assert fc["applicable"] is True
     assert fc["label"] == "Churn Risk"
-    assert fc["rationale"].startswith("Churn Risk —")
+    assert fc["rationale"].startswith("Churn Risk,")
     # Grounded: the rationale is built from real health reasons (traceable to engine).
     assert any(r in fc["rationale"] for r in health["reasons"])
 
@@ -109,7 +109,7 @@ def test_forecast_plain_renewal():
     health = engine.health_score(acct)
     fc = engine.renewal_forecast(acct, health, expansion_qualified=False)
     assert fc["label"] == "Renewal"
-    assert fc["rationale"].startswith("Renewal —")
+    assert fc["rationale"].startswith("Renewal,")
 
 
 # --------------------------------------------------------------------------- #
@@ -135,3 +135,24 @@ def test_forecast_never_fabricates_numbers():
     # The percentage shown in evidence must equal the engine's own reason figure.
     assert "85%" in " ".join(fc["evidence"])
     assert all(isinstance(e, str) for e in fc["evidence"])
+
+
+def test_forecast_not_applicable_for_insane_renewal_date():
+    """Corrupt HubSpot renewal dates (year 1314/1700, the 1970 epoch, or thousands of days
+    overdue) are data-entry errors, not genuine renewals. The forecast must treat them as
+    not-applicable so they never surface as '260,334 days overdue' upcoming renewals."""
+    import engine
+    for bad in ("1970-01-01", "1700-01-01", "1314-01-01", "1900-06-30"):
+        acct = _account()
+        acct["hubspot"]["renewal_date"] = bad
+        health = engine.health_score(acct)
+        fc = engine.renewal_forecast(acct, health)
+        assert fc["applicable"] is False, f"{bad} should be rejected as insane"
+    # And the sanity helper itself.
+    assert engine._renewal_date_is_sane("1970-01-01") is False
+    assert engine._renewal_date_is_sane("1314-01-01") is False
+    # A plausible near-future renewal is accepted.
+    import os
+    from datetime import date, timedelta
+    soon = (date.today() + timedelta(days=90)).isoformat()
+    assert engine._renewal_date_is_sane(soon) is True
