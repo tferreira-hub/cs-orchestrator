@@ -2893,7 +2893,10 @@ class AccountPerformance:
         if "icp" in pg_dims:
             where.append("j.icp = t.icp")
         if "account_type" in pg_dims and bt is None:
-            where.append("j.account_type = t.account_type")
+            # Null-safe: when the target has no dim row (account_type NULL), don't let the
+            # match collapse to empty — fall back to matching on the other dimensions (icp)
+            # so performance-only accounts still get a real cohort.
+            where.append("(j.account_type = t.account_type OR t.account_type IS NULL)")
         if match_target_size:
             where.append("j.size_band = t.size_band")
         # Explicit overrides (take precedence over the matching auto dimension).
@@ -2933,7 +2936,7 @@ class AccountPerformance:
         ),
         joined AS (
           SELECT p.*, d.account_type, ({self._SIZE_BAND_CASE}) AS size_band
-          FROM perf p JOIN dim d USING (ja_account)
+          FROM perf p LEFT JOIN dim d USING (ja_account)
         ),
         target AS (SELECT icp, account_type, size_band FROM joined WHERE ja_account = :ref)
         SELECT j.ja_account, j.jobs_created, j.ads_posted, j.board_usage, j.applications,
