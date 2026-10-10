@@ -1090,12 +1090,103 @@ body.dock-open .app{margin-right:420px;transition:margin-right .22s ease}
 .acct-summary-stats .s{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:var(--surface)}
 .acct-summary-stats .s .l{font-size:.74em;text-transform:uppercase;letter-spacing:.03em;color:var(--ink2)}
 .acct-summary-stats .s .v{font-size:1.3em;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+/* ── v2 executive redesign ───────────────────────────────────────── */
+/* Executive header */
+.acct-exec{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+.acct-exec-l{min-width:0;flex:1 1 420px}
+.acct-exec-title{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.acct-exec-title h1{font-size:1.72em;font-weight:800;color:var(--ink);line-height:1.1;letter-spacing:-.02em}
+.acct-exec-id{color:var(--ink2);font-size:.9em;margin-top:5px;font-variant-numeric:tabular-nums}
+.acct-exec-id b{color:var(--ink)}
+.acct-chip{display:inline-flex;align-items:center;gap:7px;font-size:.74em;font-weight:800;letter-spacing:.03em;text-transform:uppercase;border-radius:999px;padding:5px 13px;line-height:1}
+.acct-chip .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.acct-chip.good{color:var(--green);background:var(--greenbg)}
+.acct-chip.bad{color:var(--red);background:var(--redbg)}
+.acct-chip.warn{color:var(--amber);background:var(--amberbg)}
+.acct-chip.neutral{color:var(--ink2);background:#eef1f6}
+.acct-exec-r{text-align:right;flex:0 0 auto}
+.acct-exec-gen{color:var(--muted);font-size:.74em;margin-top:9px}
+/* Fact tiles row */
+.acct-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px;margin-top:18px}
+.acct-fact{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:linear-gradient(180deg,#fcfdff,#fafbfe)}
+.acct-fact .l{font-size:.68em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.acct-fact .v{font-size:1.08em;font-weight:800;color:var(--ink);margin-top:4px;line-height:1.2;font-variant-numeric:tabular-nums}
+.acct-fact .v.sm{font-size:.94em;font-weight:700}
+.acct-fact .v .chg{font-size:.72em;font-weight:800;margin-left:5px}
+.acct-fact .v .chg.up{color:var(--green)}.acct-fact .v .chg.down{color:var(--red)}
+.acct-fact .v.na{color:var(--muted);font-weight:600;font-size:.9em}
+.acct-fact .v .na{color:var(--muted);font-weight:600}
+/* Hero at-a-glance band */
+.acct-hero{display:grid;grid-template-columns:minmax(230px,300px) 1fr;gap:22px;align-items:stretch}
+@media(max-width:860px){.acct-hero{grid-template-columns:1fr}}
+.acct-hero-gauge{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:1px solid var(--line);border-radius:14px;padding:20px;background:linear-gradient(180deg,#fcfdff,#f6f8fe)}
+.acct-hero-gauge .ring{position:relative;display:flex;align-items:center;justify-content:center}
+.acct-hero-gauge .ring .dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.acct-hero-gauge .ring .dc b{font-size:2.3em;font-weight:800;font-variant-numeric:tabular-nums}
+.acct-hero-gauge .ring .dc .u{font-size:.62em;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:4px}
+.acct-hero-gauge .cap{font-size:.78em;color:var(--ink2);text-align:center;font-weight:600}
+.acct-hero-gauge .cap b{color:var(--ink)}
+.acct-hero-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.acct-kpi{position:relative;border:1px solid var(--line);border-radius:14px;padding:16px 17px;background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.acct-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--brand)}
+.acct-kpi.g::before{background:var(--green)}.acct-kpi.a::before{background:var(--amber)}.acct-kpi.r::before{background:var(--red)}
+.acct-kpi .k-l{font-size:.72em;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink2)}
+.acct-kpi .k-v{font-size:1.9em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.05;margin-top:7px}
+.acct-kpi .k-v.na{font-size:1.02em;font-weight:600;color:var(--muted)}
+.acct-kpi .k-s{font-size:.76em;color:var(--muted);margin-top:6px}
+.acct-kpi .k-s b{color:var(--ink2);font-weight:700}
+/* Section group heading */
+.acct-group-h{display:flex;align-items:center;gap:10px;margin:4px 2px 2px;font-size:.78em;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.acct-group-h::after{content:"";flex:1;height:1px;background:var(--line)}
+/* Performance card refinements (v2) */
+.acct-card .acct-rankpill.mid{background:linear-gradient(135deg,var(--sky),#5a86f5)}
+/* Paired comparison chart (v2, SVG grid) */
+.acct-cmp{width:100%}
+.acct-cmp-legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:.78em;color:var(--ink2);margin-bottom:14px}
+.acct-cmp-legend .k{display:inline-flex;align-items:center;gap:7px}
+.acct-cmp-legend .k i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.acct-cmp-legend .cohort{margin-left:auto;color:var(--muted);font-weight:600}
+.acct-cmp svg{display:block;width:100%}
+.acct-cmp .cmp-empty{display:flex;align-items:center;gap:10px;padding:22px 2px}
+/* Usage cards (v2) */
+.acct-usage{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:14px}
+.acct-ucard{border:1px solid var(--line);border-radius:13px;padding:15px 16px;background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+.acct-ucard .u-l{font-size:.74em;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ink2)}
+.acct-ucard .u-v{font-size:1.6em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+.acct-ucard .u-s{font-size:.74em;color:var(--muted)}
+.acct-ucard .u-bar{height:5px;border-radius:999px;background:#eef1f6;overflow:hidden;margin-top:6px}
+.acct-ucard .u-bar>i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--brand),var(--brand2))}
+.acct-ucard.zero .u-v{color:var(--muted)}
+/* Signals cards (v2) — matching usage grid */
+.acct-signals{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.acct-sigc{border:1px solid var(--line);border-radius:13px;padding:15px 16px;background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px}
+.acct-sigc .s-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.acct-sigc .s-l{font-size:.82em;font-weight:700;color:var(--ink)}
+.acct-sigc .s-badge{display:inline-flex;align-items:center;gap:6px;font-size:.72em;font-weight:800;letter-spacing:.02em;border-radius:999px;padding:4px 10px}
+.acct-sigc .s-badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.acct-sigc .s-badge.on{color:var(--green);background:var(--greenbg)}
+.acct-sigc .s-badge.off{color:var(--ink2);background:#eef1f6}
+.acct-sigc .s-badge.nc{color:var(--muted);background:#f6f8fb;border:1px dashed #cbd2df}
+.acct-sigc .s-note{font-size:.76em;color:var(--muted)}
+/* Tickets strip (v2) */
+.acct-tick{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:var(--surface)}
+.acct-tick .t{text-align:center;padding:16px 10px;border:0;border-right:1px solid var(--line)}
+.acct-tick .t:last-child{border-right:0}
+.acct-tick .t .v{font-size:1.7em;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+.acct-tick .t .v.g{color:var(--green)}.acct-tick .t .v.r{color:var(--red)}
+.acct-tick .t .l{font-size:.72em;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2);margin-top:6px}
+@media(max-width:560px){.acct-tick{grid-template-columns:repeat(2,1fr)}.acct-tick .t:nth-child(2){border-right:0}}
+/* Honest empty states */
+.acct-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px 20px;border:1.5px dashed #d3dae6;border-radius:14px;background:repeating-linear-gradient(135deg,#fbfcfe 0 14px,#f4f7fb 14px 28px);text-align:center;width:100%}
+.acct-empty .ic{width:40px;height:40px;border-radius:11px;background:#eef1f6;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.1em}
+.acct-empty .et{font-size:.9em;font-weight:700;color:var(--ink2)}
+.acct-empty .es{font-size:.8em;color:var(--muted);max-width:380px;line-height:1.5}
 @media print{
   body *{visibility:hidden!important}
   #acct-scorecard, #acct-scorecard *{visibility:visible!important}
   #acct-scorecard{position:absolute;left:0;top:0;width:100%;padding:0;margin:0}
   .sidebar,.topbar,.acct-pick,.acct-toolbar,.acct-sched-wrap,#globalFilterMount,.agent-dock,.acct-no-print{display:none!important}
-  .acct-card,.acct-sig,.acct-tick .t,.acct-peeravg .pa,.acct-summary-stats .s,.panel{box-shadow:none!important;break-inside:avoid}
+  .acct-card,.acct-sig,.acct-tick .t,.acct-peeravg .pa,.acct-summary-stats .s,.acct-kpi,.acct-ucard,.acct-sigc,.acct-fact,.acct-hero-gauge,.panel{box-shadow:none!important;break-inside:avoid}
   .acct-grid{grid-template-columns:repeat(4,1fr)}
   @page{margin:14mm}
 }
@@ -2576,7 +2667,7 @@ function _acctResetFilters(){
 
 function _acctDeltaHtml(delta,lowerIsBetter){
   if(!delta||delta.value===null||delta.value===undefined||delta.previous===null||delta.previous===undefined)
-    return '<div class="acct-delta flat"><span class="vp">Vs. previous period</span> No prior data</div>';
+    return '<div class="acct-delta flat"><span class="vp">Vs. previous</span> No prior data</div>';
   const dv=delta.delta;
   const pct=(delta.pct_change===null||delta.pct_change===undefined)?null:delta.pct_change;
   let dir='flat', arrow='→';
@@ -2587,17 +2678,34 @@ function _acctDeltaHtml(delta,lowerIsBetter){
   if(lowerIsBetter&&dir==='up') cls='inv-up';
   else if(lowerIsBetter&&dir==='down') cls='inv-down';
   const pctTxt=(pct===null)?'' : ' ('+(pct>0?'+':'')+pct.toFixed(1)+'%)';
-  return '<div class="acct-delta '+cls+'"><span class="vp">Vs. Prev</span> '+arrow+' '+(dv>0?'+':'')+_acctFmt(dv,delta._float)+pctTxt+'</div>';
+  return '<div class="acct-delta '+cls+'"><span class="vp">Vs. prev</span> '+arrow+' '+(dv>0?'+':'')+_acctFmt(dv,delta._float)+pctTxt+'</div>';
 }
 
 // Percentile band colour: >=66 green, 33–65 amber, <33 red.
 function _acctPctColor(p){ return p>=66?'#0ca678':(p>=33?'#d98b0b':'#e5484d'); }
 
+// Status chip health class from account_status (Churned=red, Active=green, else neutral/warn).
+function _acctStatusClass(s){
+  const t=String(s||'').toLowerCase();
+  if(!t) return 'neutral';
+  if(t.indexOf('churn')>=0||t.indexOf('cancel')>=0||t.indexOf('lost')>=0||t.indexOf('suspend')>=0) return 'bad';
+  if(t.indexOf('active')>=0||t.indexOf('live')>=0||t.indexOf('healthy')>=0) return 'good';
+  if(t.indexOf('risk')>=0||t.indexOf('trial')>=0||t.indexOf('onboard')>=0||t.indexOf('pending')>=0) return 'warn';
+  return 'neutral';
+}
+// Honest empty-state block (clean dashed skeleton + plain-English note). Looks
+// intentional and never fabricates data.
+function _acctEmpty(icon,title,sub){
+  return '<div class="acct-empty"><div class="ic">'+icon+'</div>'+
+    '<div class="et">'+escapeHtml(title)+'</div>'+
+    (sub?'<div class="es">'+escapeHtml(sub)+'</div>':'')+'</div>';
+}
+
 // Percentile line + slim banded bar (median tick at 50) for a metric card. Honest empty
 // state (dashed skeleton) when the metric is not ranked in the cohort.
 function _acctPctBlock(b){
   if(!b||b.percentile===null||b.percentile===undefined){
-    return '<div class="acct-pct"><div class="pct-na">Not ranked yet</div><div class="acct-skel"></div></div>';
+    return '<div class="acct-pct"><div class="pct-na">Not ranked in cohort</div><div class="acct-skel"></div></div>';
   }
   const pct=Math.max(0,Math.min(100,b.percentile));
   const col=_acctPctColor(pct);
@@ -2673,104 +2781,146 @@ function _acctFilterBar(d){
     '</div>';
 }
 
-// ── Chart builders (inline SVG, no external libraries) ─────────────────────
-// Honest by construction: a null value renders a dashed skeleton; an absent benchmark
-// renders an explicit empty state rather than a fabricated zero. Produces (a) an
-// at-a-glance benchmark-summary donut and (b) a grouped horizontal comparison chart.
-function _acctCharts(d){
-  const perf=d.performance||{};
-  const metrics=perf.metrics||{};
+// ── Hero at-a-glance band: overall-percentile radial + big KPI tiles ───────
+// Honest by construction: a null value renders a plain 'No data' tile; an unranked
+// account shows an explicit N/A gauge rather than a fabricated score.
+function _acctHero(d){
+  const id=d.identity||{};
   const bench=d.benchmark||{};
   const peers=(bench.cohort&&bench.cohort.peers)||0;
-  const brand=getComputedStyle(document.documentElement).getPropertyValue('--brand').trim()||'#5b5bf0';
-  const line=getComputedStyle(document.documentElement).getPropertyValue('--line').trim()||'#eaeef4';
-  const muted='#98a2b3';
-  const fmt=(v,fl)=>_acctFmt(v,fl);
-
-  // (a) At-a-glance benchmark summary donut: average percentile across ranked metrics.
-  //     Only rendered when at least one metric is ranked (never a fabricated gauge).
-  const ranked=ACCT_METRICS.map(m=>bench[m.key])
-    .filter(b=>b&&b.percentile!==null&&b.percentile!==undefined);
-  let summaryPanel='';
+  const ranked=ACCT_METRICS.map(m=>bench[m.key]).filter(b=>b&&b.percentile!==null&&b.percentile!==undefined);
+  // Overall percentile radial (average percentile across ranked metrics).
+  let gauge;
   if(ranked.length){
     const avgPct=Math.round(ranked.reduce((s,b)=>s+b.percentile,0)/ranked.length);
     const col=_acctPctColor(avgPct);
     const top=ranked.filter(b=>b.rank===1).length;
-    const util=(d.identity&&d.identity.users&&d.identity.users.utilization_pct!=null)?d.identity.users.utilization_pct:null;
-    const donut=svgDonut([{value:avgPct,color:col},{value:100-avgPct,color:'#eef1f6'}],{size:132,thickness:16});
-    const stat=(l,v)=>'<div class="s"><div class="l">'+l+'</div><div class="v">'+v+'</div></div>';
-    summaryPanel='<div class="panel"><div class="head"><h2>Benchmark Summary</h2>'+
-      '<span class="note">Average percentile across '+ranked.length+' ranked metric'+(ranked.length===1?'':'s')+
-      (peers?(' · cohort of '+peers+' peers'):'')+'</span></div>'+
-      '<div class="body pad"><div class="acct-summary">'+
-        '<div class="acct-donut">'+donut+'<div class="dc"><b style="color:'+col+'">'+avgPct+'</b><span>avg pctile</span></div></div>'+
-        '<div class="acct-summary-stats">'+
-          stat('Metrics ranked #1', top+' / '+ranked.length)+
-          stat('Metrics ranked', ranked.length+' / '+ACCT_METRICS.length)+
-          stat('Peer cohort', peers.toLocaleString()+' peer'+(peers===1?'':'s'))+
-          (util!=null?stat('User utilisation', util+'%'):'')+
-        '</div>'+
-      '</div></div></div>';
-  }
-
-  // (b) Grouped horizontal comparison bars (this account vs peer average), normalised
-  //     per metric so each row is readable on its own scale.
-  let cmpInner;
-  if(!perf.connected){
-    cmpInner='<div class="acct-chart-empty"><span class="acct-nc-chip">Performance data not available for this account</span></div>';
-  }else{
-    const legend='<div class="acct-cmp-legend">'+
-      '<span class="k"><i style="background:'+brand+'"></i>This account</span>'+
-      '<span class="k"><i style="background:'+muted+'"></i>Peer average</span>'+
-      (peers?'<span class="k" style="margin-left:auto">'+peers.toLocaleString()+' peers in cohort</span>':'')+
+    const donut=svgDonut([{value:avgPct,color:col},{value:100-avgPct,color:'#eef1f6'}],{size:150,thickness:17});
+    gauge='<div class="acct-hero-gauge">'+
+      '<div class="ring">'+donut+'<div class="dc"><b style="color:'+col+'">'+avgPct+'</b><span class="u">Overall pctile</span></div></div>'+
+      '<div class="cap">Across <b>'+ranked.length+'</b> ranked metric'+(ranked.length===1?'':'s')+
+        (top?(' · <b>'+top+'</b> ranked #1'):'')+'</div>'+
     '</div>';
-    const rows=ACCT_METRICS.map(m=>{
-      const you=metrics[m.key];
-      const b=bench[m.key]||null;
+  }else{
+    gauge='<div class="acct-hero-gauge">'+
+      '<div class="ring">'+svgDonut([{value:1,color:'#eef1f6'}],{size:150,thickness:17})+
+        '<div class="dc"><b style="color:var(--muted);font-size:1.3em">N/A</b><span class="u">Overall pctile</span></div></div>'+
+      '<div class="cap" style="color:var(--muted)">No ranked metrics in cohort</div>'+
+    '</div>';
+  }
+  // KPI tiles.
+  const kpi=(cls,l,v,s,na)=>'<div class="acct-kpi '+cls+'"><div class="k-l">'+l+'</div>'+
+    '<div class="k-v'+(na?' na':'')+'">'+v+'</div>'+(s?'<div class="k-s">'+s+'</div>':'')+'</div>';
+  const arr=(id.arr_usd===null||id.arr_usd===undefined)?null:Number(id.arr_usd);
+  const u=id.users||{};
+  const active=Number(u.active);
+  const chg=Number(u.change);
+  const util=(u.utilization_pct!=null)?u.utilization_pct:null;
+  const arrTile=arr===null
+    ? kpi('','Annual recurring revenue','No data','ARR not available',true)
+    : kpi('','Annual recurring revenue','$'+arr.toLocaleString(),'USD · contract value');
+  let usersTile;
+  if(!Number.isFinite(active)){
+    usersTile=kpi('','Active users','No data','User counts not available',true);
+  }else{
+    const chgTxt=Number.isFinite(chg)&&chg!==0
+      ? '<span style="color:'+(chg>0?'var(--green)':'var(--red)')+';font-weight:800;font-size:.6em;margin-left:6px">'+(chg>0?'▲ +':'▼ ')+chg.toLocaleString()+'</span>'
+      : '';
+    const sub=(u.committed!=null?('of <b>'+Number(u.committed).toLocaleString()+'</b> committed'):'')+
+      (util!=null?(' · <b>'+util+'%</b> utilised'):'');
+    usersTile='<div class="acct-kpi '+(Number.isFinite(chg)&&chg<0?'r':'g')+'"><div class="k-l">Active users</div>'+
+      '<div class="k-v">'+active.toLocaleString()+chgTxt+'</div>'+
+      (sub?'<div class="k-s">'+sub+'</div>':'')+'</div>';
+  }
+  let healthTile;
+  if(ranked.length){
+    const avgPct=Math.round(ranked.reduce((s,b)=>s+b.percentile,0)/ranked.length);
+    const cls=avgPct>=66?'g':(avgPct>=33?'a':'r');
+    const word=avgPct>=66?'Strong':(avgPct>=33?'Mixed':'Underperforming');
+    healthTile=kpi(cls,'Benchmark health',word,'<b>'+avgPct+'th</b> avg percentile');
+  }else{
+    healthTile=kpi('','Benchmark health','No data','Not ranked in a cohort',true);
+  }
+  const cohortTile=peers
+    ? kpi('','Peer cohort',peers.toLocaleString(),'comparable '+(id.account_type?escapeHtml(id.account_type).toLowerCase():'')+' accounts')
+    : kpi('','Peer cohort','No data','No comparable cohort',true);
+  const kpis='<div class="acct-hero-kpis">'+arrTile+usersTile+healthTile+cohortTile+'</div>';
+  return '<div class="panel"><div class="head"><h2>At a glance</h2>'+
+    '<span class="note">Executive summary across revenue, adoption and benchmark standing</span></div>'+
+    '<div class="body pad"><div class="acct-hero">'+gauge+kpis+'</div></div></div>';
+}
+
+// ── Account vs Peer Average: professional paired horizontal bars (inline SVG) ──
+// Gridlines, legend and value labels. A null metric renders a dashed skeleton row;
+// an absent cohort renders an explicit empty state rather than a fabricated zero.
+function _acctCompareChart(d){
+  const perf=d.performance||{};
+  const metrics=perf.metrics||{};
+  const bench=d.benchmark||{};
+  const peers=(bench.cohort&&bench.cohort.peers)||0;
+  const css=getComputedStyle(document.documentElement);
+  const brand=css.getPropertyValue('--brand').trim()||'#5b5bf0';
+  const peerCol='#c3cad8', line='#e7ecf3', ink2='#4a5568', muted='#98a2b3';
+  let inner;
+  if(!perf.connected){
+    inner='<div class="cmp-empty">'+_acctEmpty('▦','Performance data not available','This account is not connected to the performance warehouse, so there is nothing to compare.')+'</div>';
+  }else if(!peers){
+    inner='<div class="cmp-empty">'+_acctEmpty('▦','No peer cohort to compare against','There is no comparable peer group for the current filters. Adjust the benchmark filters above to form a cohort.')+'</div>';
+  }else{
+    const W=760, padL=132, padR=78, rowH=58, chartW=W-padL-padR;
+    const rows=ACCT_METRICS.map(m=>({m:m,you:metrics[m.key],b:bench[m.key]||null}));
+    const H=rows.length*rowH+34;
+    const barH=14, gapY=5;
+    let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="Account versus peer average by metric" style="font-family:Inter,system-ui,sans-serif">'+
+      '<defs><pattern id="acctSkel" width="14" height="14" patternUnits="userSpaceOnUse">'+
+      '<rect width="14" height="14" fill="#f4f7fb"></rect><rect width="7" height="14" fill="#eef1f6"></rect></pattern></defs>';
+    const gridTop=24, gridBot=H-10;
+    [0,0.25,0.5,0.75,1].forEach(g=>{
+      const x=padL+g*chartW;
+      svg+='<line x1="'+x.toFixed(1)+'" y1="'+gridTop+'" x2="'+x.toFixed(1)+'" y2="'+gridBot+'" stroke="'+line+'" stroke-width="1"'+(g===0?' ':' stroke-dasharray="2 3"')+'></line>';
+    });
+    svg+='<text x="'+padL+'" y="16" font-size="10" fill="'+muted+'">0</text>';
+    svg+='<text x="'+(padL+chartW)+'" y="16" text-anchor="end" font-size="10" fill="'+muted+'">row max</text>';
+    rows.forEach((row,i)=>{
+      const y0=gridTop+10+i*rowH;
+      const you=row.you, b=row.b;
       const peerAvg=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg:null;
+      svg+='<text x="'+(padL-12)+'" y="'+(y0+barH+2)+'" text-anchor="end" font-size="12" font-weight="700" fill="#0b1220">'+escapeHtml(row.m.label)+'</text>';
+      if(row.m.derived){
+        svg+='<text x="'+(padL-12)+'" y="'+(y0+barH+16)+'" text-anchor="end" font-size="8.5" font-weight="700" fill="'+brand+'" letter-spacing="0.3">DERIVED</text>';
+      }
       if(you===null||you===undefined){
-        return '<div class="acct-cmprow"><div class="cl">'+escapeHtml(m.label)+
-          (m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
-          '<div class="cbar"><div class="acct-skel" style="height:10px"></div></div>'+
-          '<div class="cnum" style="color:'+muted+'">No data</div></div>';
+        svg+='<rect x="'+padL+'" y="'+(y0+2)+'" width="'+chartW+'" height="'+(barH*2+gapY)+'" rx="7" fill="url(#acctSkel)"></rect>';
+        svg+='<text x="'+(padL+chartW/2)+'" y="'+(y0+barH+6)+'" text-anchor="middle" font-size="10.5" fill="'+muted+'">No data</text>';
+        return;
       }
       const max=Math.max(you||0, peerAvg||0, 0.0001);
-      const W=520, rowH=20, barH=13, trackX=1, trackW=W-2;
-      const youW=Math.max(3,(you/max)*trackW);
-      const peerW=peerAvg===null?null:Math.max(3,(peerAvg/max)*trackW);
-      // Value labels sit just inside the bar end when there's room, else just outside.
-      const youLbl=escapeHtml(fmt(you,m.float));
-      const peerLbl=peerAvg===null?null:escapeHtml(fmt(peerAvg,m.float));
-      function barRow(y,w,fill,label,outside){
-        const inside=w>70;
-        const tx=inside?(w-6):(w+6);
-        const anchor=inside?'end':'start';
-        const tcol=inside?'#fff':'var(--ink2)';
-        return '<rect x="'+trackX+'" y="'+y+'" width="'+trackW+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+line+'" opacity="0.5"></rect>'+
-          '<rect x="'+trackX+'" y="'+y+'" width="'+w.toFixed(1)+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+fill+'"></rect>'+
-          '<text x="'+tx.toFixed(1)+'" y="'+(y+barH-3)+'" text-anchor="'+anchor+'" font-size="10.5" font-weight="700" fill="'+tcol+'" style="font-variant-numeric:tabular-nums">'+label+'</text>';
+      const youW=Math.max(3,(you/max)*chartW);
+      const peerW=peerAvg===null?null:Math.max(3,(peerAvg/max)*chartW);
+      const fl=row.m.float;
+      const youLbl=_acctFmt(you,fl);
+      const peerLbl=peerAvg===null?null:_acctFmt(peerAvg,fl);
+      svg+='<rect x="'+padL+'" y="'+y0+'" width="'+youW.toFixed(1)+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+brand+'"></rect>';
+      svg+='<text x="'+(padL+youW+7).toFixed(1)+'" y="'+(y0+barH-2.5)+'" font-size="10.5" font-weight="800" fill="'+ink2+'" style="font-variant-numeric:tabular-nums">'+escapeHtml(youLbl)+'</text>';
+      const y1=y0+barH+gapY;
+      if(peerW===null){
+        svg+='<text x="'+padL+'" y="'+(y1+barH-2.5)+'" font-size="10" fill="'+muted+'">No peer average</text>';
+      }else{
+        svg+='<rect x="'+padL+'" y="'+y1+'" width="'+peerW.toFixed(1)+'" height="'+barH+'" rx="'+(barH/2)+'" fill="'+peerCol+'"></rect>';
+        svg+='<text x="'+(padL+peerW+7).toFixed(1)+'" y="'+(y1+barH-2.5)+'" font-size="10.5" font-weight="700" fill="'+muted+'" style="font-variant-numeric:tabular-nums">'+escapeHtml(peerLbl)+'</text>';
       }
-      const H=peerW===null?(rowH):(rowH*2+3);
-      const svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="'+escapeHtml(m.label)+' this account versus peer average">'+
-        barRow(2,youW,brand,'you · '+youLbl)+
-        (peerW===null?'':barRow(rowH+3,peerW,muted,'peers · '+peerLbl))+
-        '</svg>';
-      const sideTxt=peerAvg===null
-        ? '<span style="color:'+muted+'">No peer cohort</span>'
-        : ('<span class="p-you">You '+youLbl+'</span><br><span style="color:'+muted+'">Peers '+peerLbl+'</span>');
-      return '<div class="acct-cmprow">'+
-        '<div class="cl">'+escapeHtml(m.label)+(m.derived?'<span class="lb-tag">DER</span>':'')+'</div>'+
-        '<div class="cbar">'+svg+'</div>'+
-        '<div class="cnum">'+sideTxt+'</div>'+
-      '</div>';
-    }).join('');
-    cmpInner=legend+rows;
+    });
+    svg+='</svg>';
+    const legend='<div class="acct-cmp-legend">'+
+      '<span class="k"><i style="background:'+brand+'"></i>This account</span>'+
+      '<span class="k"><i style="background:'+peerCol+'"></i>Peer average</span>'+
+      '<span class="cohort">'+peers.toLocaleString()+' peers · each row scaled to its own maximum</span>'+
+    '</div>';
+    inner='<div class="acct-cmp">'+legend+svg+'</div>';
   }
-  const cmpPanel='<div class="panel"><div class="head"><h2>Account vs Peer Average</h2>'+
-    '<span class="note">Each metric scaled to its own max · bars show this account against the cohort average</span></div>'+
-    '<div class="body pad">'+cmpInner+'</div></div>';
-
-  return summaryPanel+cmpPanel;
+  return '<div class="panel"><div class="head"><h2>Account vs Peer Average</h2>'+
+    '<span class="note">How this account compares to the cohort average, metric by metric</span></div>'+
+    '<div class="body pad">'+inner+'</div></div>';
 }
 
 function _acctRenderScorecard(d){
@@ -2781,46 +2931,50 @@ function _acctRenderScorecard(d){
   const deltas=perf.deltas||{};
   const bench=d.benchmark||{};
   const win=perf.window||{};
-  const conn=d.connected||{};
   const peers=(bench.cohort&&bench.cohort.peers)||0;
 
-  // ── Identity header ────────────────────────────────────────────────────────
+  // ── Executive header: name, status chip, Master ID, fact tiles, filter bar ──
   const arr=(id.arr_usd===null||id.arr_usd===undefined)?null:id.arr_usd;
-  const arrTxt=arr===null?'not connected':'$'+Number(arr).toLocaleString();
+  const arrTxt=arr===null?'Not available':'$'+Number(arr).toLocaleString();
   const windowTxt=win.end?('Trailing '+(win.months||12)+' months to '+_acctMonthLabel(win.end)):'Reporting window not available';
-  const metaChip=(label,val)=>'<span class="mp-chip">'+label+': <strong>'+escapeHtml(val)+'</strong></span>';
+  const statusCls=_acctStatusClass(id.account_status);
+  const statusTxt=id.account_status||'Status unknown';
+  const genTxt=(d.generated_at||'').slice(0,16).replace('T',' ');
+  const fact=(l,v,cls)=>'<div class="acct-fact"><div class="l">'+l+'</div><div class="v'+(cls?(' '+cls):'')+'">'+v+'</div></div>';
+  const u=id.users||{};
+  const active=Number(u.active);
+  const chg=Number(u.change);
+  let usersVal;
+  if(!Number.isFinite(active)){ usersVal='<span class="na">Not available</span>'; }
+  else{
+    const chgHtml=(Number.isFinite(chg)&&chg!==0)
+      ? '<span class="chg '+(chg>0?'up':'down')+'">'+(chg>0?'▲ +':'▼ ')+chg.toLocaleString()+'</span>' : '';
+    usersVal=active.toLocaleString()+chgHtml;
+  }
+  const facts='<div class="acct-facts">'+
+    fact('Type', escapeHtml(id.account_type||'Not available'), (id.account_type?'':'na'))+
+    fact('Plan', escapeHtml(id.plan||id.tier||'Not available'), (id.plan||id.tier?'sm':'na'))+
+    fact('Active users', usersVal)+
+    fact('ARR', arrTxt, (arr===null?'na':''))+
+    fact('Country', escapeHtml(id.country||'Not available'), (id.country?'':'na'))+
+    fact('Peer group', peers?(peers.toLocaleString()+' peers'):'<span class="na">Not available</span>')+
+  '</div>';
   const header=
     '<div class="panel"><div class="body pad">'+
-      '<div class="acct-id-head">'+
-        '<div>'+
-          '<div class="acct-id-name">'+escapeHtml(id.name||d.account_id||'Unknown account')+'</div>'+
-          '<div class="acct-id-sub">Master ID '+escapeHtml(String(id.account_id||d.account_id||'—'))+'</div>'+
-          '<div class="acct-id-meta">'+
-            metaChip('Status', id.account_status||'Not available')+
-            metaChip('Type', id.account_type||'Not available')+
-            metaChip('Plan', id.plan||id.tier||'Not available')+
-            (function(){
-              // Users: 'active (±change)' — native-dashboard parity. Honest when absent.
-              var u=id.users;
-              var active=u?Number(u.active):NaN;
-              if(!u||!Number.isFinite(active)) return metaChip('Users','not connected');
-              var txt=active.toLocaleString();
-              var chg=Number(u.change);
-              if(Number.isFinite(chg)&&chg!==0){
-                txt+=' ('+(chg>0?'+':'')+chg.toLocaleString()+')';
-              }
-              return metaChip('Users', txt);
-            })()+
-            metaChip('ARR', arrTxt)+
-            metaChip('Country', id.country||'Not available')+
-            metaChip('Peer group', peers?('Agency · '+peers+' peers'):'not connected')+
+      '<div class="acct-exec">'+
+        '<div class="acct-exec-l">'+
+          '<div class="acct-exec-title">'+
+            '<h1>'+escapeHtml(id.name||d.account_id||'Unknown account')+'</h1>'+
+            '<span class="acct-chip '+statusCls+'"><span class="dot"></span>'+escapeHtml(statusTxt)+'</span>'+
           '</div>'+
+          '<div class="acct-exec-id">Master ID <b>'+escapeHtml(String(id.account_id||d.account_id||'Not available'))+'</b></div>'+
         '</div>'+
-        '<div style="text-align:right">'+
+        '<div class="acct-exec-r">'+
           '<span class="acct-window">◴ '+escapeHtml(windowTxt)+'</span>'+
-          '<div class="muted" style="font-size:.76em;margin-top:8px">Generated '+escapeHtml((d.generated_at||'').slice(0,16).replace('T',' '))+'</div>'+
+          (genTxt?'<div class="acct-exec-gen">Generated '+escapeHtml(genTxt)+'</div>':'')+
         '</div>'+
       '</div>'+
+      facts+
       _acctFilterBar(d)+
     '</div></div>';
 
@@ -2831,123 +2985,126 @@ function _acctRenderScorecard(d){
       '<button class="acct-btn" onclick="_acctExportSlides()">▭ Export to Slides</button>'+
     '</div>';
 
-  // ── Performance Data grid ──────────────────────────────────────────────────
-  const perfCards=ACCT_METRICS.map(m=>{
-    const raw=metrics[m.key];
-    const val=_acctFmt(raw,m.float);
-    const dl=deltas[m.key]?Object.assign({},deltas[m.key],{_float:m.float}):null;
-    const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
-    const b=bench[m.key];
-    const hasVal=!(val===null);
-    // Prominent RANK pill at the top of the card (matches the native dashboard layout);
-    // ranked #1 gets the gold-green treatment, unranked gets an honest dashed pill.
-    const pill=(b&&b.rank)
-      ? '<span class="acct-rankpill'+(b.rank===1?' top':'')+'">RANK '+b.rank+' / '+b.peers+'</span>'
-      : '<span class="acct-rankpill na">UNRANKED</span>';
-    const tag=m.derived?'<span class="derived">DERIVED</span>':'';
-    return '<div class="acct-card'+(hasVal?'':' na')+'">'+
-      '<div class="acct-cardtop">'+pill+tag+'</div>'+
-      '<div class="lbl">'+escapeHtml(m.label)+'</div>'+
-      (hasVal?'<div class="val">'+val+'</div>':'<div class="val na">not connected</div>')+
-      (hasVal?_acctDeltaHtml(dl,lowerBetter):'')+
-      _acctPctBlock(b)+
-    '</div>';
-  }).join('');
-  const perfPanel=
-    '<div class="panel"><div class="head"><h2>Performance Data</h2>'+
-      '<span class="note">'+(perf.connected?'Live from the warehouse':'warehouse not connected')+
-      ' · Source Efficiency and Days to Place are lower-is-better</span></div>'+
-      '<div class="body pad"><div class="acct-grid">'+perfCards+'</div></div></div>';
+  // ── Hero at-a-glance band (radial + KPI tiles) ──────────────────────────────
+  const heroPanel=_acctHero(d);
 
-  // ── Usage Data grid ────────────────────────────────────────────────────────
+  // ── Performance grid ────────────────────────────────────────────────────────
+  let perfInner;
+  if(!perf.connected){
+    perfInner=_acctEmpty('▦','Performance data not available','This account is not connected to the performance warehouse yet. Metrics will appear here once a connection is established.');
+  }else{
+    const perfCards=ACCT_METRICS.map(m=>{
+      const raw=metrics[m.key];
+      const val=_acctFmt(raw,m.float);
+      const dl=deltas[m.key]?Object.assign({},deltas[m.key],{_float:m.float}):null;
+      const lowerBetter=(m.key==='days_to_place'||m.key==='source_efficiency');
+      const b=bench[m.key];
+      const hasVal=!(val===null);
+      // RANK pill coloured by standing: #1 gold-green, strong (≥66th) brand, mid (33-65th)
+      // sky, weak/unranked an honest dashed pill. Never fabricated.
+      let pillCls='na', pillTxt='UNRANKED';
+      if(b&&b.rank){
+        pillTxt='RANK '+b.rank+' / '+b.peers;
+        const p=b.percentile;
+        pillCls=(b.rank===1)?'top':((p!=null&&p>=66)?'':(p!=null&&p>=33?'mid':''));
+      }
+      const pill='<span class="acct-rankpill'+(pillCls?(' '+pillCls):'')+'">'+pillTxt+'</span>';
+      const tag=m.derived?'<span class="derived">DERIVED</span>':'';
+      return '<div class="acct-card'+(hasVal?'':' na')+'">'+
+        '<div class="acct-cardtop">'+pill+tag+'</div>'+
+        '<div class="lbl">'+escapeHtml(m.label)+'</div>'+
+        (hasVal?'<div class="val">'+val+'</div>':'<div class="val na">No data</div>')+
+        (hasVal?_acctDeltaHtml(dl,lowerBetter):'')+
+        _acctPctBlock(b)+
+      '</div>';
+    }).join('');
+    perfInner='<div class="acct-grid">'+perfCards+'</div>';
+  }
+  const perfPanel=
+    '<div class="panel"><div class="head"><h2>Performance</h2>'+
+      '<span class="note">'+(perf.connected?'Live from the warehouse':'Warehouse not connected')+
+      ' · Source Efficiency and Days to Place are lower-is-better</span></div>'+
+      '<div class="body pad">'+perfInner+'</div></div>';
+
+  // ── Account vs Peer Average chart ───────────────────────────────────────────
+  const comparePanel=_acctCompareChart(d);
+
+  // ── Automation & AI usage (Pendo) ───────────────────────────────────────────
   const fu=d.feature_usage||{};
-  const templates=fu.templates||null;
+  const templates=fu&&fu.templates?fu.templates:null;
   let usageInner;
-  if(!templates){
-    usageInner='<div class="acct-nc-chip">● feature usage not connected</div>';
+  if(!templates||!Object.keys(templates).length){
+    usageInner=_acctEmpty('⚙','Feature usage not connected','Pendo automation & AI usage is not available for this account. Totals will populate once usage telemetry is connected.');
   }else{
     const names=Object.keys(templates);
-    usageInner='<div class="acct-grid">'+ACCT_USAGE.map(u=>{
-      // Sum totals across any template whose name matches one of the row's keywords.
+    const rows=ACCT_USAGE.map(uu=>{
       let total=0, matched=false;
-      names.forEach(n=>{
-        const low=n.toLowerCase();
-        if(u.match.some(k=>low.includes(k))){ total+=(templates[n].total||0); matched=true; }
-      });
-      // Connected but no matching usage => honest 0 (never fabricated).
-      return '<div class="acct-card">'+
-        '<div class="acct-cardtop"><span class="acct-rankpill na">USAGE</span></div>'+
-        '<div class="lbl">'+escapeHtml(u.label)+'</div>'+
-        '<div class="val">'+total.toLocaleString()+'</div>'+
-        '<div class="acct-delta flat"><span class="vp">'+(matched?'from automation usage':'no usage in window')+'</span></div></div>';
+      names.forEach(n=>{ const low=n.toLowerCase();
+        if(uu.match.some(k=>low.includes(k))){ total+=(templates[n].total||0); matched=true; } });
+      return {label:uu.label,total:total,matched:matched};
+    });
+    const mx=Math.max(1,...rows.map(r=>r.total));
+    usageInner='<div class="acct-usage">'+rows.map(r=>{
+      const w=Math.round((r.total/mx)*100);
+      return '<div class="acct-ucard'+(r.total===0?' zero':'')+'">'+
+        '<div class="u-l">'+escapeHtml(r.label)+'</div>'+
+        '<div class="u-v">'+r.total.toLocaleString()+'</div>'+
+        '<div class="u-bar"><i style="width:'+Math.max(2,w)+'%"></i></div>'+
+        '<div class="u-s">'+(r.matched?'uses in window':'no usage in window')+'</div>'+
+      '</div>';
     }).join('')+'</div>';
   }
   const usagePanel=
-    '<div class="panel"><div class="head"><h2>Usage Data</h2>'+
-      '<span class="note">Automation &amp; AI feature usage over the window</span></div>'+
+    '<div class="panel"><div class="head"><h2>Automation &amp; AI Usage</h2>'+
+      '<span class="note">Pendo feature usage over the reporting window</span></div>'+
       '<div class="body pad">'+usageInner+'</div></div>';
 
-  // ── New signals row ────────────────────────────────────────────────────────
+  // ── Intelligence & product signals ──────────────────────────────────────────
   const sig=d.signals||{};
   const sigCard=(s)=>{
     if(!s) return '';
     const label=s.label||'';
+    let badge, note='';
     if(s.status==='not_connected'||s.enabled===null||s.enabled===undefined){
-      const note=s.note||'not connected';
-      return '<div class="acct-sig"><span class="lbl">'+escapeHtml(label)+'</span>'+
-        '<span class="st nc"><span class="dot nc"></span>Not connected</span>'+
-        '<span class="note">'+escapeHtml(note)+'</span></div>';
+      badge='<span class="s-badge nc"><span class="dot"></span>Not connected</span>';
+      note='<div class="s-note">'+escapeHtml(s.note||'No signal data available')+'</div>';
+    }else if(s.enabled){
+      badge='<span class="s-badge on"><span class="dot"></span>Enabled</span>';
+    }else{
+      badge='<span class="s-badge off"><span class="dot"></span>Disabled</span>';
     }
-    const on=!!s.enabled;
-    return '<div class="acct-sig"><span class="lbl">'+escapeHtml(label)+'</span>'+
-      '<span class="st '+(on?'on':'off')+'"><span class="dot '+(on?'on':'off')+'"></span>'+(on?'Enabled':'Disabled')+'</span></div>';
+    return '<div class="acct-sigc"><div class="s-top"><span class="s-l">'+escapeHtml(label)+'</span>'+badge+'</div>'+note+'</div>';
   };
   const signalsPanel=
     '<div class="panel"><div class="head"><h2>Intelligence &amp; Product Signals</h2>'+
       '<span class="note">Adder Intelligence Match, AI Float, Enhanced Profile &amp; event availability</span></div>'+
-      '<div class="body pad"><div class="acct-grid">'+
+      '<div class="body pad"><div class="acct-signals">'+
         sigCard(sig.adder_intelligence_match)+
         sigCard(sig.ai_float)+
         sigCard(sig.enhanced_profile)+
         sigCard(sig.event_availability)+
       '</div></div></div>';
 
-  // ── Peer averages panel ────────────────────────────────────────────────────
-  let peerInner;
-  if(!peers){
-    peerInner='<div class="acct-nc-chip">● no comparable peer cohort</div>';
-  }else{
-    peerInner='<div class="acct-peeravg">'+ACCT_METRICS.map(m=>{
-      const b=bench[m.key];
-      const pa=(b&&b.peer_avg!==null&&b.peer_avg!==undefined)?b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1}):'No peer data';
-      return '<div class="pa"><div class="l">'+escapeHtml(m.label)+'</div><div class="v">'+pa+'</div></div>';
-    }).join('')+'</div>';
-  }
-  const peerPanel=
-    '<div class="panel"><div class="head"><h2>Peer Benchmarking</h2>'+
-      '<span class="note">'+(peers?('Benchmarking against '+peers+' peers'):'benchmark not available')+'</span></div>'+
-      '<div class="body pad">'+peerInner+'</div></div>';
-
-  // ── Tickets ────────────────────────────────────────────────────────────────
+  // ── Support tickets (compact stat strip) ────────────────────────────────────
   const t=d.tickets||{};
   let ticketInner;
-  if(t.status==='not_connected'||!t||Object.keys(t).length===0){
-    ticketInner='<div class="acct-nc-chip">● '+escapeHtml((t&&t.note)||'tickets not connected (Zendesk)')+'</div>';
+  if(!t||t.status==='not_connected'||Object.keys(t).length===0){
+    ticketInner=_acctEmpty('🎧','Support tickets not connected','Zendesk is not connected for this account. Ticket volume and resolution times will appear here once linked.');
   }else{
     const pick=(keys)=>{ for(const k of keys){ if(t[k]!==undefined&&t[k]!==null) return t[k]; } return null; };
     const tot=pick(['total','total_tickets','tickets_total','count']);
     const solved=pick(['solved','solved_tickets','resolved','closed']);
     const open=pick(['open','open_tickets','unsolved']);
     const resDays=pick(['resolution_days','res_days','avg_resolution_days','mean_resolution_days']);
-    const cell=(v,l)=>'<div class="t"><div class="v">'+(v===null?'—':(typeof v==='number'?v.toLocaleString(undefined,{maximumFractionDigits:1}):escapeHtml(String(v))))+'</div><div class="l">'+l+'</div></div>';
-    ticketInner='<div class="acct-tick">'+cell(tot,'Total')+cell(solved,'Solved')+cell(open,'Open')+cell(resDays,'Res Days')+'</div>';
+    const cell=(v,l,cls)=>'<div class="t"><div class="v'+(cls?(' '+cls):'')+'">'+(v===null?'No data':(typeof v==='number'?v.toLocaleString(undefined,{maximumFractionDigits:1}):escapeHtml(String(v))))+'</div><div class="l">'+l+'</div></div>';
+    ticketInner='<div class="acct-tick">'+cell(tot,'Total')+cell(solved,'Solved','g')+cell(open,'Open',(open?'r':''))+cell(resDays,'Avg res. days')+'</div>';
   }
   const ticketPanel=
     '<div class="panel"><div class="head"><h2>Support Tickets</h2>'+
-      '<span class="note">From Zendesk over the window</span></div>'+
+      '<span class="note">From Zendesk over the reporting window</span></div>'+
       '<div class="body pad">'+ticketInner+'</div></div>';
 
-  // ── Schedule quarterly (unobtrusive) ───────────────────────────────────────
+  // ── Schedule quarterly (unobtrusive, not printed) ───────────────────────────
   const schedPanel=
     '<div class="panel acct-sched-wrap acct-no-print"><div class="head"><h2>Schedule quarterly report</h2>'+
       '<span class="note">Email this scorecard every quarter</span></div>'+
@@ -2960,11 +3117,22 @@ function _acctRenderScorecard(d){
       '</div></div>';
 
   const dataNote=(d.data_note)
-    ? '<div class="acct-no-print" style="margin:0 0 10px;padding:10px 14px;border:1px solid #f0d58a;background:#fdf6e3;border-radius:10px;font:500 13px Inter,system-ui;color:#8a6d00">'+escapeHtml(d.data_note)+'</div>'
+    ? '<div class="acct-no-print" style="margin:0 0 10px;padding:11px 15px;border:1px solid #f0d58a;background:#fdf6e3;border-radius:11px;font:500 13px Inter,system-ui;color:#8a6d00">⚠ '+escapeHtml(d.data_note)+'</div>'
     : '';
-  const chartsPanel=_acctCharts(d);
+
+  const groupH=(label)=>'<div class="acct-group-h">'+label+'</div>';
+
   card.innerHTML=
-    '<div id="acct-scorecard-print">'+header+dataNote+toolbar+perfPanel+chartsPanel+usagePanel+signalsPanel+peerPanel+ticketPanel+'</div>'+schedPanel;
+    '<div id="acct-scorecard-print">'+
+      header+dataNote+toolbar+
+      heroPanel+
+      groupH('Performance &amp; Benchmarking')+
+      perfPanel+comparePanel+
+      groupH('Product Engagement')+
+      usagePanel+signalsPanel+
+      groupH('Support')+
+      ticketPanel+
+    '</div>'+schedPanel;
 }
 
 // Print just the scorecard via the @media print stylesheet.
