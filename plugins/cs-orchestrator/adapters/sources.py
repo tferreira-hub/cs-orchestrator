@@ -2995,6 +2995,15 @@ class AccountPerformance:
             if tv is None or len(present) < 2:
                 out[name] = None
                 continue
+            # A zero on a higher-is-better metric is NO activity, not a performance signal.
+            # Ranking it would be misleading (it ties with the many other zero-activity
+            # accounts and lands at a flattering percentile), so surface it as unranked with
+            # an honest reason rather than implying the account outperformed its peers.
+            if higher_better and (tv == 0):
+                out[name] = {"rank": None, "peers": len(present), "percentile": None,
+                             "peer_avg": round(sum(present) / len(present), 1),
+                             "higher_is_better": higher_better, "no_activity": True}
+                continue
             # Rank: 1 = best. Count strictly-better peers, +1.
             if higher_better:
                 better = sum(1 for v in present if v > tv)

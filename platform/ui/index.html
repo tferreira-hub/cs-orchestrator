@@ -2704,6 +2704,10 @@ function _acctEmpty(icon,title,sub){
 // Percentile line + slim banded bar (median tick at 50) for a metric card. Honest empty
 // state (dashed skeleton) when the metric is not ranked in the cohort.
 function _acctPctBlock(b){
+  if(b&&b.no_activity){
+    const pa=(b.peer_avg===null||b.peer_avg===undefined)?'':'<span class="peer">peer avg '+b.peer_avg.toLocaleString(undefined,{maximumFractionDigits:1})+'</span>';
+    return '<div class="acct-pct"><div class="pct-top"><span class="pct-na">No activity this period</span>'+pa+'</div><div class="acct-pctbar"><i style="width:2%;background:var(--muted)"></i></div></div>';
+  }
   if(!b||b.percentile===null||b.percentile===undefined){
     return '<div class="acct-pct"><div class="pct-na">Not ranked in cohort</div><div class="acct-skel"></div></div>';
   }
@@ -3003,7 +3007,9 @@ function _acctRenderScorecard(d){
       // RANK pill coloured by standing: #1 gold-green, strong (≥66th) brand, mid (33-65th)
       // sky, weak/unranked an honest dashed pill. Never fabricated.
       let pillCls='na', pillTxt='UNRANKED';
-      if(b&&b.rank){
+      if(b&&b.no_activity){
+        pillTxt='NO ACTIVITY';
+      } else if(b&&b.rank){
         pillTxt='RANK '+b.rank+' / '+b.peers;
         const p=b.percentile;
         pillCls=(b.rank===1)?'top':((p!=null&&p>=66)?'':(p!=null&&p>=33?'mid':''));
