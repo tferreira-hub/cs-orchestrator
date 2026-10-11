@@ -737,6 +737,9 @@ class Handler(BaseHTTPRequestHandler):
                 # size-band / peer-group vocabularies). Honest {} when the warehouse is not
                 # connected (the UI then hides the cohort controls).
                 self._json(200, engine.account_performance_filter_options()); return
+            if path == "/api/account-performance/schedules":
+                # List the current principal's active scheduled report deliveries (owner-scoped).
+                self._json(200, engine.list_report_schedules()); return
             if path == "/api/account-performance":
                 # Per-account performance scorecard (CS Day-to-Day -> Accounts). Owner-scoped:
                 # ForbiddenError -> 403, unknown account -> 404. Optional benchmark cohort
@@ -1122,7 +1125,26 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self._json(400, {"error": str(exc)})
                 return
-            if path.startswith("/api/playbook/proposals/") and path.endswith("/review"):
+            if path == "/api/account-performance/schedule":
+                # Persist a quarterly (or monthly) scheduled delivery of the account
+                # scorecard. Owner-scoped (ForbiddenError -> 403), validated, audited.
+                # Honest about whether an email provider is connected; never claims a send.
+                account_id = (body.get("account_id") or "").strip()
+                email = (body.get("email") or "").strip()
+                cadence = (body.get("cadence") or "quarterly").strip()
+                try:
+                    rec = engine.save_report_schedule(account_id, email, cadence=cadence)
+                    try:
+                        record_audit("report_schedule_saved", principal,
+                                     {"account_id": account_id, "email": email, "cadence": cadence})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(201, rec)
+                except engine.ForbiddenError:
+                    self._json(403, {"error": "forbidden", "account_id": account_id})
+                except ValueError as exc:
+                    self._json(400, {"error": str(exc)})
+                return
                 proposal_id = path[len("/api/playbook/proposals/"):-len("/review")].strip("/")
                 try:
                     result = _record_playbook_review(proposal_id, body, principal)

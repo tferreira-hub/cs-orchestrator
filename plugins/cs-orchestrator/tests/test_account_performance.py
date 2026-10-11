@@ -292,12 +292,16 @@ def test_new_signals_not_connected_passthrough(monkeypatch):
     card = engine.account_performance("au1-1")
     sig = card["signals"]
 
-    # Unwired signals: honest not_connected, never fabricated on/off.
+    # Unwired signals: honest, never fabricated on/off.
+    # Enhanced Profile has no configured warehouse column here -> not_connected.
     assert sig["enhanced_profile"]["status"] == "not_connected"
     assert "enabled" not in sig["enhanced_profile"]
-    assert sig["event_availability"]["status"] == "not_connected"
-    assert "enabled" not in sig["event_availability"]
     assert sig["enhanced_profile"].get("note")   # carries the honest explanatory note
+    # Event Availability is a Corporate-only feature; this account_type is 'Agency', so it is
+    # honestly reported as not_applicable (never a fabricated on/off). enabled must be None.
+    assert sig["event_availability"]["status"] == "not_applicable"
+    assert sig["event_availability"].get("enabled") is None
+    assert sig["event_availability"].get("note")
 
     # Warehouse-boolean signals reflect the connected dim flags.
     assert sig["adder_intelligence_match"]["status"] == "enabled"
@@ -314,7 +318,77 @@ def test_new_signals_not_connected_passthrough(monkeypatch):
     assert card["tickets"]["status"] == "not_connected"
 
 
-def test_new_signals_not_connected_when_dim_absent(monkeypatch):
+def test_event_availability_live_for_corporate_when_column_configured(monkeypatch):
+    """When CS_EVENT_AVAIL_COL / CS_ENHANCED_PROFILE_COL are configured and the dim carries
+    those flags for a Corporate account, the signals go LIVE (enabled/disabled) instead of
+    not_connected — proving the opt-in warehouse-column wiring works end to end."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    monkeypatch.setenv("CS_ENHANCED_PROFILE_COL", "is_enhanced_profile")
+    monkeypatch.setenv("CS_EVENT_AVAIL_COL", "is_event_available")
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    # Dim as the engine would receive it after the adapter surfaced the optional columns.
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {
+        "account_name": "BigCorp", "account_status": "Active", "account_type": "Corporate",
+        "account_kind": "Corporate", "tier_name": "Pro", "country": "AU",
+        "is_ai_matching_enabled": True, "is_floats_enabled": True,
+        "enhanced_profile_enabled": True, "event_availability_enabled": False,
+        "stripe_customer_id": None, "global_customer_id": None, "_source": "redshift-live",
+    })
+    monkeypatch.setattr(sources.AccountPerformance, "performance", lambda self, ref: {})
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark", lambda self, ref, **kw: {})
+    monkeypatch.setattr(sources.AccountPerformance, "feature_usage", lambda self, ref: {})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+    engine.set_principal(None)
+    sig = engine.account_performance("au1-1")["signals"]
+    assert sig["enhanced_profile"]["status"] == "enabled"
+    assert sig["enhanced_profile"]["enabled"] is True
+    # Corporate account => event availability applies and reflects the (false) flag.
+    assert sig["event_availability"]["status"] == "disabled"
+    assert sig["event_availability"]["enabled"] is False
+
+
+def test_save_and_list_report_schedule(tmp_path, monkeypatch):
+    """A quarterly report schedule persists, is listed back, and is honest about whether an
+    email provider is connected (never claims a send). Owner-scoping is enforced."""
+    import engine, dataaccess
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    monkeypatch.setenv("CS_REPORT_SCHEDULE_FILE", str(tmp_path / "sched.jsonl"))
+    monkeypatch.delenv("CS_EMAIL_PROVIDER", raising=False)
+    engine.set_principal(None)
+
+    rec = engine.save_report_schedule("au1-1", "boss@company.com", cadence="quarterly")
+    assert rec["account_id"] == "au1-1"
+    assert rec["cadence"] == "quarterly"
+    assert rec["email_provider_connected"] is False
+    assert "nothing is sent" in rec["delivery"].lower()
+
+    listed = engine.list_report_schedules()
+    assert listed["count"] == 1
+    assert listed["schedules"][0]["email"] == "boss@company.com"
+
+    # Invalid email rejected; bad cadence rejected.
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        engine.save_report_schedule("au1-1", "not-an-email", cadence="quarterly")
+    with _pt.raises(ValueError):
+        engine.save_report_schedule("au1-1", "boss@company.com", cadence="weekly")
+
+
+def test_save_report_schedule_owner_scoped(tmp_path, monkeypatch):
+    """A CSM cannot schedule a report for an account they don't own (ForbiddenError)."""
+    import engine, dataaccess
+    import pytest as _pt
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setenv("CS_REPORT_SCHEDULE_FILE", str(tmp_path / "sched.jsonl"))
+    engine.set_principal({"email": "a@x.com", "name": "A", "role": "csm", "owner_id": "owner-A"})
+    with _pt.raises(engine.ForbiddenError):
+        engine.save_report_schedule("au1-3", "a@x.com", cadence="quarterly")  # not owned
+    engine.set_principal(None)
     """When the warehouse dim is NOT connected, even the AI-boolean signals are honestly
     'not_connected' (not assumed off), and the whole scorecard still assembles."""
     import engine, dataaccess
@@ -445,6 +519,51 @@ def test_perf_present_dim_missing_shows_profile_note(monkeypatch):
     assert card["has_warehouse_profile"] is False
     assert card["roster_only"] is False                          # NOT a bare roster-only
     assert card["data_note"] and "profile" in card["data_note"].lower()
+
+
+def test_perf_present_dim_missing_but_benchmark_ranked_does_not_claim_hidden(monkeypatch):
+    """Regression for the data-provenance contradiction: an account with performance rows
+    and NO warehouse dimension can STILL be ranked (the cohort query falls back to matching
+    on icp when account_type is NULL). When rankings ARE produced, the banner must NOT say
+    'rankings are hidden' — the old code computed the note before the benchmark was built
+    and always claimed hidden, contradicting the rankings shown on screen."""
+    import engine, dataaccess
+    from adapters import sources
+    monkeypatch.setattr(dataaccess, "all_accounts", _fake_accounts)
+    monkeypatch.setattr(engine, "can_view_account", lambda account_id: True)
+    monkeypatch.setattr(sources.AccountPerformance, "live", lambda self: True)
+    monkeypatch.setattr(sources.AccountPerformance, "dimension", lambda self, ref: {})   # no dim
+    monkeypatch.setattr(sources.AccountPerformance, "performance", lambda self, ref: {
+        "metrics": {"jobs_created": 23, "ads_posted": 52}, "previous": {"jobs_created": 16},
+        "window": {"months": 12, "end": "2026-10"}, "_source": "redshift-live",
+    })
+    # Benchmark returns a real ranked cohort despite the missing dim row.
+    monkeypatch.setattr(sources.AccountPerformance, "benchmark",
+                        lambda self, ref, **kw: {
+                            "cohort": {"peers": 9498},
+                            "jobs_created": {"rank": 1767, "peers": 9498, "percentile": 81,
+                                             "peer_avg": 24.1},
+                            "applied_filters": {"peer_group": "icp+account_type"},
+                        })
+    monkeypatch.setattr(sources.AccountPerformance, "feature_usage", lambda self, ref: {})
+    monkeypatch.setattr(sources.HubSpot, "live", lambda self: False)
+    monkeypatch.setattr(sources.Zendesk, "live", lambda self: False)
+    monkeypatch.setattr(sources.AccountMetrics, "live", lambda self: False)
+    monkeypatch.setattr(engine, "full_roster", lambda: {"companies": [
+        {"account_id": "au9-2", "name": "1300 Hired", "arr_usd": 3396, "country": "Australia"},
+    ]})
+    engine.set_principal(None)
+    card = engine.account_performance("au9-2")
+    assert card["has_warehouse_performance"] is True
+    assert card["has_warehouse_profile"] is False
+    assert card["has_benchmark"] is True                      # a ranked cohort WAS built
+    assert card["benchmark"]["jobs_created"]["percentile"] == 81
+    # The note must NOT contradict the visible rankings.
+    note = (card["data_note"] or "").lower()
+    assert "hidden" not in note
+    assert "benchmarking isn't available" not in note
+    # It should still be transparent that the profile row is backfilled from HubSpot.
+    assert "benchmark" in note or "profile" in note
 
 
 def test_unknown_account_still_404s_when_not_in_roster(monkeypatch):
