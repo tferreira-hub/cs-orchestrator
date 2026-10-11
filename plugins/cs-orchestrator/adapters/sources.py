@@ -3092,9 +3092,24 @@ class AccountPerformance:
             return {}
         client = ch._client()
         ref = identity.normalise(account_ref).upper()
+        # Optional warehouse columns for the newer product signals. These are not yet in the
+        # account dimension for every tenant, so they are OPT-IN via env (same pattern as
+        # CS_CSM_FIELD): set CS_ENHANCED_PROFILE_COL / CS_EVENT_AVAIL_COL to the real column
+        # names and they light up with zero code change. Until then the signals stay honestly
+        # 'not connected' rather than fabricated. Identifier-validated to prevent injection.
+        import os as _os
+        ep_col = (_os.environ.get("CS_ENHANCED_PROFILE_COL", "") or "").strip()
+        ev_col = (_os.environ.get("CS_EVENT_AVAIL_COL", "") or "").strip()
+        _ident = lambda s: bool(s) and all(c.isalnum() or c == "_" for c in s)
+        extra_cols = []
+        if _ident(ep_col):
+            extra_cols.append(ep_col)
+        if _ident(ev_col):
+            extra_cols.append(ev_col)
+        extra_sql = ("," + ",".join(extra_cols)) if extra_cols else ""
         sql = f"""
         SELECT account_name, account_status, account_type, account_kind, tier_name, country,
-               is_ai_matching_enabled, is_floats_enabled, stripe_customer_id, global_customer_id
+               is_ai_matching_enabled, is_floats_enabled, stripe_customer_id, global_customer_id{extra_sql}
         FROM {self.DIM_TABLE}
         WHERE {self._DIM_KEY_EXPR} = :ref AND dbt_valid_to IS NULL
         LIMIT 1
@@ -3110,7 +3125,7 @@ class AccountPerformance:
             return {}
         idx = {c: i for i, c in enumerate(cols)}
         r = rows[0]
-        return {
+        out = {
             "account_name": r[idx["account_name"]],
             "account_status": r[idx["account_status"]],
             "account_type": r[idx["account_type"]],
@@ -3123,6 +3138,12 @@ class AccountPerformance:
             "global_customer_id": r[idx["global_customer_id"]],
             "_source": "redshift-live",
         }
+        # Surface the optional signal columns under stable keys when configured + present.
+        if _ident(ep_col) and ep_col in idx:
+            out["enhanced_profile_enabled"] = r[idx[ep_col]]
+        if _ident(ev_col) and ev_col in idx:
+            out["event_availability_enabled"] = r[idx[ev_col]]
+        return out
 
     def feature_usage(self, account_ref: str, window_months: int | None = None) -> dict:
         """Best-effort automation/feature usage from rpt_job_automation_usage_monthly, grouped

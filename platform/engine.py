@@ -194,7 +194,12 @@ def _batch_metrics_for(account_ids: list) -> dict:
     ttl = _report_cache_ttl()
     now = time.time()
     fresh = _BATCH_METRICS["data"] and (now - _BATCH_METRICS["at"]) < ttl
-    if not fresh and not _BATCH_METRICS_REFRESHING:
+    # Only spawn a refresh when the source can actually batch. A source double that
+    # reports live() but lacks batch_metrics (e.g. a test SimpleNamespace) must NOT
+    # start a background thread that then dies with an unhandled AttributeError — but
+    # we still return whatever is already cached below.
+    can_batch = hasattr(_src.ACCOUNT_METRICS, "batch_metrics")
+    if not fresh and not _BATCH_METRICS_REFRESHING and can_batch:
         _BATCH_METRICS_REFRESHING = True
         ids = list(account_ids)
         def _bg():
@@ -204,6 +209,8 @@ def _batch_metrics_for(account_ids: list) -> dict:
                 if isinstance(data, dict) and data:
                     _BATCH_METRICS["data"] = data
                     _BATCH_METRICS["at"] = time.time()
+            except Exception:  # noqa: BLE001 - background refresh is best-effort; never crash the thread
+                pass
             finally:
                 _BATCH_METRICS_REFRESHING = False
         threading.Thread(target=_bg, daemon=True).start()
@@ -2393,6 +2400,48 @@ def _acct_perf_deltas(metrics: dict, previous: dict) -> dict:
 
 def account_performance(account_id: str, business_type: str | None = None,
                         size_band: str | None = None, peer_group: str | None = None) -> dict:
+    """Cached entry point for the per-account performance scorecard.
+
+    The underlying build fans out to 8+ live warehouse/vendor calls — including a
+    whole-cohort benchmark scan (thousands of accounts ranked per metric) — so an
+    uncached load is slow and every benchmark-filter toggle used to pay the full cost
+    again. We memoise the assembled payload per (account_id, filters, principal scope)
+    with the standard stale-while-revalidate report cache: the first load warms it, and
+    subsequent loads / filter toggles within the TTL are instant and never re-hit the
+    warehouse. Owner scoping is preserved because the cache key includes the scope and
+    the authorization check runs before any cache lookup. TTL<=0 (tests) bypasses the
+    cache entirely for determinism.
+
+    ForbiddenError when the principal may not view the account is raised BEFORE the cache
+    so an unauthorised caller can never be served another scope's cached payload."""
+    # Authorise first — never serve a cached payload to a principal who can't view it.
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
+    # Compose a cache name that captures the account + the exact benchmark cohort shaping,
+    # so different filter combinations are cached independently and never cross-served.
+    cache_name = "account_performance:{}|bt={}|sb={}|pg={}".format(
+        identity_normalise_safe(account_id),
+        business_type or "", size_band or "", peer_group or "")
+    return _cached_report(
+        cache_name,
+        lambda: _account_performance_build(
+            account_id, business_type=business_type,
+            size_band=size_band, peer_group=peer_group),
+    )
+
+
+def identity_normalise_safe(ref: str) -> str:
+    """Best-effort account-ref normalisation for cache keys (uppercase-hyphen when the
+    identity module is available), falling back to the raw ref. Never raises."""
+    try:
+        from adapters import identity as _id
+        return _id.normalise(ref)
+    except Exception:  # noqa: BLE001
+        return str(ref)
+
+
+def _account_performance_build(account_id: str, business_type: str | None = None,
+                               size_band: str | None = None, peer_group: str | None = None) -> dict:
     """Assemble the per-account performance scorecard. Owner-scoped (ForbiddenError when the
     principal may not view the account); KeyError when the account id resolves to nothing in
     any live system. Never fabricates — missing signals are not_connected / None / {}.
@@ -2472,28 +2521,15 @@ def account_performance(account_id: str, business_type: str | None = None,
 
     # Accurate provenance: an account can be in the PERFORMANCE table but missing from the
     # account DIMENSION (status/type/plan + the icp/account_type that drives benchmarking).
-    # Distinguish three honest states so the banner never contradicts what's on screen:
+    # Distinguish honest states. NOTE: the data_note is computed LATER (after the benchmark
+    # is built) so it can tell the truth about whether rankings are actually shown — the
+    # cohort query falls back to matching on icp when account_type is NULL, so an account
+    # with no dim row CAN still be ranked. Computing the note here (pre-benchmark) was the
+    # source of the "rankings are hidden" banner contradicting visible rankings on screen.
     #   - has_perf  : performance metrics loaded (even if dim is missing)
     #   - has_dim   : the warehouse dimension row exists
     has_perf = bool(perf and (metrics or previous))
     has_dim = bool(dim)
-    data_note = None
-    if roster_only and not has_perf and not has_dim:
-        data_note = ("This account is in your book but has no live warehouse data yet "
-                     "(not provisioned in the data warehouse). Showing account details only.")
-    elif has_perf and not has_dim:
-        # Perf present, warehouse dimension absent. Profile (status/type/plan) is backfilled
-        # from HubSpot where available; only the peer BENCHMARK genuinely needs the warehouse
-        # dimension, so be precise rather than claiming the profile is unavailable.
-        if hubspot:
-            data_note = ("Peer benchmarking isn't available for this account yet (no "
-                         "warehouse profile row), so rankings are hidden. Account details "
-                         "and performance metrics are live.")
-        else:
-            data_note = ("Performance metrics are live, but this account's warehouse profile "
-                         "(status, type, plan) and peer benchmark aren't provisioned yet, so "
-                         "those fields and rankings are unavailable.")
-        roster_only = False
 
     # --- peer benchmark -------------------------------------------------------
     benchmark = {}
@@ -2504,6 +2540,42 @@ def account_performance(account_id: str, business_type: str | None = None,
                 peer_group=peer_group) or {}
     except Exception:  # noqa: BLE001
         benchmark = {}
+
+    # Did the benchmark actually produce rankings? A non-empty cohort with at least one
+    # ranked metric means the user IS seeing rankings — so the banner must not claim they
+    # are hidden. (benchmark is {} when there was no comparable cohort / not live.)
+    _bench_cohort = (benchmark.get("cohort") if isinstance(benchmark, dict) else None) or {}
+    has_benchmark = bool(benchmark) and bool(
+        _bench_cohort.get("peers") or any(
+            isinstance(v, dict) and v.get("percentile") is not None
+            for v in benchmark.values()))
+
+    data_note = None
+    if roster_only and not has_perf and not has_dim:
+        data_note = ("This account is in your book but has no live warehouse data yet "
+                     "(not provisioned in the data warehouse). Showing account details only.")
+    elif has_perf and not has_dim:
+        # Performance present, warehouse dimension (status/type/plan) absent. Those profile
+        # fields are backfilled from HubSpot where available. Whether the peer BENCHMARK is
+        # available depends on the cohort build above, NOT on the dim row — so word the note
+        # to match what is actually on screen.
+        if has_benchmark:
+            data_note = ("This account isn't in the warehouse profile table yet, so its "
+                         "status, type and plan are shown from HubSpot where available. "
+                         "Live performance and peer benchmarking are fully available.")
+        elif hubspot:
+            data_note = ("Peer benchmarking isn't available for this account yet (no "
+                         "warehouse profile row and no comparable cohort), so rankings are "
+                         "hidden. Account details and performance metrics are live.")
+        else:
+            data_note = ("Performance metrics are live, but this account's warehouse profile "
+                         "(status, type, plan) and peer benchmark aren't provisioned yet, so "
+                         "those fields and rankings are unavailable.")
+        roster_only = False
+    elif has_perf and has_dim and not has_benchmark:
+        # Full profile but no comparable cohort (e.g. a very narrow filter combination).
+        data_note = ("No comparable peer cohort for the current benchmark filters, so "
+                     "rankings are hidden. Performance metrics and account details are live.")
 
     # --- benchmark filter options (for the UI cohort controls) ----------------
     # Options come from the live dim (distinct business types) + the fixed size-band /
@@ -2582,6 +2654,36 @@ def account_performance(account_id: str, business_type: str | None = None,
         "warehouse_connected": bool(dim),
     }
 
+    # --- account health: churn signal + renewal (data we already have, now joined) -------
+    # Churn comes from the whole-book batch churn cache (ML score/status when the Redshift
+    # churn model is connected; else {}). Renewal date is taken from the warehouse dim or
+    # HubSpot, whichever is present. All honest: not_connected / None when unavailable, so
+    # the panel never fabricates a risk reading.
+    account_health = {}
+    try:
+        norm_ref = identity_normalise_safe(ref).upper()
+        churn_map = _batch_churn_for() or {}
+        cinfo = churn_map.get(norm_ref) or churn_map.get(ref) or {}
+    except Exception:  # noqa: BLE001
+        cinfo = {}
+    if cinfo:
+        _score = cinfo.get("score")
+        account_health["churn"] = {
+            "status": cinfo.get("status"),
+            "score": _score,
+            "score_pct": (round(_score * 100) if isinstance(_score, (int, float)) else None),
+            "is_ml": True,
+            "source": "redshift-churn-model",
+        }
+    else:
+        account_health["churn"] = {"status": "not_connected",
+                                   "note": "Churn model not connected for this account."}
+    _renewal = (dim.get("renewal_date") or hubspot.get("renewal_date")
+                or hubspot.get("hs_next_renewal_date"))
+    account_health["renewal_date"] = _renewal
+    account_health["renewal_source"] = ("warehouse" if dim.get("renewal_date")
+                                        else ("hubspot" if _renewal else None))
+
     # --- new signals ----------------------------------------------------------
     # Adder Intelligence Match + AI Float come from the warehouse dim booleans; when the dim
     # is not connected they are honestly not_connected (not assumed off).
@@ -2595,15 +2697,38 @@ def account_performance(account_id: str, business_type: str | None = None,
         return {"label": label, "enabled": bool(val),
                 "status": ("enabled" if val else "disabled")}
 
+    # Enhanced Profile + Event Availability: sourced from optional warehouse dim columns
+    # (opt-in via CS_ENHANCED_PROFILE_COL / CS_EVENT_AVAIL_COL on the adapter). When the
+    # column is configured + present, the signal goes live; otherwise it stays honestly
+    # not_connected (never fabricated). Event Availability is a Corporate-only product, so
+    # for non-corporate accounts it is reported as not-applicable rather than a false "off".
+    def _opt_signal(dim_key: str, label: str):
+        if not dim:
+            return {"label": label, "status": "not_connected",
+                    "note": "Warehouse account dimension not connected."}
+        if dim_key not in dim:
+            return {"label": label, "status": "not_connected", "note": _ACCT_PERF_UNCONNECTED_NOTE}
+        val = dim.get(dim_key)
+        if val is None:
+            return {"label": label, "enabled": None, "status": "unknown"}
+        return {"label": label, "enabled": bool(val),
+                "status": ("enabled" if val else "disabled")}
+
+    _acct_type = str(dim.get("account_type") or hubspot.get("segment_label")
+                     or hubspot.get("segment") or "").lower()
+    _is_corporate = ("corporate" in _acct_type) or ("enterprise" in _acct_type)
+    event_sig = _opt_signal("event_availability_enabled", "Event Availability (Corporates)")
+    if not _is_corporate and dim:
+        # Not a corporate account — the feature does not apply; say so honestly instead of
+        # implying it is merely switched off.
+        event_sig = {"label": "Event Availability (Corporates)", "status": "not_applicable",
+                     "enabled": None, "note": "Corporate-only feature; this account is not a Corporate."}
+
     signals = {
         "adder_intelligence_match": _bool_signal("is_ai_matching_enabled", "Adder Intelligence Match"),
         "ai_float": _bool_signal("is_floats_enabled", "AI Float"),
-        # Enhanced Profile and corporate event availability have no identified upstream source
-        # yet — surfaced honestly as not_connected rather than fabricated.
-        "enhanced_profile": {"label": "Enhanced Profile", "status": "not_connected",
-                             "note": _ACCT_PERF_UNCONNECTED_NOTE},
-        "event_availability": {"label": "Event Availability (Corporates)", "status": "not_connected",
-                               "note": _ACCT_PERF_UNCONNECTED_NOTE},
+        "enhanced_profile": _opt_signal("enhanced_profile_enabled", "Enhanced Profile"),
+        "event_availability": event_sig,
     }
 
     return {
@@ -2634,6 +2759,7 @@ def account_performance(account_id: str, business_type: str | None = None,
         "feature_usage": feature_usage,              # {} when none / not connected
         "tickets": tickets,                          # Zendesk signal or {status:not_connected}
         "signals": signals,
+        "account_health": account_health,            # churn (ML) + renewal, honest not_connected
         "dimension": dim,                            # raw dim fields (connected => has _source)
         "connected": {
             "warehouse_performance": bool(perf),
@@ -2648,6 +2774,7 @@ def account_performance(account_id: str, business_type: str | None = None,
         "roster_only": roster_only,
         "has_warehouse_profile": has_dim,
         "has_warehouse_performance": has_perf,
+        "has_benchmark": has_benchmark,
         "data_note": data_note,
     }
 
@@ -2688,6 +2815,100 @@ def account_performance_accounts() -> dict:
         "count": len(accounts),
         "scope": roster.get("summary", {}).get("account_scope", "csm"),
     }
+
+
+# --- Account-report scheduling (quarterly) -----------------------------------
+# Operators asked to schedule the account scorecard to a recipient every quarter. We
+# persist the schedule to an append-only JSONL store (latest-per-key wins), owner-scoped
+# and audited like the other mutations. ACTUAL SENDING is gated on an outbound email
+# provider (CS_EMAIL_PROVIDER) exactly like the monthly digest: until that is connected
+# the schedule is recorded honestly and the quarterly batch compiles-only (never claims a
+# send that didn't happen). The 1st-of-quarter scheduler target reads these rows.
+def _report_schedule_path() -> Path:
+    return Path(os.environ.get("CS_REPORT_SCHEDULE_FILE",
+                               str(Path(__file__).resolve().parents[1] / ".cs-report-schedules.jsonl")))
+
+
+def save_report_schedule(account_id: str, email: str, cadence: str = "quarterly") -> dict:
+    """Persist (or update) a scheduled account-report delivery. Owner-scoped: the caller
+    must be allowed to view the account (ForbiddenError otherwise). Validates the email and
+    cadence. Returns the stored record incl. an honest `delivery` note about whether an
+    outbound email provider is connected (so the UI never implies a send that can't happen)."""
+    import re as _re
+    import time as _t
+    account_id = (account_id or "").strip()
+    email = (email or "").strip()
+    cadence = (cadence or "quarterly").strip().lower()
+    if not account_id:
+        raise ValueError("account_id is required")
+    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise ValueError("a valid recipient email is required")
+    if cadence not in ("quarterly", "monthly"):
+        raise ValueError("cadence must be 'quarterly' or 'monthly'")
+    if not can_view_account(account_id):
+        raise ForbiddenError(account_id)
+    p = get_principal() or {}
+    rec = {
+        "account_id": account_id,
+        "email": email,
+        "cadence": cadence,
+        "created_by": p.get("email") or "system",
+        "owner_id": p.get("owner_id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "active": True,
+    }
+    try:
+        path = _report_schedule_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"could not persist schedule: {exc}")
+    provider = (os.environ.get("CS_EMAIL_PROVIDER", "") or "").strip()
+    rec["delivery"] = ("Scheduled. Reports will be emailed each " + cadence + "."
+                       if provider else
+                       "Schedule saved. Delivery starts once an outbound email provider "
+                       "(CS_EMAIL_PROVIDER) is connected — nothing is sent until then.")
+    rec["email_provider_connected"] = bool(provider)
+    return rec
+
+
+def list_report_schedules() -> dict:
+    """Return the active report schedules visible to the current principal (owner-scoped;
+    admin sees all). Latest line per (account_id,email) wins; a line with active=False
+    removes it. Honest {} store when nothing is scheduled."""
+    path = _report_schedule_path()
+    latest: dict = {}
+    if path.exists():
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                key = (row.get("account_id"), row.get("email"))
+                latest[key] = row
+        except Exception:  # noqa: BLE001
+            latest = {}
+    p = get_principal()
+    rows = []
+    for row in latest.values():
+        if not row.get("active", True):
+            continue
+        if p and p.get("role") not in (None, "admin"):
+            # Owner-scoped: only schedules on accounts the CSM can view.
+            try:
+                if not can_view_account(row.get("account_id") or ""):
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+        rows.append(row)
+    rows.sort(key=lambda r: r.get("created_at") or "")
+    return {"schedules": rows, "count": len(rows),
+            "email_provider_connected": bool((os.environ.get("CS_EMAIL_PROVIDER", "") or "").strip())}
 
 
 # Per-CSM whole-book enrichment cache. Keyed by owner_id (or "admin"), holds the enriched

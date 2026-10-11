@@ -46,6 +46,12 @@ def _force_offline() -> None:
     directly (they never rely on real tokens), so this does not weaken any coverage."""
     os.environ["CS_USE_LIVE"] = "0"
     os.environ["CS_ROSTER_DEAL_RENEWAL"] = "0"
+    # Disable the stale-while-revalidate report cache in tests so each test's monkeypatched
+    # data is built fresh and synchronously (never served a stale/"warming" placeholder, and
+    # never spawning a background build thread that would hit a live source). Set here at the
+    # session guard — not only in the per-test fixture — so it holds even for the FIRST test
+    # that imports engine (the fixture's engine check runs before engine is in sys.modules).
+    os.environ["CS_REPORT_CACHE_TTL"] = "0"
     os.environ.pop("CS_ALLOW_WRITE", None)
     for tok in ("HUBSPOT_TOKEN", "ZENDESK_TOKEN", "ZENDESK_EMAIL", "ZENDESK_SUBDOMAIN",
                 "STRIPE_API_KEY", "PENDO_API_KEY", "JIMINNY_API_KEY", "ROCKETLANE_TOKEN"):
